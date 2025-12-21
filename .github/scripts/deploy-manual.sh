@@ -5,7 +5,13 @@
 
 set -e
 
-DEPLOY_DIR="/home/foom/deployments"
+# Detect current user
+CURRENT_USER=${SUDO_USER:-$USER}
+if [ "$CURRENT_USER" = "root" ]; then
+    CURRENT_USER="foom"
+fi
+
+DEPLOY_DIR="/home/$CURRENT_USER/deployments"
 APP_DIR="$DEPLOY_DIR/manufacturing-app"
 PROJECT_DIR="/var/www/manufacturing-process-production-authenticity"
 
@@ -32,6 +38,9 @@ echo "📦 Checking for client build..."
 if [ -d "$PROJECT_DIR/client/build" ]; then
     echo "✅ Found client build, copying..."
     cp -r "$PROJECT_DIR/client/build"/* "$APP_DIR/client-build/"
+    # Fix permissions
+    chmod -R 755 "$APP_DIR/client-build"
+    find "$APP_DIR/client-build" -type f -exec chmod 644 {} \;
 else
     echo "⚠️  Client build not found. Building now..."
     if [ -d "$PROJECT_DIR/client" ]; then
@@ -43,14 +52,32 @@ else
             echo "🔨 Building client..."
             npm run build
             
-            echo "📦 Copying build..."
-            cp -r build/* "$APP_DIR/client-build/"
+            if [ -d "build" ]; then
+                echo "📦 Copying build..."
+                cp -r build/* "$APP_DIR/client-build/"
+                # Fix permissions
+                chmod -R 755 "$APP_DIR/client-build"
+                find "$APP_DIR/client-build" -type f -exec chmod 644 {} \;
+                echo "✅ Client build copied and permissions set"
+            else
+                echo "❌ Build directory not created!"
+            fi
         else
             echo "⚠️  package.json not found, skipping client build"
         fi
     else
         echo "⚠️  Client directory not found, skipping client build"
     fi
+fi
+
+# Ensure nginx can read the files
+echo "🔧 Setting permissions for Nginx..."
+if [ -d "$APP_DIR/client-build" ]; then
+    # Make readable by www-data (nginx user)
+    sudo chmod -R o+r "$APP_DIR/client-build" 2>/dev/null || true
+    sudo chmod o+x "$APP_DIR" 2>/dev/null || true
+    sudo chmod o+x "$APP_DIR/client-build" 2>/dev/null || true
+    echo "✅ Permissions set for Nginx"
 fi
 
 # Install server dependencies
@@ -66,19 +93,33 @@ fi
 # Create logs directory
 mkdir -p logs
 
-# Start with PM2
+# Start with PM2 (use sudo if running as root, otherwise use current user)
 echo "🔄 Starting application with PM2..."
-pm2 delete manufacturing-app || true
+if [ "$(id -u)" -eq 0 ]; then
+    # Running as root
+    PM2_CMD="pm2"
+    PM2_HOME="/root/.pm2"
+else
+    # Running as regular user
+    PM2_CMD="pm2"
+    PM2_HOME="$HOME/.pm2"
+fi
+
+$PM2_CMD delete manufacturing-app || true
 
 # Check if ecosystem.config.js exists
 if [ -f "ecosystem.config.js" ]; then
-    pm2 start ecosystem.config.js
+    $PM2_CMD start ecosystem.config.js
 else
     # Fallback: start directly with cluster mode
-    pm2 start index.js --name manufacturing-app --instances max --exec-mode cluster --env production
+    $PM2_CMD start index.js --name manufacturing-app --instances max --exec-mode cluster --env production
 fi
 
-pm2 save
+$PM2_CMD save
+
+echo ""
+echo "📊 PM2 Status:"
+$PM2_CMD status | grep manufacturing-app || $PM2_CMD list | grep manufacturing-app
 
 echo ""
 echo "✅ Deployment completed!"

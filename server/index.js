@@ -320,12 +320,12 @@ app.post('/api/production/liquid', (req, res) => {
   // Create separate row for each authenticity data entry (each roll number)
   const insertPromises = authenticityRows.map((row) => {
     return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
+  db.run(
+    `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
         [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
-        function(err) {
-          if (err) {
+    function(err) {
+      if (err) {
             reject(err);
           } else {
             resolve({ id: this.lastID, row });
@@ -366,12 +366,12 @@ app.post('/api/production/device', (req, res) => {
   // Create separate row for each authenticity data entry (each roll number)
   const insertPromises = authenticityRows.map((row) => {
     return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO production_device (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
+  db.run(
+    `INSERT INTO production_device (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
         [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
-        function(err) {
-          if (err) {
+    function(err) {
+      if (err) {
             reject(err);
           } else {
             resolve({ id: this.lastID, row });
@@ -412,12 +412,12 @@ app.post('/api/production/cartridge', (req, res) => {
   // Create separate row for each authenticity data entry (each roll number)
   const insertPromises = authenticityRows.map((row) => {
     return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO production_cartridge (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
+  db.run(
+    `INSERT INTO production_cartridge (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
         [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
-        function(err) {
-          if (err) {
+    function(err) {
+      if (err) {
             reject(err);
           } else {
             resolve({ id: this.lastID, row });
