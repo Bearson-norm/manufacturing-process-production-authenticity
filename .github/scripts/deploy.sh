@@ -31,10 +31,24 @@ echo "📦 Installing server dependencies..."
 cd "$APP_DIR/server"
 npm install --production
 
-# Restart application with PM2
-echo "🔄 Restarting application..."
+# Restart application with PM2 using ecosystem config
+echo "🔄 Restarting application with PM2 cluster mode..."
+cd "$APP_DIR/server"
+
+# Create logs directory
+mkdir -p logs
+
+# Delete old PM2 process
 pm2 delete manufacturing-app || true
-pm2 start index.js --name manufacturing-app --cwd "$APP_DIR/server"
+
+# Start with ecosystem config for cluster mode
+if [ -f ecosystem.config.js ]; then
+    pm2 start ecosystem.config.js
+else
+    # Fallback to direct start with cluster mode
+    pm2 start index.js --name manufacturing-app --instances max --exec-mode cluster --cwd "$APP_DIR/server" --env production
+fi
+
 pm2 save
 
 # Cleanup old backups (keep last 5)

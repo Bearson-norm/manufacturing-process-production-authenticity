@@ -6,16 +6,29 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 1234;
 
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Database setup
+// Database setup with connection pooling for concurrent requests
 const dbPath = path.join(__dirname, 'database.sqlite');
-const db = new sqlite3.Database(dbPath);
+
+// Create database connection with WAL mode for better concurrency
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('Error opening database:', err);
+  } else {
+    // Enable WAL mode for better concurrent read/write performance
+    db.run('PRAGMA journal_mode = WAL;');
+    db.run('PRAGMA synchronous = NORMAL;');
+    db.run('PRAGMA cache_size = 10000;');
+    db.run('PRAGMA foreign_keys = ON;');
+    console.log('Database connected with WAL mode enabled');
+  }
+});
 
 // Initialize database tables
 db.serialize(() => {
@@ -119,6 +132,27 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_production_combined_mo_number ON production_combined(mo_number)`, () => {});
   db.run(`CREATE INDEX IF NOT EXISTS idx_production_combined_created_at ON production_combined(created_at)`, () => {});
   db.run(`CREATE INDEX IF NOT EXISTS idx_production_combined_type ON production_combined(production_type)`, () => {});
+});
+
+// Health check endpoint for Traefik and monitoring
+app.get('/health', (req, res) => {
+  // Check database connection
+  db.get('SELECT 1', (err) => {
+    if (err) {
+      res.status(503).json({ 
+        status: 'unhealthy', 
+        database: 'disconnected',
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.json({ 
+        status: 'healthy', 
+        database: 'connected',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
 });
 
 // Authentication endpoint
@@ -822,7 +856,55 @@ app.post('/api/production/combined/sync', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+// Graceful shutdown handling
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  db.close((err) => {
+    if (err) {
+      console.error('Error closing database:', err);
+    } else {
+      console.log('Database connection closed');
+    }
+    process.exit(0);
+  });
 });
+
+process.on('SIGINT', () => {
+  console.log('SIGINT signal received: closing HTTP server');
+  db.close((err) => {
+    if (err) {
+      console.error('Error closing database:', err);
+    } else {
+      console.log('Database connection closed');
+    }
+    process.exit(0);
+  });
+});
+
+// Start server
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server is running on port ${PORT}`);
+  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 Access at: http://localhost:${PORT}`);
+  
+  // Signal PM2 that the app is ready
+  if (process.send) {
+    process.send('ready');
+  }
+});
+
+// Handle server errors
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`❌ Port ${PORT} is already in use`);
+  } else {
+    console.error('❌ Server error:', err);
+  }
+  process.exit(1);
+});
+
+// Increase server timeout for long-running requests
+server.timeout = 60000; // 60 seconds
+server.keepAliveTimeout = 65000; // 65 seconds
+server.headersTimeout = 66000; // 66 seconds
 

@@ -40,6 +40,10 @@ jobs:
         cp -r client/build deploy/client-build
         cp package.json deploy/
         cp -r .github/scripts deploy/scripts || true
+        # Ensure ecosystem.config.js is included
+        if [ -f server/ecosystem.config.js ]; then
+          cp server/ecosystem.config.js deploy/server/
+        fi
         tar -czf deploy.tar.gz deploy/
         
     - name: Deploy to VPS

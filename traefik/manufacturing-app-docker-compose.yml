@@ -1,0 +1,38 @@
+version: '3.8'
+
+# Docker Compose untuk Manufacturing App dengan Traefik labels
+# Gunakan ini jika ingin menjalankan app dalam Docker container
+
+services:
+  manufacturing-app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: manufacturing-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=1234
+    volumes:
+      - ../server/database.sqlite:/app/server/database.sqlite
+      - ../server/logs:/app/server/logs
+    networks:
+      - traefik-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.manufacturing-app.rule=Host(`mpr.moof-set.web.id`)"
+      - "traefik.http.routers.manufacturing-app.entrypoints=websecure"
+      - "traefik.http.routers.manufacturing-app.tls.certresolver=letsencrypt"
+      - "traefik.http.services.manufacturing-app.loadbalancer.server.port=1234"
+      - "traefik.http.routers.manufacturing-app.middlewares=manufacturing-rate-limit,manufacturing-headers"
+      - "traefik.http.middlewares.manufacturing-rate-limit.ratelimit.average=50"
+      - "traefik.http.middlewares.manufacturing-rate-limit.ratelimit.burst=30"
+      - "traefik.http.middlewares.manufacturing-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.manufacturing-headers.headers.customresponseheaders.X-Frame-Options=SAMEORIGIN"
+      - "traefik.http.middlewares.manufacturing-headers.headers.customresponseheaders.X-Content-Type-Options=nosniff"
+      - "traefik.http.middlewares.manufacturing-headers.headers.customresponseheaders.X-XSS-Protection=1; mode=block"
+
+networks:
+  traefik-network:
+    external: true
+

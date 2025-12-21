@@ -1,0 +1,51 @@
+# Traefik Dynamic Configuration
+# This file contains dynamic configuration for non-Docker services
+
+http:
+  routers:
+    # Manufacturing App Router
+    manufacturing-app:
+      rule: "Host(`mpr.moof-set.web.id`)"
+      entryPoints:
+        - websecure
+      service: manufacturing-app-service
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - manufacturing-rate-limit
+        - manufacturing-headers
+
+  services:
+    # Manufacturing App Service (non-Docker)
+    manufacturing-app-service:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:1234"
+        healthCheck:
+          path: "/health"
+          interval: "10s"
+          timeout: "3s"
+
+  middlewares:
+    # Rate limiting for manufacturing app
+    manufacturing-rate-limit:
+      rateLimit:
+        average: 50
+        burst: 30
+        period: 1s
+
+    # Security headers
+    manufacturing-headers:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+        customResponseHeaders:
+          X-Frame-Options: "SAMEORIGIN"
+          X-Content-Type-Options: "nosniff"
+          X-XSS-Protection: "1; mode=block"
+          Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+
+    # Compression
+    manufacturing-compress:
+      compress: {}
+

@@ -21,6 +21,10 @@ dist/
 server/database.sqlite
 
 # Logs
+server/logs/
+*.log
+
+# Logs
 logs
 *.log
 npm-debug.log*
