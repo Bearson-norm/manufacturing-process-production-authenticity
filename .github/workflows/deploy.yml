@@ -80,9 +80,17 @@ jobs:
           cd manufacturing-app/server
           npm install --production
           
-          # Restart application with PM2
+          # Restart application with PM2 using ecosystem config
+          cd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+          mkdir -p logs
           pm2 delete manufacturing-app || true
-          pm2 start index.js --name manufacturing-app --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+          
+          # Start with ecosystem config if available, otherwise use direct start
+          if [ -f ecosystem.config.js ]; then
+            pm2 start ecosystem.config.js
+          else
+            pm2 start index.js --name manufacturing-app --instances max --exec-mode cluster --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server --env production
+          fi
           pm2 save
           
           # Cleanup old backups (keep last 5)
