@@ -1,0 +1,29 @@
+{
+  "name": "manufacturing-process-authenticity",
+  "version": "1.0.0",
+  "description": "Manufacturing Process Production Authenticity System",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon server/index.js",
+    "client": "cd client && npm start",
+    "install-all": "npm install && cd client && npm install && cd server && npm install",
+    "build": "cd client && npm run build",
+    "build:server": "cd server && npm install --production",
+    "start": "cd server && node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "sqlite3": "^5.1.6",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "concurrently": "^8.2.2"
+  }
+}
+

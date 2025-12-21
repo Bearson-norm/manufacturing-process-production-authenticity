@@ -1,0 +1,92 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+        
+    - name: Install dependencies
+      run: |
+        npm install
+        cd client && npm install && cd ..
+        cd server && npm install && cd ..
+        
+    - name: Build client
+      run: |
+        cd client
+        npm run build
+        
+    - name: Create deployment package
+      run: |
+        mkdir -p deploy
+        cp -r server deploy/
+        cp -r client/build deploy/client-build
+        cp package.json deploy/
+        cp -r .github/scripts deploy/scripts || true
+        tar -czf deploy.tar.gz deploy/
+        
+    - name: Deploy to VPS
+      uses: appleboy/scp-action@master
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        port: ${{ secrets.VPS_PORT || 22 }}
+        source: "deploy.tar.gz"
+        target: "/home/${{ secrets.VPS_USER }}/deployments"
+        
+    - name: Execute deployment script on VPS
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        port: ${{ secrets.VPS_PORT || 22 }}
+        script: |
+          cd /home/${{ secrets.VPS_USER }}/deployments
+          tar -xzf deploy.tar.gz
+          
+          # Backup existing deployment
+          if [ -d "manufacturing-app" ]; then
+            mv manufacturing-app manufacturing-app-backup-$(date +%Y%m%d-%H%M%S)
+          fi
+          
+          # Create new deployment directory
+          mkdir -p manufacturing-app
+          mv deploy/* manufacturing-app/
+          
+          # Install/update dependencies
+          cd manufacturing-app/server
+          npm install --production
+          
+          # Restart application with PM2
+          pm2 delete manufacturing-app || true
+          pm2 start index.js --name manufacturing-app --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+          pm2 save
+          
+          # Cleanup old backups (keep last 5)
+          cd /home/${{ secrets.VPS_USER }}/deployments
+          ls -dt manufacturing-app-backup-* | tail -n +6 | xargs rm -rf || true
+          
+          # Cleanup
+          rm -f deploy.tar.gz
+          
+          echo "Deployment completed successfully!"
+
