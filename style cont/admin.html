@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="id">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Admin - API Key Management</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+	<style>
+		body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+		header { padding: 16px 24px; background: #111827; border-bottom: 1px solid #1f2937; display: flex; justify-content: space-between; align-items: center; }
+		h1 { font-size: 18px; margin: 0; }
+		main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+		.card { background: #0b1220; border: 1px solid #1f2937; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+		.actions { display: flex; gap: 8px; }
+		button { background: #2563eb; color: white; border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; font-size: 14px; }
+		button.secondary { background: #374151; }
+		button.danger { background: #dc2626; }
+		button.danger:hover { background: #b91c1c; }
+		button.success { background: #059669; }
+		button.success:hover { background: #047857; }
+		button:hover { opacity: 0.9; }
+		table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+		th, td { text-align: left; padding: 10px; border-bottom: 1px solid #1f2937; font-size: 14px; }
+		th { color: #93c5fd; }
+		.api-key { font-family: monospace; background: #1e293b; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+		.badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+		.badge.active { background: #065f46; color: #ecfdf5; }
+		.badge.inactive { background: #7f1d1d; color: #fecaca; }
+		.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: none; align-items: center; justify-content: center; z-index: 1000; }
+		.modal { width: 560px; max-width: calc(100% - 32px); background: #0b1220; border: 1px solid #1f2937; border-radius: 10px; padding: 24px; }
+		.modal h2 { margin: 0 0 16px; font-size: 18px; }
+		label { display: block; margin: 12px 0 6px; color: #cbd5e1; font-size: 13px; }
+		input, textarea { width: 100%; background: #0f172a; border: 1px solid #1f2937; color: #e2e8f0; padding: 10px; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+		textarea { min-height: 80px; resize: vertical; }
+		.new-key-display { background: #1e293b; padding: 12px; border-radius: 8px; margin: 12px 0; border: 2px solid #059669; }
+		.new-key-display code { font-size: 16px; color: #34d399; word-break: break-all; }
+		.warning { background: #7f1d1d; color: #fecaca; padding: 12px; border-radius: 8px; margin: 12px 0; font-size: 13px; }
+		.toast { position: fixed; right: 16px; bottom: 16px; background: #065f46; color: #ecfdf5; padding: 12px 16px; border-radius: 8px; display: none; z-index: 2000; }
+		.empty { color: #94a3b8; padding: 16px; text-align: center; }
+		.user-info { display: flex; align-items: center; gap: 12px; }
+		.user-badge { background: #1e293b; padding: 6px 12px; border-radius: 6px; font-size: 13px; }
+	</style>
+	<script>
+		let sessionToken = null;
+		let currentUser = null;
+
+		// Check authentication
+		async function checkAuth() {
+			sessionToken = localStorage.getItem('session_token');
+			if (!sessionToken) {
+				window.location.href = '/login';
+				return;
+			}
+			try {
+				const res = await fetch('/api/auth/me', {
+					headers: { 'x-session-token': sessionToken }
+				});
+				if (!res.ok) {
+					if (res.status === 401) {
+						window.location.href = '/login';
+						return;
+					}
+					throw new Error('Auth check failed');
+				}
+				const data = await res.json();
+				currentUser = data.user;
+				updateUserInfo();
+			} catch (error) {
+				console.error('Auth error:', error);
+				window.location.href = '/login';
+			}
+		}
+
+		function updateUserInfo() {
+			const headerActions = document.querySelector('header .actions');
+			const userInfo = document.createElement('div');
+			userInfo.className = 'user-info';
+			userInfo.innerHTML = `
+				<span class="user-badge">${currentUser.username} (${currentUser.role === 'production' ? 'Produksi' : 'Warehouse'})</span>
+				<button class="secondary" onclick="window.location.href='/'">Dashboard</button>
+				<button class="danger" onclick="logout()">Logout</button>
+			`;
+			headerActions.appendChild(userInfo);
+		}
+
+		async function logout() {
+			try {
+				await fetch('/api/logout', {
+					method: 'POST',
+					headers: { 'x-session-token': sessionToken }
+				});
+			} catch (e) {}
+			localStorage.removeItem('session_token');
+			window.location.href = '/login';
+		}
+
+		function getHeaders() {
+			return { 'x-session-token': sessionToken, 'Content-Type': 'application/json' };
+		}
+
+		async function loadApiKeys() {
+			const tbody = document.querySelector('#keys-body');
+			tbody.innerHTML = '<tr><td colspan="7">Memuat...</td></tr>';
+			try {
+				const res = await fetch('/api/admin/api-keys', { headers: getHeaders() });
+				if (!res.ok) throw new Error('Failed to load API keys');
+				const { data } = await res.json();
+				if (!data || data.length === 0) {
+					tbody.innerHTML = '<tr><td colspan="7" class="empty">Belum ada API key. Klik "Generate API Key" untuk membuat yang baru.</td></tr>';
+					return;
+				}
+				tbody.innerHTML = data.map(key => `
+					<tr>
+						<td>${key.key_name || '-'}</td>
+						<td><code class="api-key">${key.api_key}</code></td>
+						<td>${key.created_by || '-'}</td>
+						<td>${key.created_at ? new Date(key.created_at).toLocaleString('id-ID') : '-'}</td>
+						<td>${key.last_used_at ? new Date(key.last_used_at).toLocaleString('id-ID') : 'Belum pernah digunakan'}</td>
+						<td><span class="badge ${key.is_active ? 'active' : 'inactive'}">${key.is_active ? 'Active' : 'Inactive'}</span></td>
+						<td>
+							<button class="secondary" onclick="toggleKey(${key.id}, ${key.is_active ? 0 : 1})" style="font-size:12px; padding:6px 10px;">
+								${key.is_active ? 'Deactivate' : 'Activate'}
+							</button>
+							<button class="danger" onclick="deleteKey(${key.id})" style="font-size:12px; padding:6px 10px;">Hapus</button>
+						</td>
+					</tr>
+				`).join('');
+			} catch (error) {
+				tbody.innerHTML = `<tr><td colspan="7" class="empty">Error: ${error.message}</td></tr>`;
+			}
+		}
+
+		function openCreateModal() {
+			document.querySelector('#createModal').style.display = 'flex';
+			document.querySelector('#createForm').reset();
+			document.querySelector('#newKeyDisplay').style.display = 'none';
+		}
+
+		function closeCreateModal() {
+			document.querySelector('#createModal').style.display = 'none';
+			document.querySelector('#createForm').reset();
+			document.querySelector('#newKeyDisplay').style.display = 'none';
+		}
+
+		async function createApiKey(ev) {
+			ev.preventDefault();
+			const key_name = document.querySelector('#key_name').value.trim();
+			const description = document.querySelector('#description').value.trim();
+			if (!key_name) {
+				alert('Nama API key wajib diisi');
+				return;
+			}
+			try {
+				const res = await fetch('/api/admin/api-keys', {
+					method: 'POST',
+					headers: getHeaders(),
+					body: JSON.stringify({ key_name, description })
+				});
+				if (!res.ok) {
+					const error = await res.json();
+					throw new Error(error.error || 'Failed to create API key');
+				}
+				const data = await res.json();
+				document.querySelector('#newKeyDisplay').style.display = 'block';
+				document.querySelector('#newKeyValue').textContent = data.api_key;
+				showToast('API key berhasil dibuat! Simpan key ini - tidak akan ditampilkan lagi.');
+				setTimeout(() => {
+					closeCreateModal();
+					loadApiKeys();
+				}, 3000);
+			} catch (error) {
+				alert('Gagal membuat API key: ' + error.message);
+			}
+		}
+
+		async function deleteKey(id) {
+			if (!confirm('Yakin ingin menghapus API key ini? Tindakan ini tidak dapat dibatalkan.')) {
+				return;
+			}
+			try {
+				const res = await fetch(`/api/admin/api-keys/${id}`, {
+					method: 'DELETE',
+					headers: getHeaders()
+				});
+				if (!res.ok) {
+					const error = await res.json();
+					throw new Error(error.error || 'Failed to delete API key');
+				}
+				showToast('API key berhasil dihapus');
+				loadApiKeys();
+			} catch (error) {
+				alert('Gagal menghapus API key: ' + error.message);
+			}
+		}
+
+		async function toggleKey(id, newStatus) {
+			try {
+				const res = await fetch(`/api/admin/api-keys/${id}/toggle`, {
+					method: 'POST',
+					headers: getHeaders()
+				});
+				if (!res.ok) {
+					const error = await res.json();
+					throw new Error(error.error || 'Failed to toggle API key');
+				}
+				showToast(`API key berhasil ${newStatus ? 'diaktifkan' : 'dinonaktifkan'}`);
+				loadApiKeys();
+			} catch (error) {
+				alert('Gagal mengubah status API key: ' + error.message);
+			}
+		}
+
+		function showToast(msg) {
+			const t = document.querySelector('#toast');
+			t.textContent = msg;
+			t.style.display = 'block';
+			setTimeout(() => t.style.display = 'none', 3000);
+		}
+
+		// Table status functions
+		async function loadTableStatus() {
+			const statusDiv = document.querySelector('#table-status');
+			try {
+				const res = await fetch('/api/admin/table-status', { headers: getHeaders() });
+				if (!res.ok) throw new Error('Failed to load table status');
+				const data = await res.json();
+				
+				const tables = data.tables;
+				const importantTables = [
+					{ name: 'recent_mo', label: 'Recent MO' },
+					{ name: 'manufacturing_identity', label: 'Manufacturing Identity' },
+					{ name: 'production_log', label: 'Production Log' },
+					{ name: 'authenticity_used_line', label: 'Authenticity Used Line' },
+					{ name: 'authenticity_used_rm', label: 'Authenticity Used RM' },
+					{ name: 'master_authenticity_vendor', label: 'Master Authenticity Vendor' }
+				];
+
+				let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">';
+				importantTables.forEach(table => {
+					const info = tables[table.name] || { count: 0, has_data: false };
+					const statusColor = info.has_data ? '#34d399' : '#f87171';
+					const statusText = info.has_data ? '✓' : '✗';
+					html += `
+						<div style="padding: 8px; background: #1e293b; border-radius: 6px;">
+							<div style="font-weight: 600; margin-bottom: 4px;">${table.label}</div>
+							<div style="font-size: 18px; color: ${statusColor};">${statusText} ${info.count} records</div>
+						</div>
+					`;
+				});
+				html += '</div>';
+				statusDiv.innerHTML = html;
+			} catch (error) {
+				statusDiv.innerHTML = `<div style="color: #f87171;">Error: ${error.message}</div>`;
+			}
+		}
+
+		async function populateAuthenticityUsedLine() {
+			if (!confirm('Yakin ingin populate data authenticity_used_line dari recent_mo? Ini akan mengisi tabel dengan data yang ada di recent_mo.')) {
+				return;
+			}
+			try {
+				const res = await fetch('/api/admin/populate-authenticity-used-line', {
+					method: 'POST',
+					headers: getHeaders()
+				});
+				if (!res.ok) {
+					const error = await res.json();
+					throw new Error(error.error || 'Failed to populate data');
+				}
+				const data = await res.json();
+				showToast(data.message || 'Data berhasil di-populate');
+				setTimeout(loadTableStatus, 500);
+			} catch (error) {
+				alert('Gagal populate data: ' + error.message);
+			}
+		}
+
+		async function populateAuthenticityUsedRM() {
+			if (!confirm('Yakin ingin populate data authenticity_used_rm dari recent_mo? Ini akan mengisi tabel dengan data yang ada di recent_mo.')) {
+				return;
+			}
+			try {
+				const res = await fetch('/api/admin/populate-authenticity-used-rm', {
+					method: 'POST',
+					headers: getHeaders()
+				});
+				if (!res.ok) {
+					const error = await res.json();
+					throw new Error(error.error || 'Failed to populate data');
+				}
+				const data = await res.json();
+				showToast(data.message || 'Data berhasil di-populate');
+				setTimeout(loadTableStatus, 500);
+			} catch (error) {
+				alert('Gagal populate data: ' + error.message);
+			}
+		}
+
+		// Scheduler functions
+		async function loadSchedulerStatus() {
+			try {
+				const res = await fetch('/api/scheduler/all/status', { headers: getHeaders() });
+				if (!res.ok) throw new Error('Failed to load scheduler status');
+				const data = await res.json();
+				
+				// Update Odoo scheduler status
+				const odooStatus = data.odoo;
+				const odooStatusDiv = document.querySelector('#odoo-scheduler-status');
+				odooStatusDiv.innerHTML = `
+					<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+						<div><strong>Status:</strong> <span class="badge ${odooStatus.running ? 'active' : 'inactive'}">${odooStatus.running ? 'Running' : 'Stopped'}</span></div>
+						<div><strong>Syncing:</strong> ${odooStatus.isSyncing ? 'Yes' : 'No'}</div>
+						<div><strong>Interval:</strong> ${odooStatus.interval_minutes} menit</div>
+						<div><strong>Run Count:</strong> ${odooStatus.run_count || 0}</div>
+						<div><strong>Last Run:</strong> ${odooStatus.last_run_at ? new Date(odooStatus.last_run_at).toLocaleString('id-ID') : 'Never'}</div>
+						<div><strong>Next Run:</strong> ${odooStatus.next_run_at ? new Date(odooStatus.next_run_at).toLocaleString('id-ID') : '-'}</div>
+						<div><strong>Last Result:</strong> <span style="color: ${odooStatus.last_ok ? '#34d399' : '#f87171'}">${odooStatus.last_ok === null ? 'N/A' : (odooStatus.last_ok ? 'OK' : 'Error')}</span></div>
+						<div><strong>Duration:</strong> ${odooStatus.last_duration_sec || '-'}s</div>
+					</div>
+					${odooStatus.last_error ? `<div style="margin-top: 8px; padding: 8px; background: #7f1d1d; border-radius: 4px; color: #fecaca; font-size: 12px;"><strong>Error:</strong> ${odooStatus.last_error}</div>` : ''}
+				`;
+
+				// Update Authenticity scheduler status
+				const authStatus = data.authenticity;
+				const authStatusDiv = document.querySelector('#auth-scheduler-status');
+				authStatusDiv.innerHTML = `
+					<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+						<div><strong>Status:</strong> <span class="badge ${authStatus.running ? 'active' : 'inactive'}">${authStatus.running ? 'Running' : 'Stopped'}</span></div>
+						<div><strong>Syncing:</strong> ${authStatus.isSyncing ? 'Yes' : 'No'}</div>
+						<div><strong>Interval:</strong> ${authStatus.interval_minutes} menit</div>
+						<div><strong>Run Count:</strong> ${authStatus.run_count || 0}</div>
+						<div><strong>Last Run:</strong> ${authStatus.last_run_at ? new Date(authStatus.last_run_at).toLocaleString('id-ID') : 'Never'}</div>
+						<div><strong>Next Run:</strong> ${authStatus.next_run_at ? new Date(authStatus.next_run_at).toLocaleString('id-ID') : '-'}</div>
+						<div><strong>Last Result:</strong> <span style="color: ${authStatus.last_ok ? '#34d399' : '#f87171'}">${authStatus.last_ok === null ? 'N/A' : (authStatus.last_ok ? 'OK' : 'Error')}</span></div>
+						<div><strong>Duration:</strong> ${authStatus.last_duration_sec || '-'}s</div>
+					</div>
+					${authStatus.last_error ? `<div style="margin-top: 8px; padding: 8px; background: #7f1d1d; border-radius: 4px; color: #fecaca; font-size: 12px;"><strong>Error:</strong> ${authStatus.last_error}</div>` : ''}
+				`;
+			} catch (error) {
+				console.error('Failed to load scheduler status:', error);
+			}
+		}
+
+		async function startOdooScheduler() {
+			const interval = parseInt(document.querySelector('#odoo-interval').value, 10);
+			const sessionId = document.querySelector('#odoo-session-id').value.trim();
+			if (!interval || interval < 1) {
+				alert('Interval harus lebih dari 0');
+				return;
+			}
+			try {
+				const res = await fetch('/api/scheduler/start', {
+					method: 'POST',
+					headers: getHeaders(),
+					body: JSON.stringify({
+						interval_minutes: interval,
+						session_id: sessionId || undefined
+					})
+				});
+				if (!res.ok) {
+					const error = await res.json();
+					throw new Error(error.error || 'Failed to start scheduler');
+				}
+				showToast('Odoo scheduler started');
+				setTimeout(loadSchedulerStatus, 500);
+			} catch (error) {
+				alert('Gagal start scheduler: ' + error.message);
+			}
+		}
+
+		async function stopOdooScheduler() {
+			try {
+				const res = await fetch('/api/scheduler/stop', {
+					method: 'POST',
+					headers: getHeaders()
+				});
+				if (!res.ok) {
+					const error = await res.json();
+					throw new Error(error.error || 'Failed to stop scheduler');
+				}
+				showToast('Odoo scheduler stopped');
+				setTimeout(loadSchedulerStatus, 500);
+			} catch (error) {
+				alert('Gagal stop scheduler: ' + error.message);
+			}
+		}
+
+		async function startAuthScheduler() {
+			const interval = parseInt(document.querySelector('#auth-interval').value, 10);
+			if (!interval || interval < 1) {
+				alert('Interval harus lebih dari 0');
+				return;
+			}
+			try {
+				const res = await fetch('/api/scheduler/authenticity/start', {
+					method: 'POST',
+					headers: getHeaders(),
+					body: JSON.stringify({
+						interval_minutes: interval
+					})
+				});
+				if (!res.ok) {
+					const error = await res.json();
+					throw new Error(error.error || 'Failed to start scheduler');
+				}
+				showToast('Authenticity scheduler started');
+				setTimeout(loadSchedulerStatus, 500);
+			} catch (error) {
+				alert('Gagal start scheduler: ' + error.message);
+			}
+		}
+
+		async function stopAuthScheduler() {
+			try {
+				const res = await fetch('/api/scheduler/authenticity/stop', {
+					method: 'POST',
+					headers: getHeaders()
+				});
+				if (!res.ok) {
+					const error = await res.json();
+					throw new Error(error.error || 'Failed to stop scheduler');
+				}
+				showToast('Authenticity scheduler stopped');
+				setTimeout(loadSchedulerStatus, 500);
+			} catch (error) {
+				alert('Gagal stop scheduler: ' + error.message);
+			}
+		}
+
+		window.addEventListener('DOMContentLoaded', async () => {
+			await checkAuth();
+			loadApiKeys();
+			loadSchedulerStatus();
+			loadTableStatus();
+			
+			// Set up table status controls
+			document.querySelector('#populate-auth-line-btn').addEventListener('click', populateAuthenticityUsedLine);
+			document.querySelector('#populate-auth-rm-btn').addEventListener('click', populateAuthenticityUsedRM);
+			document.querySelector('#refresh-status-btn').addEventListener('click', loadTableStatus);
+			
+			// Set up scheduler controls
+			document.querySelector('#odoo-start-btn').addEventListener('click', startOdooScheduler);
+			document.querySelector('#odoo-stop-btn').addEventListener('click', stopOdooScheduler);
+			document.querySelector('#odoo-refresh-btn').addEventListener('click', loadSchedulerStatus);
+			document.querySelector('#auth-start-btn').addEventListener('click', startAuthScheduler);
+			document.querySelector('#auth-stop-btn').addEventListener('click', stopAuthScheduler);
+			document.querySelector('#auth-refresh-btn').addEventListener('click', loadSchedulerStatus);
+			
+			// Auto-refresh scheduler status every 5 seconds
+			setInterval(loadSchedulerStatus, 5000);
+			// Auto-refresh table status every 30 seconds
+			setInterval(loadTableStatus, 30000);
+			
+			document.querySelector('#createBtn').addEventListener('click', openCreateModal);
+			document.querySelector('#createCancel').addEventListener('click', closeCreateModal);
+			document.querySelector('#createForm').addEventListener('submit', createApiKey);
+		});
+	</script>
+</head>
+<body>
+	<header>
+		<h1>API Key Management - Admin</h1>
+		<div class="actions"></div>
+	</header>
+	<main>
+		<!-- Database Table Status -->
+		<div class="card">
+			<h2 style="margin: 0 0 16px; font-size: 18px;">Database Table Status</h2>
+			<div id="table-status" style="margin-bottom: 12px; padding: 12px; background: #1e293b; border-radius: 8px; font-size: 13px;">
+				Memuat status...
+			</div>
+			<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+				<button id="populate-auth-line-btn" class="success">Populate Authenticity Used Line</button>
+				<button id="populate-auth-rm-btn" class="success">Populate Authenticity Used RM</button>
+				<button id="refresh-status-btn" class="secondary">Refresh Status</button>
+			</div>
+		</div>
+
+		<!-- Scheduler Management -->
+		<div class="card">
+			<h2 style="margin: 0 0 16px; font-size: 18px;">Scheduler Management</h2>
+			
+			<!-- Odoo Scheduler -->
+			<div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #1f2937;">
+				<h3 style="margin: 0 0 12px; font-size: 16px; color: #93c5fd;">Odoo Sync Scheduler</h3>
+				<div id="odoo-scheduler-status" style="margin-bottom: 12px; padding: 12px; background: #1e293b; border-radius: 8px; font-size: 13px;">
+					Memuat status...
+				</div>
+				<div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+					<label style="margin: 0; display: flex; align-items: center; gap: 8px;">
+						<span>Interval (menit):</span>
+						<input type="number" id="odoo-interval" min="1" value="5" style="width: 80px; margin: 0;" />
+					</label>
+					<label style="margin: 0; display: flex; align-items: center; gap: 8px;">
+						<span>Session ID:</span>
+						<input type="text" id="odoo-session-id" placeholder="Opsional" style="width: 200px; margin: 0;" />
+					</label>
+					<button id="odoo-start-btn" class="success">Start</button>
+					<button id="odoo-stop-btn" class="danger">Stop</button>
+					<button id="odoo-refresh-btn" class="secondary">Refresh Status</button>
+				</div>
+			</div>
+
+			<!-- Authenticity Scheduler -->
+			<div>
+				<h3 style="margin: 0 0 12px; font-size: 16px; color: #93c5fd;">Authenticity API Sync Scheduler</h3>
+				<div id="auth-scheduler-status" style="margin-bottom: 12px; padding: 12px; background: #1e293b; border-radius: 8px; font-size: 13px;">
+					Memuat status...
+				</div>
+				<div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+					<label style="margin: 0; display: flex; align-items: center; gap: 8px;">
+						<span>Interval (menit):</span>
+						<input type="number" id="auth-interval" min="1" value="10" style="width: 80px; margin: 0;" />
+					</label>
+					<button id="auth-start-btn" class="success">Start</button>
+					<button id="auth-stop-btn" class="danger">Stop</button>
+					<button id="auth-refresh-btn" class="secondary">Refresh Status</button>
+				</div>
+			</div>
+		</div>
+
+		<div class="card">
+			<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+				<h2 style="margin: 0; font-size: 18px;">API Keys</h2>
+				<button id="createBtn">Generate API Key</button>
+			</div>
+			<table>
+				<thead>
+					<tr>
+						<th>Nama</th>
+						<th>API Key</th>
+						<th>Dibuat Oleh</th>
+						<th>Tanggal Dibuat</th>
+						<th>Terakhir Digunakan</th>
+						<th>Status</th>
+						<th>Aksi</th>
+					</tr>
+				</thead>
+				<tbody id="keys-body"></tbody>
+			</table>
+		</div>
+
+		<div class="card">
+			<h2 style="margin: 0 0 12px; font-size: 16px;">Cara Menggunakan API Key</h2>
+			<div style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
+				<p><strong>1. Header x-api-key:</strong></p>
+				<code style="background: #1e293b; padding: 4px 8px; border-radius: 4px; display: block; margin: 8px 0;">
+					x-api-key: mps_xxxxxxxxxxxxx
+				</code>
+				<p style="margin-top: 12px;"><strong>2. Header Authorization (Bearer):</strong></p>
+				<code style="background: #1e293b; padding: 4px 8px; border-radius: 4px; display: block; margin: 8px 0;">
+					Authorization: Bearer mps_xxxxxxxxxxxxx
+				</code>
+				<p style="margin-top: 12px;"><strong>Contoh curl:</strong></p>
+				<code style="background: #1e293b; padding: 8px; border-radius: 4px; display: block; margin: 8px 0; font-size: 12px;">
+					curl -H "x-api-key: YOUR_API_KEY" \<br>
+					&nbsp;&nbsp;&nbsp;&nbsp;https://your-server.com/api/data/recent-mo
+				</code>
+			</div>
+		</div>
+	</main>
+
+	<!-- Create Modal -->
+	<div id="createModal" class="modal-backdrop">
+		<div class="modal">
+			<h2>Generate API Key Baru</h2>
+			<form id="createForm">
+				<label for="key_name">Nama API Key *</label>
+				<input type="text" id="key_name" placeholder="Contoh: Production Device 1" required />
+				
+				<label for="description">Deskripsi (Opsional)</label>
+				<textarea id="description" placeholder="Deskripsi penggunaan API key ini..."></textarea>
+
+				<div id="newKeyDisplay" class="new-key-display" style="display: none;">
+					<div class="warning">
+						<strong>⚠️ PENTING:</strong> Simpan API key ini sekarang! Key ini tidak akan ditampilkan lagi setelah modal ditutup.
+					</div>
+					<code id="newKeyValue"></code>
+				</div>
+
+				<div style="margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end;">
+					<button type="button" class="secondary" id="createCancel">Batal</button>
+					<button type="submit">Generate</button>
+				</div>
+			</form>
+		</div>
+	</div>
+
+	<div id="toast" class="toast"></div>
+</body>
+</html>
+

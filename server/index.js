@@ -155,14 +155,31 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Favicon route (before static middleware)
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end();
+});
+
+// Serve static files (for favicon, etc.)
+app.use(express.static(path.join(__dirname, '../client/public')));
+
 // Authentication endpoint
 app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-  
-  if (username === 'production' && password === 'production123') {
-    res.json({ success: true, message: 'Login successful' });
-  } else {
-    res.status(401).json({ success: false, message: 'Invalid credentials' });
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Username and password are required' });
+    }
+    
+    if (username === 'production' && password === 'production123') {
+      res.json({ success: true, message: 'Login successful' });
+    } else {
+      res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 

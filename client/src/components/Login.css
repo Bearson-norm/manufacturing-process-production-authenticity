@@ -3,31 +3,31 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #0f172a;
   padding: 20px;
 }
 
 .login-box {
-  background: white;
+  background: #0b1220;
+  border: 1px solid #1f2937;
   border-radius: 12px;
-  padding: 40px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  padding: 32px;
   width: 100%;
   max-width: 500px;
 }
 
 .login-box h1 {
   text-align: center;
-  color: #333;
+  color: #e2e8f0;
   margin-bottom: 10px;
-  font-size: 28px;
+  font-size: 24px;
 }
 
 .login-box h2 {
   text-align: center;
-  color: #666;
-  margin-bottom: 30px;
-  font-size: 18px;
+  color: #94a3b8;
+  margin-bottom: 24px;
+  font-size: 14px;
   font-weight: normal;
 }
 
@@ -37,65 +37,71 @@
 
 .form-group label {
   display: block;
-  margin-bottom: 8px;
-  color: #333;
-  font-weight: 500;
+  margin: 16px 0 6px;
+  color: #cbd5e1;
+  font-size: 13px;
 }
 
 .form-group input {
   width: 100%;
+  background: #0f172a;
+  border: 1px solid #1f2937;
+  color: #e2e8f0;
   padding: 12px;
-  border: 2px solid #e0e0e0;
-  border-radius: 6px;
-  font-size: 16px;
+  border-radius: 8px;
+  font-size: 14px;
   transition: border-color 0.3s;
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: #2563eb;
 }
 
 .error-message {
-  color: #e74c3c;
+  background: #7f1d1d;
+  color: #fecaca;
+  padding: 12px;
+  border-radius: 8px;
+  margin-top: 16px;
+  font-size: 13px;
   text-align: center;
-  margin-bottom: 15px;
-  font-size: 14px;
 }
 
 .login-button {
   width: 100%;
-  padding: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #2563eb;
   color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 16px;
-  font-weight: 600;
+  border: 0;
+  border-radius: 8px;
+  padding: 12px;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 24px;
+  transition: background 0.3s;
 }
 
 .login-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+  background: #1d4ed8;
 }
 
-.login-button:active {
-  transform: translateY(0);
+.login-button:disabled {
+  background: #374151;
+  cursor: not-allowed;
 }
 
 .production-options {
   margin-top: 30px;
   padding-top: 30px;
-  border-top: 2px solid #e0e0e0;
+  border-top: 1px solid #1f2937;
 }
 
 .production-options h3 {
   text-align: center;
-  color: #333;
+  color: #cbd5e1;
   margin-bottom: 20px;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .options-grid {
@@ -105,22 +111,20 @@
 }
 
 .option-button {
-  padding: 14px;
-  background: #f8f9fa;
-  color: #333;
-  border: 2px solid #e0e0e0;
-  border-radius: 6px;
-  font-size: 16px;
+  padding: 12px;
+  background: #374151;
+  color: #e2e8f0;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s;
 }
 
 .option-button:hover {
-  background: #667eea;
+  background: #2563eb;
   color: white;
-  border-color: #667eea;
-  transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+  border-color: #2563eb;
 }
 

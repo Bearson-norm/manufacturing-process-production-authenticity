@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="id">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Manufacturing_Process_System</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+	<style>
+		body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+		header { padding: 16px 24px; background: #111827; border-bottom: 1px solid #1f2937; display: flex; justify-content: space-between; align-items: center; }
+		h1 { font-size: 18px; margin: 0; }
+		.user-info { display: flex; align-items: center; gap: 12px; }
+		.user-badge { background: #1e293b; padding: 6px 12px; border-radius: 6px; font-size: 13px; }
+		.logout-btn { background: #dc2626; }
+		.logout-btn:hover { background: #b91c1c; }
+		main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+		.card { background: #0b1220; border: 1px solid #1f2937; border-radius: 10px; padding: 16px; }
+		.actions { display: flex; gap: 8px; }
+		button { background: #2563eb; color: white; border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; }
+		button.secondary { background: #374151; }
+		table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+		th, td { text-align: left; padding: 10px; border-bottom: 1px solid #1f2937; font-size: 14px; }
+		th { color: #93c5fd; }
+		.empty { color: #94a3b8; padding: 16px; text-align: center; }
+		.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: none; align-items: center; justify-content: center; }
+		.modal { width: 560px; max-width: calc(100% - 32px); background: #0b1220; border: 1px solid #1f2937; border-radius: 10px; padding: 16px; }
+		.modal h2 { margin: 0 0 12px; font-size: 16px; }
+		label { display: block; margin: 8px 0 6px; color: #cbd5e1; font-size: 13px; }
+		select, input { width: 100%; background: #0f172a; border: 1px solid #1f2937; color: #e2e8f0; padding: 10px; border-radius: 8px;}
+		.row { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+		.toast { position: fixed; right: 16px; bottom: 16px; background: #065f46; color: #ecfdf5; padding: 10px 12px; border-radius: 8px; display: none; }
+	</style>
+	<script>
+		// Authentication state
+		let currentUser = null;
+		let sessionToken = null;
+
+		// Get session token from localStorage
+		function getSessionToken() {
+			return localStorage.getItem('session_token');
+		}
+
+		// Add auth header to fetch options
+		function addAuthHeader(options = {}) {
+			const token = getSessionToken();
+			if (!token) return options;
+			if (!options.headers) options.headers = {};
+			options.headers['x-session-token'] = token;
+			return options;
+		}
+
+		async function fetchJSON(url, options) {
+			const opts = addAuthHeader(options);
+			const res = await fetch(url, opts);
+			if (res.status === 401) {
+				// Unauthorized - redirect to login
+				localStorage.removeItem('session_token');
+				localStorage.removeItem('user_role');
+				localStorage.removeItem('username');
+				window.location.href = '/login';
+				return;
+			}
+			if (!res.ok) {
+				const errorText = await res.text();
+				let errorData;
+				try {
+					errorData = JSON.parse(errorText);
+				} catch {
+					errorData = { error: errorText };
+				}
+				const error = new Error(errorData.error || errorText);
+				error.data = errorData;
+				throw error;
+			}
+			return res.json();
+		}
+
+		// Check authentication on page load
+		async function checkAuth() {
+			const token = getSessionToken();
+			if (!token) {
+				window.location.href = '/login';
+				return;
+			}
+			try {
+				const data = await fetchJSON('/api/auth/me');
+				currentUser = data.user;
+				updateUIForRole();
+			} catch (error) {
+				console.error('Auth check failed:', error);
+				window.location.href = '/login';
+			}
+		}
+
+		// Update UI based on role
+		function updateUIForRole() {
+			if (!currentUser) return;
+			const role = currentUser.role;
+			
+			// Update header with user info
+			const headerActions = document.querySelector('header .actions');
+			const userInfo = document.createElement('div');
+			userInfo.className = 'user-info';
+			userInfo.innerHTML = `
+				<span class="user-badge">${currentUser.username} (${role === 'production' ? 'Produksi' : 'Warehouse'})</span>
+				<button class="logout-btn" onclick="logout()">Logout</button>
+			`;
+			headerActions.insertBefore(userInfo, headerActions.firstChild);
+
+			// Hide/show features based on role
+			if (role === 'production') {
+				// Production: Hide register MO button, show production buttons
+				const registerBtn = document.querySelector('#openModal');
+				if (registerBtn) registerBtn.style.display = 'none';
+				// Show production buttons
+				const prodActions = document.querySelector('#production-actions');
+				if (prodActions) prodActions.style.display = 'block';
+			} else if (role === 'warehouse') {
+				// Warehouse: Show register MO button, hide production buttons
+				const registerBtn = document.querySelector('#openModal');
+				if (registerBtn) registerBtn.style.display = 'block';
+				// Hide production buttons
+				const prodActions = document.querySelector('#production-actions');
+				if (prodActions) prodActions.style.display = 'none';
+			}
+		}
+
+		async function logout() {
+			try {
+				await fetchJSON('/api/logout', { method: 'POST' });
+			} catch (e) {
+				console.error('Logout error:', e);
+			}
+			localStorage.removeItem('session_token');
+			localStorage.removeItem('user_role');
+			localStorage.removeItem('username');
+			window.location.href = '/login';
+		}
+
+		// Make logout available globally
+		window.logout = logout;
+		// Changeover helpers
+		async function openChangeModal() {
+			document.querySelector('#changeModal').style.display = 'flex';
+			const cur = document.querySelector('#ch_current');
+			const next = document.querySelector('#ch_next');
+			cur.innerHTML = '<option value="">Memuat...</option>';
+			next.innerHTML = '<option value="">Memuat...</option>';
+			try {
+				const running = await fetchJSON('/api/running-mo');
+				cur.innerHTML = '<option value="">Pilih MO berjalan...</option>' + (running.data || []).map(d => `
+					<option value="${d.mo_name}">${d.mo_name} — ${d.product_name || ''}</option>
+				`).join('');
+			} catch (e) {
+				cur.innerHTML = '<option value="">Gagal memuat MO berjalan</option>';
+			}
+			try {
+				const ready = await fetchJSON('/api/ready-mo');
+				next.innerHTML = '<option value="">Pilih MO berikutnya...</option>' + (ready.data || []).map(d => `
+					<option value="${d.mo_name}">${d.mo_name} — ${d.product_name || ''}</option>
+				`).join('');
+			} catch (e) {
+				next.innerHTML = '<option value="">Gagal memuat MO siap</option>';
+			}
+		}
+		function closeChangeModal() {
+			document.querySelector('#changeModal').style.display = 'none';
+			document.querySelector('#changeForm').reset();
+		}
+		function onChangeCurrentMo() {
+			// no-op for now; can prefill old auth if needed
+		}
+		async function submitChange(ev) {
+			ev.preventDefault();
+			const current_mo = document.querySelector('#ch_current').value.trim();
+			const next_mo = document.querySelector('#ch_next').value.trim();
+			const new_auth = document.querySelector('#ch_new_auth').value.trim();
+			const ch_roll = document.querySelector('#ch_roll') ? document.querySelector('#ch_roll').value.trim() : '';
+			if (!current_mo || !next_mo || !new_auth) {
+				alert('Lengkapi MO berjalan, MO berikutnya, dan authenticity baru.');
+				return;
+			}
+			if (!/^\d+$/.test(new_auth)) {
+				alert('Authenticity baru harus berupa angka.');
+				return;
+			}
+			try {
+				await fetchJSON('/api/changeover', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(ch_roll ? { current_mo, next_mo, new_auth, roll_number: ch_roll } : { current_mo, next_mo, new_auth })
+				});
+				closeChangeModal();
+				showToast('Changeover berhasil.');
+				loadReadyList();
+			} catch (e) {
+				alert('Gagal changeover: ' + e.message);
+			}
+		}
+
+		// End production
+		async function openEndModal() {
+			document.querySelector('#endModal').style.display = 'flex';
+			const select = document.querySelector('#end_mo');
+			select.innerHTML = '<option value="">Memuat...</option>';
+			try {
+				const { data } = await fetchJSON('/api/running-mo');
+				select.innerHTML = '<option value="">Pilih MO berjalan...</option>' + (data || []).map(d => `
+					<option value="${d.mo_name}">${d.mo_name} — ${d.product_name || ''}</option>
+				`).join('');
+			} catch (e) {
+				select.innerHTML = '<option value="">Gagal memuat MO berjalan</option>';
+			}
+		}
+		function closeEndModal() {
+			document.querySelector('#endModal').style.display = 'none';
+			document.querySelector('#endForm').reset();
+		}
+		async function submitEnd(ev) {
+			ev.preventDefault();
+			const mo_name = document.querySelector('#end_mo').value.trim();
+			const authenticity = document.querySelector('#end_auth').value.trim();
+			const end_roll = document.querySelector('#end_roll') ? document.querySelector('#end_roll').value.trim() : '';
+			if (!mo_name || !authenticity) {
+				alert('Pilih MO berjalan dan masukkan authenticity.');
+				return;
+			}
+			if (!/^\d+$/.test(authenticity)) {
+				alert('Authenticity harus berupa angka.');
+				return;
+			}
+			try {
+				await fetchJSON('/api/end-production', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(end_roll ? { mo_name, authenticity, roll_number: end_roll } : { mo_name, authenticity })
+				});
+				closeEndModal();
+				showToast('Produksi diakhiri untuk ' + mo_name);
+				loadReadyList();
+			} catch (e) {
+				alert('Gagal mengakhiri produksi: ' + e.message);
+			}
+		}
+
+		async function loadReadyList() {
+			const tbody = document.querySelector('#ready-body');
+			tbody.innerHTML = '<tr><td colspan="6">Memuat...</td></tr>';
+			try {
+				const { data } = await fetchJSON('/api/ready-mo');
+				if (!data || data.length === 0) {
+					tbody.innerHTML = '<tr><td colspan="6" class="empty">Belum ada MO yang siap produksi.</td></tr>';
+					return;
+				}
+				tbody.innerHTML = data.map((r) => `
+					<tr>
+						<td>${r.mo_name || ''}</td>
+						<td>${r.product_name || ''}</td>
+						<td>${r.product_qty ?? ''} ${r.product_uom || ''}</td>
+						<td>${r.auth_first || ''}</td>
+						<td>${r.roll_number || ''}</td>
+						<td>${r.create_date || ''}</td>
+					</tr>
+				`).join('');
+			} catch (e) {
+				tbody.innerHTML = '<tr><td colspan="6" class="empty">Gagal memuat data.</td></tr>';
+			}
+		}
+
+		async function openStartModal() {
+			document.querySelector('#startModal').style.display = 'flex';
+			const select = document.querySelector('#sp_mo');
+			const warningDiv = document.querySelector('#sp_warning');
+			select.innerHTML = '<option value="">Memuat...</option>';
+			
+			// Check for running MO
+			try {
+				const running = await fetchJSON('/api/running-mo');
+				if (running.data && running.data.length > 0) {
+					const runningMo = running.data[0];
+					warningDiv.style.display = 'block';
+					warningDiv.innerHTML = `<strong style="color: #fbbf24;">⚠ Peringatan:</strong> Masih ada MO yang sedang berjalan: <strong>${runningMo.mo_name}</strong> (${runningMo.product_name || ''}). Selesaikan atau lakukan changeover terlebih dahulu sebelum memulai produksi baru.`;
+					warningDiv.style.background = '#1e293b';
+					warningDiv.style.border = '1px solid #f59e0b';
+					warningDiv.style.color = '#fef3c7';
+					warningDiv.style.padding = '12px';
+					warningDiv.style.borderRadius = '8px';
+					warningDiv.style.marginBottom = '12px';
+					// Disable submit button
+					const submitBtn = document.querySelector('#startForm button[type="submit"]');
+					if (submitBtn) submitBtn.disabled = true;
+					select.disabled = true;
+				} else {
+					warningDiv.style.display = 'none';
+					const submitBtn = document.querySelector('#startForm button[type="submit"]');
+					if (submitBtn) submitBtn.disabled = false;
+					select.disabled = false;
+				}
+			} catch (e) {
+				warningDiv.style.display = 'none';
+				const submitBtn = document.querySelector('#startForm button[type="submit"]');
+				if (submitBtn) submitBtn.disabled = false;
+				select.disabled = false;
+			}
+			
+			try {
+				const { data } = await fetchJSON('/api/ready-mo');
+				select.innerHTML = '<option value="">Pilih MO...</option>' + (data || []).map(d => `
+					<option value="${d.mo_name}">${d.mo_name} — ${d.product_name || ''}</option>
+				`).join('');
+			} catch (e) {
+				select.innerHTML = '<option value="">Gagal memuat MO siap</option>';
+			}
+		}
+		function closeStartModal() {
+			document.querySelector('#startModal').style.display = 'none';
+			document.querySelector('#startForm').reset();
+			clearStartPrefill();
+			const warningDiv = document.querySelector('#sp_warning');
+			if (warningDiv) warningDiv.style.display = 'none';
+			const submitBtn = document.querySelector('#startForm button[type="submit"]');
+			if (submitBtn) submitBtn.disabled = false;
+			const select = document.querySelector('#sp_mo');
+			if (select) select.disabled = false;
+		}
+		function clearStartPrefill() {
+			document.querySelector('#sp_sku').value = '';
+			document.querySelector('#sp_target').value = '';
+			document.querySelector('#sp_uom').value = '';
+			document.querySelector('#sp_auth_first').value = '';
+			document.querySelector('#sp_roll').value = '';
+		}
+		async function onChangeStartMo(ev) {
+			const mo = ev.target.value;
+			clearStartPrefill();
+			if (!mo) return;
+			try {
+				const { data } = await fetchJSON(`/api/ready-mo-details?mo_name=${encodeURIComponent(mo)}`);
+				document.querySelector('#sp_sku').value = data.sku_name || '';
+				document.querySelector('#sp_target').value = data.target_qty ?? '';
+				document.querySelector('#sp_uom').value = data.product_uom || '';
+				document.querySelector('#sp_auth_first').value = data.auth_first || '';
+				document.querySelector('#sp_roll').value = data.roll_number || '';
+			} catch (e) {
+				alert('Gagal memuat detail MO: ' + e.message);
+			}
+		}
+		async function submitStart(ev) {
+			ev.preventDefault();
+			const mo_name = document.querySelector('#sp_mo').value.trim();
+			const leader_id = document.querySelector('#sp_leader').value.trim();
+			if (!mo_name || !leader_id) {
+				alert('Pilih MO dan masukkan Leader ID.');
+				return;
+			}
+			try {
+				await fetchJSON('/api/start-production', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ mo_name, leader_id })
+				});
+				closeStartModal();
+				showToast('Produksi dimulai untuk ' + mo_name);
+				loadReadyList();
+			} catch (e) {
+				// Display error message from backend
+				const errorMsg = (e.data && e.data.error) ? e.data.error : (e.message || 'Gagal mulai produksi');
+				alert(errorMsg);
+			}
+		}
+
+		async function openRegisterModal() {
+			document.querySelector('#modal').style.display = 'flex';
+			const select = document.querySelector('#mo_name');
+			select.innerHTML = '<option value="">Memuat...</option>';
+			try {
+				const { data } = await fetchJSON('/api/mo-options');
+				select.innerHTML = '<option value="">Pilih MO...</option>' + (data || []).map(d => `
+					<option value="${d.mo_name}">${d.mo_name} — ${d.product_name || ''}</option>
+				`).join('');
+			} catch (e) {
+				select.innerHTML = '<option value="">Gagal memuat MO</option>';
+			}
+		}
+		function closeRegisterModal() {
+			document.querySelector('#modal').style.display = 'none';
+			document.querySelector('#form').reset();
+		}
+		function onToggleMidRun(ev) {
+			const checked = ev.target.checked;
+			const af = document.querySelector('#auth_first');
+			const rn = document.querySelector('#roll_number');
+			if (checked) {
+				af.setAttribute('disabled', 'true');
+				rn.setAttribute('disabled', 'true');
+				af.removeAttribute('required');
+				rn.removeAttribute('required');
+			} else {
+				af.removeAttribute('disabled');
+				rn.removeAttribute('disabled');
+				af.setAttribute('required', 'true');
+				rn.setAttribute('required', 'true');
+			}
+		}
+		async function submitRegistration(ev) {
+			ev.preventDefault();
+			const mo_name = document.querySelector('#mo_name').value.trim();
+			const auth_first = document.querySelector('#auth_first').value.trim();
+			const roll_number = document.querySelector('#roll_number').value.trim();
+			const mid_run = document.querySelector('#mid_run').checked;
+			if (!mo_name) {
+				alert('Pilih MO terlebih dahulu.');
+				return;
+			}
+			if (!mid_run) {
+				if (!auth_first || !roll_number) {
+					alert('Lengkapi first authenticity code dan roll number.');
+					return;
+				}
+			}
+			try {
+				await fetchJSON('/api/register-mo', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(mid_run ? { mo_name, run_mid_production: true } : { mo_name, auth_first, roll_number })
+				});
+				closeRegisterModal();
+				showToast('MO berhasil didaftarkan sebagai siap produksi.');
+				loadReadyList();
+			} catch (e) {
+				alert('Gagal mendaftarkan MO: ' + e.message);
+			}
+		}
+		function showToast(msg) {
+			const t = document.querySelector('#toast');
+			t.textContent = msg;
+			t.style.display = 'block';
+			setTimeout(() => t.style.display = 'none', 2500);
+		}
+		window.addEventListener('DOMContentLoaded', async () => {
+			// Check authentication first
+			await checkAuth();
+			
+			// Only initialize if authenticated
+			if (currentUser) {
+				loadReadyList();
+				
+				// Add event listeners only if elements exist (role-based)
+				const openModalBtn = document.querySelector('#openModal');
+				if (openModalBtn) {
+					openModalBtn.addEventListener('click', openRegisterModal);
+					document.querySelector('#cancel').addEventListener('click', closeRegisterModal);
+					document.querySelector('#form').addEventListener('submit', submitRegistration);
+					document.querySelector('#mid_run').addEventListener('change', onToggleMidRun);
+				}
+				
+				const openStartBtn = document.querySelector('#openStart');
+				if (openStartBtn) {
+					openStartBtn.addEventListener('click', openStartModal);
+					document.querySelector('#sp_cancel').addEventListener('click', closeStartModal);
+					document.querySelector('#sp_mo').addEventListener('change', onChangeStartMo);
+					document.querySelector('#startForm').addEventListener('submit', submitStart);
+					document.querySelector('#openChange').addEventListener('click', openChangeModal);
+					document.querySelector('#ch_cancel').addEventListener('click', closeChangeModal);
+					document.querySelector('#ch_current').addEventListener('change', onChangeCurrentMo);
+					document.querySelector('#changeForm').addEventListener('submit', submitChange);
+					document.querySelector('#openEnd').addEventListener('click', openEndModal);
+					document.querySelector('#end_cancel').addEventListener('click', closeEndModal);
+					document.querySelector('#endForm').addEventListener('submit', submitEnd);
+				}
+			}
+		});
+	</script>
+</head>
+<body>
+	<header>
+		<h1>Manufacturing_Process_System</h1>
+		<div class="actions">
+			<button id="openModal" style="display:none;">Daftarkan MO (Siap Produksi)</button>
+			<button class="secondary" onclick="loadReadyList()">Refresh</button>
+			<button class="secondary" onclick="window.location.href='/admin'">Admin Panel</button>
+		</div>
+	</header>
+	<main>
+		<div class="card">
+			<h2 style="margin:0 0 8px;font-size:16px;">MO Siap Produksi</h2>
+			<div style="margin-bottom:8px;" id="production-actions">
+				<button id="openStart">Start Production</button>
+				<button id="openChange">Changeover</button>
+				<button id="openEnd">End Production</button>
+			</div>
+			<table>
+				<thead>
+					<tr>
+						<th>MO</th>
+						<th>Produk</th>
+						<th>Qty</th>
+						<th>First Auth</th>
+						<th>Roll Number</th>
+						<th>Created</th>
+					</tr>
+				</thead>
+				<tbody id="ready-body"></tbody>
+			</table>
+		</div>
+	</main>
+
+	<div id="modal" class="modal-backdrop">
+		<div class="modal">
+			<h2>Daftarkan MO - Siap Produksi</h2>
+			<form id="form">
+				<label for="mo_name">Pilih MO</label>
+				<select id="mo_name" required></select>
+
+				<div class="row">
+					<div>
+						<label for="auth_first">First Authenticity Code</label>
+						<input id="auth_first" placeholder="Masukkan first code" required />
+					</div>
+					<div>
+						<label for="roll_number">Roll Number</label>
+						<input id="roll_number" placeholder="Masukkan roll number" required />
+					</div>
+				</div>
+				<div style="margin-top:8px;">
+					<label style="display:flex; align-items:center; gap:8px;">
+						<input type="checkbox" id="mid_run" />
+						<span>Dijalankan di tengah produksi (tanpa first auth & roll)</span>
+					</label>
+				</div>
+				<div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+					<button type="button" class="secondary" id="cancel">Batal</button>
+					<button type="submit">Simpan</button>
+				</div>
+			</form>
+		</div>
+	</div>
+
+	<!-- End Production Modal -->
+	<div id="endModal" class="modal-backdrop">
+		<div class="modal">
+			<h2>End Production</h2>
+			<form id="endForm">
+				<label for="end_mo">MO Berjalan</label>
+				<select id="end_mo" required></select>
+
+				<label for="end_auth">Nomor Authenticity</label>
+				<input id="end_auth" placeholder="Masukkan authenticity (angka)" required />
+
+				<label for="end_roll">Nomor Roll</label>
+				<input id="end_roll" placeholder="Masukkan nomor roll (opsional)" />
+
+				<div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+					<button type="button" class="secondary" id="end_cancel">Batal</button>
+					<button type="submit">Simpan</button>
+				</div>
+			</form>
+		</div>
+	</div>
+
+	<!-- Start Production Modal -->
+	<div id="startModal" class="modal-backdrop">
+		<div class="modal">
+			<h2>Start Production</h2>
+			<form id="startForm">
+				<div id="sp_warning" style="display: none;"></div>
+				<label for="sp_mo">Pilih MO</label>
+				<select id="sp_mo" required></select>
+
+				<label>SKU / Product Name</label>
+				<input id="sp_sku" disabled />
+
+				<div class="row">
+					<div>
+						<label>Target Qty</label>
+						<input id="sp_target" disabled />
+					</div>
+					<div>
+						<label>UoM</label>
+						<input id="sp_uom" disabled />
+					</div>
+				</div>
+
+				<div class="row">
+					<div>
+						<label>First Authenticity Code</label>
+						<input id="sp_auth_first" disabled />
+					</div>
+					<div>
+						<label>Roll Number</label>
+						<input id="sp_roll" disabled />
+					</div>
+				</div>
+
+				<label for="sp_leader">Leader ID</label>
+				<input id="sp_leader" placeholder="Masukkan leader ID" required />
+
+				<div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+					<button type="button" class="secondary" id="sp_cancel">Batal</button>
+					<button type="submit">Mulai</button>
+				</div>
+			</form>
+		</div>
+	</div>
+
+	<!-- Changeover Modal -->
+	<div id="changeModal" class="modal-backdrop">
+		<div class="modal">
+			<h2>Changeover</h2>
+			<form id="changeForm">
+				<label for="ch_current">MO Berjalan</label>
+				<select id="ch_current" required></select>
+
+				<label for="ch_next">MO Berikutnya</label>
+				<select id="ch_next" required></select>
+
+				<label for="ch_new_auth">Nomor Authenticity Baru</label>
+				<input id="ch_new_auth" placeholder="Masukkan authenticity baru (angka)" required />
+
+				<label for="ch_roll">Nomor Roll (Next)</label>
+				<input id="ch_roll" placeholder="Masukkan nomor roll untuk MO berikutnya (opsional)" />
+
+				<div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+					<button type="button" class="secondary" id="ch_cancel">Batal</button>
+					<button type="submit">Simpan</button>
+				</div>
+			</form>
+		</div>
+	</div>
+
+	<div id="toast" class="toast"></div>
+</body>
+		</html>
+
+
