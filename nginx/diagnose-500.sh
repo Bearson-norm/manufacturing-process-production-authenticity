@@ -45,3 +45,4 @@ echo "1. Run: cd /var/www/manufacturing-process-production-authenticity/nginx &&
 echo "2. Check: ls -la /home/foom/deployments/manufacturing-app/client-build/"
 echo "3. Build client if missing: cd client && npm run build"
 
+
