@@ -10,6 +10,10 @@ function Admin() {
   const [externalApiUrl, setExternalApiUrl] = useState('');
   const [externalApiUrlActive, setExternalApiUrlActive] = useState('');
   const [externalApiUrlCompleted, setExternalApiUrlCompleted] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
+  const [generatedApiKey, setGeneratedApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [moStats, setMoStats] = useState({ total: 0, last7Days: 0, deleted: 0 });
@@ -29,6 +33,8 @@ function Admin() {
         setExternalApiUrl(response.data.config.externalApiUrl || 'https://foom-dash.vercel.app/API');
         setExternalApiUrlActive(response.data.config.externalApiUrlActive || response.data.config.externalApiUrl || 'https://foom-dash.vercel.app/API');
         setExternalApiUrlCompleted(response.data.config.externalApiUrlCompleted || response.data.config.externalApiUrl || 'https://foom-dash.vercel.app/API');
+        setApiKey(response.data.config.apiKey || '');
+        setApiKeyConfigured(response.data.config.apiKeyConfigured || false);
       }
     } catch (error) {
       console.error('Error fetching config:', error);
@@ -47,6 +53,34 @@ function Admin() {
     }
   };
 
+  const handleGenerateApiKey = async () => {
+    if (!window.confirm('Generate new API key? This will replace the existing API key if one exists. Make sure to save the new key securely!')) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage({ type: '', text: '' });
+
+    try {
+      const response = await axios.post('/api/admin/generate-api-key');
+      if (response.data.success) {
+        setGeneratedApiKey(response.data.apiKey);
+        setShowApiKey(true);
+        setApiKeyConfigured(true);
+        setMessage({ type: 'success', text: 'API key generated successfully! Please save it securely - it will not be shown again.' });
+        // Refresh config to get masked key
+        fetchConfig();
+      } else {
+        setMessage({ type: 'error', text: response.data.error || 'Failed to generate API key' });
+      }
+    } catch (error) {
+      console.error('Error generating API key:', error);
+      setMessage({ type: 'error', text: error.response?.data?.error || 'Failed to generate API key' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveConfig = async () => {
     if (!sessionId || sessionId.length < 20) {
       setMessage({ type: 'error', text: 'Session ID must be at least 20 characters' });
@@ -62,7 +96,8 @@ function Admin() {
         odooBaseUrl: odooBaseUrl.trim() || 'https://foomx.odoo.com',
         externalApiUrl: externalApiUrl.trim() || 'https://foom-dash.vercel.app/API',
         externalApiUrlActive: externalApiUrlActive.trim() || 'https://foom-dash.vercel.app/API',
-        externalApiUrlCompleted: externalApiUrlCompleted.trim() || 'https://foom-dash.vercel.app/API'
+        externalApiUrlCompleted: externalApiUrlCompleted.trim() || 'https://foom-dash.vercel.app/API',
+        apiKey: apiKey.trim() || undefined
       });
 
       if (response.data.success) {
@@ -234,11 +269,143 @@ function Admin() {
               URL untuk mengirim data saat MO disubmit (status: completed). Default: https://foom-dash.vercel.app/API
             </small>
           </div>
+          
+          {/* API Key Configuration */}
+          <div className="form-group" style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #334155' }}>
+            <label style={{ fontSize: '16px', fontWeight: '600', color: '#e2e8f0', marginBottom: '12px' }}>
+              API Key Authentication
+            </label>
+            <div style={{ 
+              background: '#1e293b', 
+              padding: '16px', 
+              borderRadius: '6px', 
+              border: '1px solid #334155',
+              marginBottom: '12px'
+            }}>
+              {apiKeyConfigured ? (
+                <div>
+                  <p style={{ color: '#94a3b8', marginBottom: '12px', fontSize: '14px' }}>
+                    ✅ API Key sudah dikonfigurasi
+                  </p>
+                  <div style={{ 
+                    background: '#0f172a', 
+                    padding: '12px', 
+                    borderRadius: '4px', 
+                    border: '1px solid #334155',
+                    fontFamily: 'monospace',
+                    fontSize: '13px',
+                    color: '#60a5fa',
+                    wordBreak: 'break-all',
+                    marginBottom: '12px'
+                  }}>
+                    {apiKey || 'Not configured'}
+                  </div>
+                  <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginBottom: '12px' }}>
+                    API key ini digunakan untuk autentikasi pada endpoint external API. 
+                    Gunakan header <code style={{ background: '#0f172a', padding: '2px 6px', borderRadius: '3px', color: '#60a5fa' }}>X-API-Key</code> saat memanggil API.
+                  </small>
+                </div>
+              ) : (
+                <div>
+                  <p style={{ color: '#fbbf24', marginBottom: '12px', fontSize: '14px' }}>
+                    ⚠️ API Key belum dikonfigurasi. External API endpoints saat ini dapat diakses tanpa autentikasi.
+                  </p>
+                  <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginBottom: '12px' }}>
+                    Generate API key untuk mengamankan endpoint external API. Setelah di-generate, semua request ke external API harus menyertakan API key.
+                  </small>
+                </div>
+              )}
+              
+              {showApiKey && generatedApiKey && (
+                <div style={{ 
+                  background: '#065f46', 
+                  padding: '16px', 
+                  borderRadius: '6px', 
+                  border: '2px solid #10b981',
+                  marginBottom: '12px'
+                }}>
+                  <p style={{ color: '#10b981', fontWeight: '600', marginBottom: '8px', fontSize: '14px' }}>
+                    ⚠️ IMPORTANT: Save this API key now!
+                  </p>
+                  <div style={{ 
+                    background: '#0f172a', 
+                    padding: '12px', 
+                    borderRadius: '4px', 
+                    border: '1px solid #10b981',
+                    fontFamily: 'monospace',
+                    fontSize: '13px',
+                    color: '#34d399',
+                    wordBreak: 'break-all',
+                    marginBottom: '12px',
+                    fontWeight: '600'
+                  }}>
+                    {generatedApiKey}
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedApiKey);
+                      setMessage({ type: 'success', text: 'API key copied to clipboard!' });
+                    }}
+                    style={{ 
+                      padding: '8px 16px', 
+                      fontSize: '13px', 
+                      fontWeight: '600',
+                      background: '#10b981',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      marginRight: '8px'
+                    }}
+                  >
+                    Copy to Clipboard
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowApiKey(false);
+                      setGeneratedApiKey('');
+                    }}
+                    style={{ 
+                      padding: '8px 16px', 
+                      fontSize: '13px', 
+                      fontWeight: '600',
+                      background: '#334155',
+                      color: '#e2e8f0',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Hide
+                  </button>
+                </div>
+              )}
+              
+              <button
+                onClick={handleGenerateApiKey}
+                disabled={loading}
+                style={{ 
+                  padding: '10px 20px', 
+                  fontSize: '14px', 
+                  fontWeight: '600',
+                  background: '#3b82f6',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  opacity: loading ? 0.6 : 1
+                }}
+              >
+                {loading ? 'Generating...' : apiKeyConfigured ? 'Regenerate API Key' : 'Generate API Key'}
+              </button>
+            </div>
+          </div>
+          
           <button
             onClick={handleSaveConfig}
             disabled={loading}
             className="save-button"
-            style={{ padding: '10px 20px', fontSize: '14px', fontWeight: '600' }}
+            style={{ padding: '10px 20px', fontSize: '14px', fontWeight: '600', marginTop: '16px' }}
           >
             {loading ? 'Saving...' : 'Save Configuration'}
           </button>

@@ -9,6 +9,12 @@
     "react-router-dom": "^6.20.0",
     "react-scripts": "5.0.1"
   },
+  "overrides": {
+    "nth-check": "^2.1.1",
+    "postcss": "^8.4.31",
+    "webpack-dev-server": "^4.15.1",
+    "@pmmmwh/react-refresh-webpack-plugin": "^0.5.11"
+  },
   "scripts": {
     "start": "cross-env DANGEROUSLY_DISABLE_HOST_CHECK=true react-scripts start",
     "build": "react-scripts build",
