@@ -1,0 +1,301 @@
+{
+	"info": {
+		"_postman_id": "manufacturing-process-api-001",
+		"name": "Manufacturing Process API",
+		"description": "Collection untuk menguji External Manufacturing Process API yang mengembalikan data manufacturing process dari berbagai inputan di halaman production (liquid, device, cartridge) yang sudah completed.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Get All Data by MO Number",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-data?mo_number=MO001&completed_at=all",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-data"
+					],
+					"query": [
+						{
+							"key": "mo_number",
+							"value": "MO001",
+							"description": "Nomor MO yang ingin dicari"
+						},
+						{
+							"key": "completed_at",
+							"value": "all",
+							"description": "Ambil semua data tanpa filter tanggal"
+						}
+					]
+				},
+				"description": "Mendapatkan semua data untuk MO Number tertentu tanpa filter tanggal completion."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Data by MO Number and Date",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-data?mo_number=MO001&completed_at=2024-01-15",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-data"
+					],
+					"query": [
+						{
+							"key": "mo_number",
+							"value": "MO001",
+							"description": "Nomor MO yang ingin dicari"
+						},
+						{
+							"key": "completed_at",
+							"value": "2024-01-15",
+							"description": "Tanggal completion dalam format YYYY-MM-DD"
+						}
+					]
+				},
+				"description": "Mendapatkan data untuk MO Number pada tanggal completion tertentu."
+			},
+			"response": [
+				{
+					"name": "Success - 3 MOs in 1 Session",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-data?mo_number=MO001&completed_at=all",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-data"
+							],
+							"query": [
+								{
+									"key": "mo_number",
+									"value": "MO001"
+								},
+								{
+									"key": "completed_at",
+									"value": "all"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"success\": true,\n  \"mo_number\": \"MO001\",\n  \"completed_at\": \"all\",\n  \"total_sessions\": 1,\n  \"data\": [\n    {\n      \"session\": \"Hikmatul Iman_Shift1_1705123456789\",\n      \"leader\": \"Hikmatul Iman\",\n      \"shift\": \"Shift1\",\n      \"mo_data\": [\n        {\n          \"mo_number\": \"MO001\",\n          \"sku_name\": \"Product A\",\n          \"pic\": \"John Doe\",\n          \"production_type\": \"device\",\n          \"completed_at\": \"2024-01-15T10:30:00.000Z\",\n          \"authenticity_data\": [\n            {\n              \"first_authenticity\": \"AUTH001\",\n              \"last_authenticity\": \"AUTH100\",\n              \"roll_number\": \"ROLL001\"\n            },\n            {\n              \"first_authenticity\": \"AUTH101\",\n              \"last_authenticity\": \"AUTH200\",\n              \"roll_number\": \"ROLL002\"\n            }\n          ],\n          \"buffered_auth\": [\"BUFFER001\", \"BUFFER002\"],\n          \"rejected_auth\": [\"REJECT001\"]\n        },\n        {\n          \"mo_number\": \"MO002\",\n          \"sku_name\": \"Product B\",\n          \"pic\": \"Jane Smith\",\n          \"production_type\": \"liquid\",\n          \"completed_at\": \"2024-01-15T11:00:00.000Z\",\n          \"authenticity_data\": [\n            {\n              \"first_authenticity\": \"AUTH201\",\n              \"last_authenticity\": \"AUTH300\",\n              \"roll_number\": \"ROLL003\"\n            },\n            {\n              \"first_authenticity\": \"AUTH301\",\n              \"last_authenticity\": \"AUTH400\",\n              \"roll_number\": \"ROLL004\"\n            },\n            {\n              \"first_authenticity\": \"AUTH401\",\n              \"last_authenticity\": \"AUTH500\",\n              \"roll_number\": \"ROLL005\"\n            }\n          ],\n          \"buffered_auth\": [\"BUFFER003\", \"BUFFER004\", \"BUFFER005\"],\n          \"rejected_auth\": [\"REJECT002\", \"REJECT003\"]\n        },\n        {\n          \"mo_number\": \"MO003\",\n          \"sku_name\": \"Product C\",\n          \"pic\": \"Bob Johnson\",\n          \"production_type\": \"cartridge\",\n          \"completed_at\": \"2024-01-15T12:00:00.000Z\",\n          \"authenticity_data\": [\n            {\n              \"first_authenticity\": \"AUTH501\",\n              \"last_authenticity\": \"AUTH600\",\n              \"roll_number\": \"ROLL006\"\n            }\n          ],\n          \"buffered_auth\": [\"BUFFER006\"],\n          \"rejected_auth\": []\n        }\n      ]\n    }\n  ]\n}"
+				}
+			]
+		},
+		{
+			"name": "Get Data - Device Production",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-data?mo_number=MO002&completed_at=all",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-data"
+					],
+					"query": [
+						{
+							"key": "mo_number",
+							"value": "MO002",
+							"description": "Nomor MO untuk Device Production"
+						},
+						{
+							"key": "completed_at",
+							"value": "all"
+						}
+					]
+				},
+				"description": "Contoh request untuk mendapatkan data Device Production."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Data - Liquid Production",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-data?mo_number=MO003&completed_at=all",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-data"
+					],
+					"query": [
+						{
+							"key": "mo_number",
+							"value": "MO003",
+							"description": "Nomor MO untuk Liquid Production"
+						},
+						{
+							"key": "completed_at",
+							"value": "all"
+						}
+					]
+				},
+				"description": "Contoh request untuk mendapatkan data Liquid Production."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Data - Cartridge Production",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-data?mo_number=MO004&completed_at=all",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-data"
+					],
+					"query": [
+						{
+							"key": "mo_number",
+							"value": "MO004",
+							"description": "Nomor MO untuk Cartridge Production"
+						},
+						{
+							"key": "completed_at",
+							"value": "all"
+						}
+					]
+				},
+				"description": "Contoh request untuk mendapatkan data Cartridge Production."
+			},
+			"response": []
+		},
+		{
+			"name": "Error - Missing MO Number",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-data",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-data"
+					]
+				},
+				"description": "Contoh request yang akan menghasilkan error karena MO Number tidak diisi (required parameter)."
+			},
+			"response": [
+				{
+					"name": "Error Response",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-data",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-data"
+							]
+						}
+					},
+					"status": "Bad Request",
+					"code": 400,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n  \"success\": false,\n  \"error\": \"MO Number is required\"\n}"
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		}
+	]
+}
+

@@ -22,6 +22,11 @@ function Dashboard({ setIsAuthenticated }) {
       <div className="dashboard-content">
         <h2>Select Production Type</h2>
         <div className="production-cards">
+          <div className="production-card" onClick={() => navigate('/admin')}>
+            <div className="card-icon">⚙️</div>
+            <h3>Admin Configuration</h3>
+            <p>Configure Odoo API and manage data</p>
+          </div>
           <div className="production-card" onClick={() => navigate('/production/liquid')}>
             <div className="card-icon">💧</div>
             <h3>Production Liquid</h3>

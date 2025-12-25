@@ -5,6 +5,7 @@ import Dashboard from './components/Dashboard';
 import ProductionLiquid from './components/ProductionLiquid';
 import ProductionDevice from './components/ProductionDevice';
 import ProductionCartridge from './components/ProductionCartridge';
+import Admin from './components/Admin';
 import './App.css';
 
 function App() {
@@ -53,6 +54,14 @@ function App() {
             element={
               isAuthenticated ? 
                 <ProductionCartridge /> : 
+                <Navigate to="/login" />
+            } 
+          />
+          <Route 
+            path="/admin" 
+            element={
+              isAuthenticated ? 
+                <Admin /> : 
                 <Navigate to="/login" />
             } 
           />
