@@ -1,11 +1,83 @@
 # Manufacturing Process API Documentation
 
+## 🔐 API Authentication
+
+Semua endpoint external API memerlukan API key untuk autentikasi. API key dapat di-generate dan dikonfigurasi melalui halaman Admin.
+
+### Cara Menggunakan API Key
+
+#### Option 1: Menggunakan Header `X-API-Key`
+```bash
+curl -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28246&completed_at=all" \
+  -H "X-API-Key: your_api_key_here"
+```
+
+#### Option 2: Menggunakan Header `Authorization` (Bearer Token)
+```bash
+curl -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28246&completed_at=all" \
+  -H "Authorization: Bearer your_api_key_here"
+```
+
+### Generate API Key
+
+1. Login ke halaman Admin
+2. Buka halaman Admin Configuration
+3. Klik tombol "Generate API Key"
+4. **PENTING**: Simpan API key yang di-generate dengan aman - API key hanya ditampilkan sekali saat di-generate
+5. Gunakan API key ini di semua request ke external API endpoints
+
+### Catatan Keamanan
+
+- ⚠️ **Jika API key belum dikonfigurasi**, endpoint external API dapat diakses tanpa autentikasi (backward compatibility)
+- ✅ **Setelah API key dikonfigurasi**, semua request ke external API **harus** menyertakan API key yang valid
+- 🔒 API key disimpan di database dengan format terenkripsi
+- 📝 API key yang ditampilkan di halaman Admin adalah versi yang di-mask (hanya 8 karakter terakhir yang terlihat)
+
+### Error Responses
+
+#### Missing API Key
+```json
+{
+  "success": false,
+  "error": "API key is required. Please provide X-API-Key header or Authorization Bearer token."
+}
+```
+
+#### Invalid API Key
+```json
+{
+  "success": false,
+  "error": "Invalid API key"
+}
+```
+
+---
+
 ## External API Endpoint: Get Manufacturing Data by MO Number
 
 ### Endpoint
 ```
 GET /api/external/manufacturing-data
 ```
+
+**⚠️ Requires API Key Authentication**
+
+### Authentication
+**⚠️ REQUIRED**: This endpoint requires API Key authentication.
+
+The API token must be configured in the Admin panel (Admin → Configuration → External API Authentication Token).
+
+Include the API key in the request header:
+- Header name: `X-API-Key: <your-token>`
+- Or: `Authorization: Bearer <your-token>`
+
+**Example:**
+```bash
+curl -H "X-API-Key: your-api-token-here" \
+  "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204"
+```
+
+**Note**: If no API token is configured in the Admin panel, the endpoint will be accessible without authentication (backward compatibility mode). However, **it is strongly recommended to configure an API token for production use**.
 
 ### Description
 Retrieve comprehensive manufacturing process data for a specific MO Number, **only for completed records**. The API returns all sessions, production data, buffer authenticity, and rejected authenticity for MO entries that have been marked as completed.
@@ -72,23 +144,35 @@ Retrieve comprehensive manufacturing process data for a specific MO Number, **on
 
 #### Example 1: Get all completed data for a specific MO Number (bash/Linux/Mac)
 ```bash
-curl -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all"
+# With API Key authentication
+curl -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all" \
+  -H "X-API-Key: your_api_key_here"
+
+# Or using Authorization header
+curl -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all" \
+  -H "Authorization: Bearer your_api_key_here"
 ```
 
 #### Example 2: PowerShell (Windows)
 PowerShell uses `Invoke-RestMethod` or `Invoke-WebRequest`. Use this format:
 
 ```powershell
+# Set your API key
+$apiKey = "your_api_key_here"
+
 # Option 1: Using Invoke-RestMethod (recommended, returns parsed JSON)
-$response = Invoke-RestMethod -Uri "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all" -Method Get
+$headers = @{
+    "X-API-Key" = $apiKey
+}
+$response = Invoke-RestMethod -Uri "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all" -Method Get -Headers $headers
 $response | ConvertTo-Json -Depth 10
 
 # Option 2: Using Invoke-WebRequest (returns full HTTP response)
-$response = Invoke-WebRequest -Uri "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all" -Method Get
+$response = Invoke-WebRequest -Uri "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all" -Method Get -Headers $headers
 $response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 10
 
 # Option 3: Using curl.exe (actual curl, not PowerShell alias)
-curl.exe -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all"
+curl.exe -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all" -H "X-API-Key: $apiKey"
 ```
 
 **Note**: In PowerShell, `curl` is an alias for `Invoke-WebRequest`. To use actual curl, use `curl.exe`.
@@ -96,22 +180,27 @@ curl.exe -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number
 #### Example 3: Get completed data with date filter
 ```bash
 # bash/Linux/Mac
-curl -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=2024-01-15"
+curl -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=2024-01-15" \
+  -H "X-API-Key: your_api_key_here"
 
 # PowerShell
-Invoke-RestMethod -Uri "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=2024-01-15" -Method Get
+$headers = @{ "X-API-Key" = "your_api_key_here" }
+Invoke-RestMethod -Uri "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=2024-01-15" -Method Get -Headers $headers
 ```
 
 #### Example 4: Using JavaScript/Axios
 ```javascript
 const axios = require('axios');
 
-async function getManufacturingData(moNumber, completedAt = 'all') {
+async function getManufacturingData(moNumber, completedAt = 'all', apiKey) {
   try {
     const response = await axios.get('http://localhost:3000/api/external/manufacturing-data', {
       params: {
         mo_number: moNumber,
         completed_at: completedAt
+      },
+      headers: {
+        'X-API-Key': apiKey  // Required: API key authentication
       }
     });
     
@@ -120,13 +209,18 @@ async function getManufacturingData(moNumber, completedAt = 'all') {
     
     return response.data;
   } catch (error) {
-    console.error('Error:', error.response?.data || error.message);
+    if (error.response?.status === 401) {
+      console.error('Authentication failed: Invalid or missing API key');
+    } else {
+      console.error('Error:', error.response?.data || error.message);
+    }
   }
 }
 
 // Usage with actual MO Number format: PROD/MO/xxxx
-getManufacturingData('PROD/MO/28204', 'all');
-getManufacturingData('PROD/MO/28204', '2024-01-15');
+const API_KEY = 'your_api_key_here';  // Get from environment variable or config
+getManufacturingData('PROD/MO/28204', 'all', API_KEY);
+getManufacturingData('PROD/MO/28204', '2024-01-15', API_KEY);
 ```
 
 ### Response Fields Description
@@ -288,6 +382,200 @@ function filterByDateRange(data, startDate, endDate) {
   );
 }
 ```
+
+---
+
+## External API Endpoint: Get MO Status
+
+### Endpoint
+```
+GET /api/external/manufacturing-data/status
+```
+
+### Authentication
+**⚠️ REQUIRED**: This endpoint requires API Key authentication (same as `/api/external/manufacturing-data`).
+
+The API token must be configured in the Admin panel (Admin → Configuration → External API Authentication Token).
+
+Include the API key in the request header:
+- Header name: `X-API-Key: <your-token>`
+- Or: `Authorization: Bearer <your-token>`
+
+### Description
+Check the overall status of a Manufacturing Order (MO) across all production types. Returns `"active"` if there are any active (not completed) inputs, or `"completed"` if all inputs for that MO are completed.
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mo_number` | string | Yes | Manufacturing Order number to check |
+| `completed_at` | string | No | Filter by completion date (format: YYYY-MM-DD) or "all" for all records |
+
+### Response Format
+
+#### If MO has active inputs:
+```json
+{
+  "status": "active"
+}
+```
+
+#### If all MO inputs are completed:
+```json
+{
+  "status": "completed"
+}
+```
+
+#### If MO not found:
+```json
+{
+  "success": false,
+  "error": "MO number not found",
+  "status": null
+}
+```
+
+### Example Requests
+
+```bash
+# With API Key
+curl -X GET "http://localhost:3000/api/external/manufacturing-data/status?mo_number=PROD/MO/28246&completed_at=all" \
+  -H "X-API-Key: your_api_key_here"
+```
+
+```javascript
+// JavaScript/Axios
+const axios = require('axios');
+
+async function getMOStatus(moNumber, apiKey) {
+  try {
+    const response = await axios.get('http://localhost:3000/api/external/manufacturing-data/status', {
+      params: {
+        mo_number: moNumber,
+        completed_at: 'all'
+      },
+      headers: {
+        'X-API-Key': apiKey
+      }
+    });
+    
+    console.log('MO Status:', response.data.status);
+    return response.data;
+  } catch (error) {
+    console.error('Error:', error.response?.data || error.message);
+  }
+}
+
+getMOStatus('PROD/MO/28246', 'your_api_key_here');
+```
+
+### Notes
+
+1. **Status Logic**: 
+   - Returns `"active"` if ANY production type (liquid/device/cartridge) has active inputs for the MO
+   - Returns `"completed"` only if ALL inputs across ALL production types are completed
+   - Returns error if MO number doesn't exist in any production table
+
+2. **Production Types**: The endpoint checks all three production types (liquid, device, cartridge) automatically.
+
+3. **Use Case**: Useful for quickly checking if an MO is still in progress or fully completed.
+
+---
+
+## API Key Setup & Configuration
+
+### Setting Up API Key
+
+#### 1. Generate Secure API Key
+
+**Linux/Mac:**
+```bash
+openssl rand -hex 32
+```
+
+**Node.js:**
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+**PowerShell (Windows):**
+```powershell
+-join ((48..57) + (65..90) + (97..122) | Get-Random -Count 64 | ForEach-Object {[char]$_})
+```
+
+#### 2. Configure in Environment File
+
+Edit `server/.env`:
+```env
+API_KEY=your_generated_api_key_here
+```
+
+#### 3. Restart Application
+
+```bash
+# Development
+npm run dev
+
+# Production (PM2)
+pm2 restart manufacturing-app
+```
+
+### Using API Key in Requests
+
+#### cURL
+```bash
+curl -H "X-API-Key: your_api_key_here" \
+  "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204"
+```
+
+#### JavaScript/Axios
+```javascript
+axios.get('http://localhost:3000/api/external/manufacturing-data', {
+  params: { mo_number: 'PROD/MO/28204' },
+  headers: { 'X-API-Key': 'your_api_key_here' }
+});
+```
+
+#### Python/Requests
+```python
+import requests
+
+headers = {'X-API-Key': 'your_api_key_here'}
+response = requests.get(
+    'http://localhost:3000/api/external/manufacturing-data',
+    params={'mo_number': 'PROD/MO/28204'},
+    headers=headers
+)
+```
+
+### Security Notes
+
+1. **Never commit API key to Git**: Always use `.env` file (already in `.gitignore`)
+2. **Use different keys for different environments**: Dev, staging, production
+3. **Rotate keys periodically**: Change API key every 3-6 months
+4. **Share keys securely**: Use secure channels (not email, not chat)
+5. **Monitor usage**: Check logs for unauthorized access attempts
+
+### Error Responses
+
+#### Missing API Key
+```json
+{
+  "success": false,
+  "error": "Unauthorized: API key is required. Please provide X-API-Key header or Authorization: Bearer <key>"
+}
+```
+
+#### Invalid API Key
+```json
+{
+  "success": false,
+  "error": "Unauthorized: Invalid API key"
+}
+```
+
+---
 
 ### Database Schema Reference
 

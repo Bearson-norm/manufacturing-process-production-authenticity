@@ -5,6 +5,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 1234;
@@ -243,8 +244,47 @@ app.get('/favicon.ico', (req, res) => {
   res.status(204).end();
 });
 
-// Serve static files (for favicon, etc.)
-app.use(express.static(path.join(__dirname, '../client/public')));
+// Helper function to get API key from database
+function getApiKey(callback) {
+  db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['api_key'], (err, row) => {
+    if (err) {
+      console.error('Error fetching API key:', err);
+      return callback(null, null);
+    }
+    const apiKey = row ? row.config_value : null;
+    callback(null, apiKey);
+  });
+}
+
+// Middleware for API key authentication
+function apiKeyAuth(req, res, next) {
+  getApiKey((err, storedApiKey) => {
+    if (err || !storedApiKey) {
+      // If no API key is configured, allow access (backward compatibility)
+      // In production, you might want to require API key
+      return next();
+    }
+    
+    // Get API key from header
+    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+    
+    if (!apiKey) {
+      return res.status(401).json({
+        success: false,
+        error: 'API key is required. Please provide X-API-Key header or Authorization Bearer token.'
+      });
+    }
+    
+    if (apiKey !== storedApiKey) {
+      return res.status(403).json({
+        success: false,
+        error: 'Invalid API key'
+      });
+    }
+    
+    next();
+  });
+}
 
 // Authentication endpoint
 app.post('/api/login', (req, res) => {
@@ -341,6 +381,85 @@ function getFallbackUrl(callback, defaultUrl) {
   });
 }
 
+// Circuit breaker state for External API
+const externalApiCircuitBreaker = {
+  state: 'CLOSED', // CLOSED, OPEN, HALF_OPEN
+  failureCount: 0,
+  lastFailureTime: null,
+  successCount: 0,
+  errorStats: {
+    '405': 0,
+    'other': 0
+  }
+};
+
+// Circuit breaker configuration
+const CIRCUIT_BREAKER_CONFIG = {
+  failureThreshold: 10, // Open circuit after 10 consecutive failures
+  resetTimeout: 300000, // 5 minutes in milliseconds
+  halfOpenMaxAttempts: 3 // Try 3 times in half-open state
+};
+
+// Helper function to check circuit breaker state
+function checkCircuitBreaker() {
+  const now = Date.now();
+  
+  // If circuit is OPEN, check if we should move to HALF_OPEN
+  if (externalApiCircuitBreaker.state === 'OPEN') {
+    if (externalApiCircuitBreaker.lastFailureTime && 
+        (now - externalApiCircuitBreaker.lastFailureTime) >= CIRCUIT_BREAKER_CONFIG.resetTimeout) {
+      externalApiCircuitBreaker.state = 'HALF_OPEN';
+      externalApiCircuitBreaker.successCount = 0;
+      return true; // Allow request
+    }
+    return false; // Block request
+  }
+  
+  // If circuit is HALF_OPEN, allow limited requests
+  if (externalApiCircuitBreaker.state === 'HALF_OPEN') {
+    return externalApiCircuitBreaker.successCount < CIRCUIT_BREAKER_CONFIG.halfOpenMaxAttempts;
+  }
+  
+  // Circuit is CLOSED, allow all requests
+  return true;
+}
+
+// Helper function to record success
+function recordCircuitBreakerSuccess() {
+  if (externalApiCircuitBreaker.state === 'HALF_OPEN') {
+    externalApiCircuitBreaker.successCount++;
+    if (externalApiCircuitBreaker.successCount >= CIRCUIT_BREAKER_CONFIG.halfOpenMaxAttempts) {
+      externalApiCircuitBreaker.state = 'CLOSED';
+      externalApiCircuitBreaker.failureCount = 0;
+      externalApiCircuitBreaker.errorStats = { '405': 0, 'other': 0 };
+    }
+  } else if (externalApiCircuitBreaker.state === 'CLOSED') {
+    externalApiCircuitBreaker.failureCount = 0;
+  }
+}
+
+// Helper function to record failure
+function recordCircuitBreakerFailure(statusCode) {
+  externalApiCircuitBreaker.failureCount++;
+  externalApiCircuitBreaker.lastFailureTime = Date.now();
+  
+  // Track error by status code
+  if (statusCode === 405) {
+    externalApiCircuitBreaker.errorStats['405']++;
+  } else {
+    externalApiCircuitBreaker.errorStats['other']++;
+  }
+  
+  // Open circuit if threshold exceeded
+  if (externalApiCircuitBreaker.failureCount >= CIRCUIT_BREAKER_CONFIG.failureThreshold) {
+    externalApiCircuitBreaker.state = 'OPEN';
+  } else if (externalApiCircuitBreaker.state === 'HALF_OPEN') {
+    // If failure in half-open, go back to open
+    externalApiCircuitBreaker.state = 'OPEN';
+    externalApiCircuitBreaker.successCount = 0;
+  }
+}
+
 // Helper function to send data to external API with specific URL
 async function sendToExternalAPIWithUrl(data, apiUrl) {
   return new Promise((resolve, reject) => {
@@ -348,6 +467,26 @@ async function sendToExternalAPIWithUrl(data, apiUrl) {
     if (!apiUrl || apiUrl.trim() === '') {
       console.log(`⚠️  [External API] External API URL not configured, skipping send`);
       return resolve({ success: true, skipped: true, message: 'External API URL not configured' });
+    }
+    
+    // Check circuit breaker
+    if (!checkCircuitBreaker()) {
+      const stats = externalApiCircuitBreaker.errorStats;
+      const totalErrors = stats['405'] + stats['other'];
+      // Only log once per minute to reduce spam
+      if (!externalApiCircuitBreaker.lastLogTime || 
+          (Date.now() - externalApiCircuitBreaker.lastLogTime) > 60000) {
+        console.log(`⚠️  [External API] Circuit breaker OPEN - skipping requests. ` +
+                   `Recent errors: 405 (${stats['405']}), Other (${stats['other']}). ` +
+                   `Will retry in ${Math.ceil((CIRCUIT_BREAKER_CONFIG.resetTimeout - (Date.now() - externalApiCircuitBreaker.lastFailureTime)) / 1000)}s`);
+        externalApiCircuitBreaker.lastLogTime = Date.now();
+      }
+      return resolve({ 
+        success: false, 
+        skipped: true, 
+        message: 'Circuit breaker is OPEN - too many failures',
+        circuitBreakerState: externalApiCircuitBreaker.state
+      });
     }
     
     try {
@@ -378,29 +517,46 @@ async function sendToExternalAPIWithUrl(data, apiUrl) {
         });
         res.on('end', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
-            console.log(`✅ [External API] Successfully sent data to ${apiUrl}`);
+            recordCircuitBreakerSuccess();
+            // Only log success if circuit was in half-open state (recovery)
+            if (externalApiCircuitBreaker.state === 'HALF_OPEN') {
+              console.log(`✅ [External API] Successfully sent data to ${apiUrl} (Circuit recovering)`);
+            }
             resolve({ success: true, statusCode: res.statusCode, data: responseData });
           } else {
-            console.error(`❌ [External API] Error response: ${res.statusCode} - ${responseData}`);
-            reject(new Error(`API returned status ${res.statusCode}: ${responseData}`));
+            recordCircuitBreakerFailure(res.statusCode);
+            // Only log non-405 errors or log 405 errors less frequently
+            if (res.statusCode !== 405) {
+              console.error(`❌ [External API] Error response: ${res.statusCode} - ${responseData.substring(0, 100)}`);
+            }
+            reject(new Error(`API returned status ${res.statusCode}: ${responseData.substring(0, 100)}`));
           }
         });
       });
       
       req.on('error', (error) => {
-        console.error(`❌ [External API] Request error:`, error.message);
+        recordCircuitBreakerFailure(0); // 0 for network errors
+        // Only log network errors occasionally
+        if (externalApiCircuitBreaker.failureCount % 10 === 0) {
+          console.error(`❌ [External API] Request error:`, error.message);
+        }
         reject(error);
       });
       
       req.setTimeout(30000, () => {
         req.destroy();
+        recordCircuitBreakerFailure(0);
         reject(new Error('Request timeout'));
       });
       
       req.write(postData);
       req.end();
     } catch (error) {
-      console.error(`❌ [External API] Error sending data:`, error.message);
+      recordCircuitBreakerFailure(0);
+      // Only log errors occasionally
+      if (externalApiCircuitBreaker.failureCount % 10 === 0) {
+        console.error(`❌ [External API] Error sending data:`, error.message);
+      }
       reject(error);
     }
   });
@@ -606,7 +762,7 @@ app.get('/api/production/cartridge', (req, res) => {
 });
 
 // External API endpoints for authenticity data
-app.get('/api/external/authenticity', async (req, res) => {
+app.get('/api/external/authenticity', apiKeyAuth, async (req, res) => {
   try {
     const data = await fetchProductionData({
       type: req.query.type,
@@ -620,7 +776,7 @@ app.get('/api/external/authenticity', async (req, res) => {
   }
 });
 
-app.post('/api/external/authenticity', async (req, res) => {
+app.post('/api/external/authenticity', apiKeyAuth, async (req, res) => {
   try {
     const { type, status, start_date, end_date } = req.body || {};
     const data = await fetchProductionData({ type, status, start_date, end_date });
@@ -631,7 +787,7 @@ app.post('/api/external/authenticity', async (req, res) => {
 });
 
 // External API endpoint for manufacturing process data by MO Number
-app.get('/api/external/manufacturing-data', async (req, res) => {
+app.get('/api/external/manufacturing-data', apiKeyAuth, async (req, res) => {
   try {
     const { mo_number, completed_at } = req.query;
     
@@ -796,7 +952,7 @@ app.get('/api/external/manufacturing-data', async (req, res) => {
 });
 
 // GET endpoint to check MO status (active or completed)
-app.get('/api/external/manufacturing-data/status', async (req, res) => {
+app.get('/api/external/manufacturing-data/status', apiKeyAuth, async (req, res) => {
   try {
     const { mo_number, completed_at } = req.query;
     
@@ -879,6 +1035,208 @@ app.get('/api/external/manufacturing-data/status', async (req, res) => {
 
   } catch (error) {
     console.error('Error checking MO status:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+// GET endpoint to get all MOs completed on a specific date
+app.get('/api/external/manufacturing-data/by-date', apiKeyAuth, async (req, res) => {
+  try {
+    const { completed_at } = req.query;
+    
+    if (!completed_at) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'completed_at parameter is required. Format: YYYY-MM-DD' 
+      });
+    }
+
+    // Query all production tables
+    const tables = [
+      { name: 'production_liquid', type: 'liquid' },
+      { name: 'production_device', type: 'device' },
+      { name: 'production_cartridge', type: 'cartridge' }
+    ];
+
+    const productionPromises = tables.map(table => {
+      return new Promise((resolve, reject) => {
+        let query = `SELECT *, '${table.type}' as production_type FROM ${table.name} WHERE status = 'completed' AND completed_at IS NOT NULL AND DATE(completed_at) = DATE(?)`;
+        const params = [completed_at];
+        
+        query += ` ORDER BY completed_at ASC, mo_number ASC`;
+        
+        db.all(query, params, (err, rows) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve(rows.map(row => parseAuthenticityData(row)));
+        });
+      });
+    });
+
+    // Query buffer tables for all MOs
+    const bufferPromises = [
+      { name: 'buffer_liquid', type: 'liquid' },
+      { name: 'buffer_device', type: 'device' },
+      { name: 'buffer_cartridge', type: 'cartridge' }
+    ].map(table => {
+      return new Promise((resolve, reject) => {
+        // Get buffer data for MOs that were completed on the target date
+        db.all(
+          `SELECT b.* FROM ${table.name} b 
+           INNER JOIN (
+             SELECT DISTINCT mo_number FROM (
+               SELECT mo_number FROM production_liquid WHERE status = 'completed' AND completed_at IS NOT NULL AND DATE(completed_at) = DATE(?)
+               UNION
+               SELECT mo_number FROM production_device WHERE status = 'completed' AND completed_at IS NOT NULL AND DATE(completed_at) = DATE(?)
+               UNION
+               SELECT mo_number FROM production_cartridge WHERE status = 'completed' AND completed_at IS NOT NULL AND DATE(completed_at) = DATE(?)
+             )
+           ) p ON b.mo_number = p.mo_number
+           ORDER BY b.created_at ASC`,
+          [completed_at, completed_at, completed_at],
+          (err, rows) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve(rows.map(row => ({
+              ...row,
+              authenticity_numbers: typeof row.authenticity_numbers === 'string' 
+                ? JSON.parse(row.authenticity_numbers) 
+                : row.authenticity_numbers
+            })));
+          }
+        );
+      });
+    });
+
+    // Query reject tables for all MOs
+    const rejectPromises = [
+      { name: 'reject_liquid', type: 'liquid' },
+      { name: 'reject_device', type: 'device' },
+      { name: 'reject_cartridge', type: 'cartridge' }
+    ].map(table => {
+      return new Promise((resolve, reject) => {
+        // Get reject data for MOs that were completed on the target date
+        db.all(
+          `SELECT r.* FROM ${table.name} r 
+           INNER JOIN (
+             SELECT DISTINCT mo_number FROM (
+               SELECT mo_number FROM production_liquid WHERE status = 'completed' AND completed_at IS NOT NULL AND DATE(completed_at) = DATE(?)
+               UNION
+               SELECT mo_number FROM production_device WHERE status = 'completed' AND completed_at IS NOT NULL AND DATE(completed_at) = DATE(?)
+               UNION
+               SELECT mo_number FROM production_cartridge WHERE status = 'completed' AND completed_at IS NOT NULL AND DATE(completed_at) = DATE(?)
+             )
+           ) p ON r.mo_number = p.mo_number
+           ORDER BY r.created_at ASC`,
+          [completed_at, completed_at, completed_at],
+          (err, rows) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve(rows.map(row => ({
+              ...row,
+              authenticity_numbers: typeof row.authenticity_numbers === 'string' 
+                ? JSON.parse(row.authenticity_numbers) 
+                : row.authenticity_numbers
+            })));
+          }
+        );
+      });
+    });
+
+    const [productionResults, bufferResults, rejectResults] = await Promise.all([
+      Promise.all(productionPromises),
+      Promise.all(bufferPromises),
+      Promise.all(rejectPromises)
+    ]);
+
+    // Flatten results
+    const allProduction = productionResults.flat();
+    const allBuffers = bufferResults.flat();
+    const allRejects = rejectResults.flat();
+
+    if (allProduction.length === 0) {
+      return res.json({
+        success: true,
+        completed_at: completed_at,
+        total_mo: 0,
+        total_sessions: 0,
+        data: []
+      });
+    }
+
+    // Get unique MO numbers
+    const uniqueMoNumbers = [...new Set(allProduction.map(row => row.mo_number))];
+
+    // Group by MO number first, then by session_id
+    const moGroups = {};
+    uniqueMoNumbers.forEach(moNumber => {
+      moGroups[moNumber] = {
+        mo_number: moNumber,
+        sessions: {}
+      };
+    });
+
+    // Group production data by MO and session
+    allProduction.forEach(row => {
+      const moNumber = row.mo_number;
+      const sessionKey = row.session_id;
+      
+      if (!moGroups[moNumber].sessions[sessionKey]) {
+        moGroups[moNumber].sessions[sessionKey] = {
+          session: sessionKey,
+          leader: row.leader_name,
+          shift: row.shift_number,
+          mo_data: []
+        };
+      }
+
+      // Add production data
+      moGroups[moNumber].sessions[sessionKey].mo_data.push({
+        mo_number: row.mo_number,
+        sku_name: row.sku_name,
+        pic: row.pic,
+        production_type: row.production_type,
+        completed_at: row.completed_at || null,
+        authenticity_data: row.authenticity_data.map(auth => ({
+          first_authenticity: auth.firstAuthenticity || '',
+          last_authenticity: auth.lastAuthenticity || '',
+          roll_number: auth.rollNumber || ''
+        })),
+        buffered_auth: allBuffers
+          .filter(b => b.mo_number === row.mo_number)
+          .flatMap(b => b.authenticity_numbers),
+        rejected_auth: allRejects
+          .filter(r => r.mo_number === row.mo_number)
+          .flatMap(r => r.authenticity_numbers)
+      });
+    });
+
+    // Convert to array format
+    const result = Object.values(moGroups).map(moGroup => ({
+      mo_number: moGroup.mo_number,
+      total_sessions: Object.keys(moGroup.sessions).length,
+      sessions: Object.values(moGroup.sessions)
+    }));
+
+    res.json({
+      success: true,
+      completed_at: completed_at,
+      total_mo: uniqueMoNumbers.length,
+      total_sessions: Object.values(moGroups).reduce((sum, mo) => sum + Object.keys(mo.sessions).length, 0),
+      data: result
+    });
+
+  } catch (error) {
+    console.error('Error fetching manufacturing data by date:', error);
     res.status(500).json({ 
       success: false,
       error: error.message 
@@ -1668,39 +2026,99 @@ app.get('/api/admin/config', (req, res) => {
           
           // Get external API URLs (active and completed)
           db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['external_api_url_active'], (err3, row3) => {
-            if (err3) {
-              console.error('Error fetching external_api_url_active config:', err3);
-            }
-            
-            const externalApiUrlActive = row3 ? row3.config_value : (process.env.EXTERNAL_API_URL_ACTIVE || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
-            
-            db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['external_api_url_completed'], (err4, row4) => {
-              if (err4) {
-                console.error('Error fetching external_api_url_completed config:', err4);
+            try {
+              if (err3) {
+                console.error('Error fetching external_api_url_active config:', err3);
               }
               
-              const externalApiUrlCompleted = row4 ? row4.config_value : (process.env.EXTERNAL_API_URL_COMPLETED || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
+              const externalApiUrlActive = row3 ? row3.config_value : (process.env.EXTERNAL_API_URL_ACTIVE || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
               
-              // Also get fallback general external_api_url for backward compatibility
-              db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['external_api_url'], (err5, row5) => {
-                if (err5) {
-                  console.error('Error fetching external_api_url config:', err5);
-                }
-                
-                const externalApiUrl = row5 ? row5.config_value : (process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
-                
-                res.json({
-                  success: true,
-                  config: {
-                    sessionId: sessionId,
-                    odooBaseUrl: odooBaseUrl,
-                    externalApiUrl: externalApiUrl,
-                    externalApiUrlActive: externalApiUrlActive,
-                    externalApiUrlCompleted: externalApiUrlCompleted
+              db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['external_api_url_completed'], (err4, row4) => {
+                try {
+                  if (err4) {
+                    console.error('Error fetching external_api_url_completed config:', err4);
                   }
-                });
+                  
+                  const externalApiUrlCompleted = row4 ? row4.config_value : (process.env.EXTERNAL_API_URL_COMPLETED || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
+                  
+                  // Also get fallback general external_api_url for backward compatibility
+                  db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['external_api_url'], (err5, row5) => {
+                    try {
+                      if (err5) {
+                        console.error('Error fetching external_api_url config:', err5);
+                      }
+                      
+                      const externalApiUrl = row5 ? row5.config_value : (process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
+                      
+                      // Get API key (masked for security)
+                      db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['api_key'], (err6, row6) => {
+                        try {
+                          if (err6) {
+                            console.error('Error fetching api_key config:', err6);
+                          }
+                          
+                          const apiKey = row6 ? row6.config_value : null;
+                          // Mask API key for display (show only last 8 characters)
+                          let maskedApiKey = null;
+                          if (apiKey && typeof apiKey === 'string' && apiKey.length > 8) {
+                            maskedApiKey = apiKey.substring(0, apiKey.length - 8) + '********';
+                          } else if (apiKey && typeof apiKey === 'string') {
+                            // If API key is too short, just show all as masked
+                            maskedApiKey = '********';
+                          }
+                          
+                          res.json({
+                            success: true,
+                            config: {
+                              sessionId: sessionId,
+                              odooBaseUrl: odooBaseUrl,
+                              externalApiUrl: externalApiUrl,
+                              externalApiUrlActive: externalApiUrlActive,
+                              externalApiUrlCompleted: externalApiUrlCompleted,
+                              apiKey: maskedApiKey,
+                              apiKeyConfigured: !!apiKey
+                            }
+                          });
+                        } catch (error) {
+                          console.error('Error processing API key config:', error);
+                          // Return response even if API key processing fails
+                          res.json({
+                            success: true,
+                            config: {
+                              sessionId: sessionId,
+                              odooBaseUrl: odooBaseUrl,
+                              externalApiUrl: externalApiUrl,
+                              externalApiUrlActive: externalApiUrlActive,
+                              externalApiUrlCompleted: externalApiUrlCompleted,
+                              apiKey: null,
+                              apiKeyConfigured: false
+                            }
+                          });
+                        }
+                      });
+                    } catch (error) {
+                      console.error('Error processing external_api_url config:', error);
+                      res.status(500).json({
+                        success: false,
+                        error: error.message || 'Internal server error'
+                      });
+                    }
+                  });
+                } catch (error) {
+                  console.error('Error processing external_api_url_completed config:', error);
+                  res.status(500).json({
+                    success: false,
+                    error: error.message || 'Internal server error'
+                  });
+                }
               });
-            });
+            } catch (error) {
+              console.error('Error processing external_api_url_active config:', error);
+              res.status(500).json({
+                success: false,
+                error: error.message || 'Internal server error'
+              });
+            }
           });
         });
       });
@@ -1716,7 +2134,7 @@ app.get('/api/admin/config', (req, res) => {
 
 // PUT admin configuration
 app.put('/api/admin/config', (req, res) => {
-  const { sessionId, odooBaseUrl, externalApiUrl, externalApiUrlActive, externalApiUrlCompleted } = req.body;
+  const { sessionId, odooBaseUrl, externalApiUrl, externalApiUrlActive, externalApiUrlCompleted, apiKey } = req.body;
   
   if (sessionId && sessionId.length < 20) {
     return res.status(400).json({ success: false, error: 'Session ID must be at least 20 characters' });
@@ -1840,6 +2258,27 @@ app.put('/api/admin/config', (req, res) => {
               return res.status(500).json({ success: false, error: err5.message });
             }
             
+            saveApiKey();
+          }
+        );
+      } else {
+        saveApiKey();
+      }
+    }
+    
+    function saveApiKey() {
+      // Save API key if provided (only if explicitly set, not on every config save)
+      if (apiKey !== undefined && apiKey !== null && apiKey !== '') {
+        db.run(
+          `INSERT OR REPLACE INTO admin_config (config_key, config_value, updated_at) 
+           VALUES ('api_key', ?, CURRENT_TIMESTAMP)`,
+          [apiKey],
+          function(err6) {
+            if (err6) {
+              console.error('Error saving api_key config:', err6);
+              return res.status(500).json({ success: false, error: err6.message });
+            }
+            
             res.json({ success: true, message: 'Configuration saved successfully' });
           }
         );
@@ -1847,6 +2286,61 @@ app.put('/api/admin/config', (req, res) => {
         res.json({ success: true, message: 'Configuration saved successfully' });
       }
     }
+  }
+});
+
+// Generate API Key endpoint
+app.post('/api/admin/generate-api-key', (req, res) => {
+  try {
+    // Generate a secure random API key (64 characters)
+    const apiKey = crypto.randomBytes(32).toString('hex');
+    
+    // Check if table exists, if not create it
+    db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='admin_config'", (tableErr, tableRow) => {
+      if (tableErr || !tableRow) {
+        // Create table if it doesn't exist
+        db.run(`CREATE TABLE IF NOT EXISTS admin_config (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          config_key TEXT NOT NULL UNIQUE,
+          config_value TEXT,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`, (createErr) => {
+          if (createErr) {
+            return res.status(500).json({ success: false, error: createErr.message });
+          }
+          // Continue with save after table creation
+          saveApiKey();
+        });
+      } else {
+        // Table exists, proceed with save
+        saveApiKey();
+      }
+    });
+    
+    function saveApiKey() {
+      db.run(
+        `INSERT OR REPLACE INTO admin_config (config_key, config_value, updated_at) 
+         VALUES ('api_key', ?, CURRENT_TIMESTAMP)`,
+        [apiKey],
+        function(err) {
+          if (err) {
+            console.error('Error saving API key:', err);
+            return res.status(500).json({ success: false, error: err.message });
+          }
+          
+          // Return the API key (only shown once when generated)
+          res.json({ 
+            success: true, 
+            message: 'API key generated successfully',
+            apiKey: apiKey,
+            warning: 'Please save this API key securely. It will not be shown again.'
+          });
+        }
+      );
+    }
+  } catch (error) {
+    console.error('Error generating API key:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -3347,27 +3841,100 @@ async function sendMoListToExternalAPI() {
           return;
         }
         
+        // Check circuit breaker before attempting
+        if (!checkCircuitBreaker()) {
+          const stats = externalApiCircuitBreaker.errorStats;
+          console.log(`⚠️  [Scheduler] Circuit breaker is OPEN - skipping MO list send. ` +
+                     `Recent errors: 405 (${stats['405']}), Other (${stats['other']})`);
+          return;
+        }
+        
         try {
           // Try sending as array first (list format)
           await sendToExternalAPIWithUrl({ mo_list: moList }, fallbackUrl);
           console.log(`✅ [Scheduler] Successfully sent MO list (${moList.length} items) to external API`);
         } catch (arrayError) {
-          // If array format fails, try sending individual items
-          console.log(`⚠️  [Scheduler] Array format failed, trying individual items...`);
+          // If array format fails, try sending individual items with batch processing
+          console.log(`⚠️  [Scheduler] Array format failed, trying individual items in batches...`);
+          
+          const BATCH_SIZE = 10; // Process 10 items at a time
+          const BATCH_DELAY = 2000; // 2 seconds delay between batches
           let successCount = 0;
           let errorCount = 0;
+          let skippedCount = 0;
+          const errorDetails = {
+            '405': [],
+            'other': [],
+            'network': []
+          };
           
-          for (const moData of moList) {
-            try {
-              await sendToExternalAPIWithUrl(moData, fallbackUrl);
-              successCount++;
-            } catch (apiError) {
-              console.error(`❌ [Scheduler] Failed to send MO ${moData.mo}:`, apiError.message);
-              errorCount++;
+          // Process in batches
+          for (let i = 0; i < moList.length; i += BATCH_SIZE) {
+            const batch = moList.slice(i, i + BATCH_SIZE);
+            
+            // Check circuit breaker before each batch
+            if (!checkCircuitBreaker()) {
+              skippedCount += batch.length;
+              continue;
+            }
+            
+            // Process batch in parallel
+            const batchPromises = batch.map(async (moData) => {
+              try {
+                const result = await sendToExternalAPIWithUrl(moData, fallbackUrl);
+                if (result.success) {
+                  successCount++;
+                } else if (result.skipped) {
+                  skippedCount++;
+                }
+              } catch (apiError) {
+                errorCount++;
+                // Categorize errors
+                const errorMsg = apiError.message || '';
+                if (errorMsg.includes('405')) {
+                  errorDetails['405'].push(moData.mo);
+                } else if (errorMsg.includes('timeout') || errorMsg.includes('ECONNREFUSED') || errorMsg.includes('ENOTFOUND')) {
+                  errorDetails['network'].push(moData.mo);
+                } else {
+                  errorDetails['other'].push(moData.mo);
+                }
+              }
+            });
+            
+            await Promise.all(batchPromises);
+            
+            // Add delay between batches (except for the last batch)
+            if (i + BATCH_SIZE < moList.length) {
+              await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
             }
           }
           
-          console.log(`✅ [Scheduler] Completed sending MO list. Success: ${successCount}, Errors: ${errorCount}`);
+          // Summary logging instead of individual errors
+          const totalProcessed = successCount + errorCount + skippedCount;
+          console.log(`📊 [Scheduler] Completed sending MO list:`);
+          console.log(`   ✅ Success: ${successCount}`);
+          console.log(`   ❌ Errors: ${errorCount}`);
+          console.log(`   ⏭️  Skipped (circuit breaker): ${skippedCount}`);
+          
+          // Only show error details if there are errors and not too many
+          if (errorCount > 0 && errorCount <= 20) {
+            if (errorDetails['405'].length > 0) {
+              console.log(`   ⚠️  405 Errors (${errorDetails['405'].length}): ${errorDetails['405'].slice(0, 5).join(', ')}${errorDetails['405'].length > 5 ? '...' : ''}`);
+            }
+            if (errorDetails['network'].length > 0) {
+              console.log(`   ⚠️  Network Errors (${errorDetails['network'].length}): ${errorDetails['network'].slice(0, 5).join(', ')}${errorDetails['network'].length > 5 ? '...' : ''}`);
+            }
+            if (errorDetails['other'].length > 0) {
+              console.log(`   ⚠️  Other Errors (${errorDetails['other'].length}): ${errorDetails['other'].slice(0, 5).join(', ')}${errorDetails['other'].length > 5 ? '...' : ''}`);
+            }
+          } else if (errorCount > 20) {
+            console.log(`   ⚠️  Too many errors (${errorCount}) - circuit breaker may activate`);
+          }
+          
+          // Log circuit breaker state if open
+          if (externalApiCircuitBreaker.state === 'OPEN') {
+            console.log(`   🔴 Circuit breaker is OPEN - future requests will be skipped`);
+          }
         }
       }, process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
     });
@@ -3425,6 +3992,17 @@ console.log('   - MO data update: Every 6 hours');
 console.log('   - Cleanup old MO data: Daily at 2 AM');
 console.log('   - Sync production data: Every 12 hours');
 console.log('   - Send MO list to external API: Every 6 hours (10 minutes after MO update)');
+
+// Serve static files AFTER all API routes (only for non-API routes)
+const staticMiddleware = express.static(path.join(__dirname, '../client/public'));
+app.use((req, res, next) => {
+  // Skip static file serving for API routes
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
+  // Serve static files for non-API routes
+  staticMiddleware(req, res, next);
+});
 
 // Error handling middleware (must be last, after all routes)
 app.use((err, req, res, next) => {

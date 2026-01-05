@@ -1,0 +1,284 @@
+{
+	"info": {
+		"_postman_id": "mo-completed-by-date-collection",
+		"name": "Get Semua MO Selesai per Tanggal",
+		"description": "Koleksi Postman untuk mendapatkan semua Manufacturing Order (MO) yang selesai pada tanggal tertentu tanpa perlu menyebutkan mo_number. Endpoint ini memerlukan API key authentication.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Get Semua MO Selesai per Tanggal",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"type": "text",
+						"description": "API Key untuk autentikasi"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-data/by-date?completed_at={{target_date}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-data",
+						"by-date"
+					],
+					"query": [
+						{
+							"key": "completed_at",
+							"value": "{{target_date}}",
+							"description": "Tanggal selesai dalam format YYYY-MM-DD (contoh: 2024-01-15). Parameter ini wajib."
+						}
+					]
+				},
+				"description": "Mendapatkan semua Manufacturing Order yang selesai pada tanggal tertentu. Tidak perlu menyebutkan mo_number, endpoint ini akan mengembalikan semua MO yang selesai pada tanggal yang ditentukan."
+			},
+			"response": [
+				{
+					"name": "Success - Semua MO Selesai pada Tanggal",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-data/by-date?completed_at=2024-01-15",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-data",
+								"by-date"
+							],
+							"query": [
+								{
+									"key": "completed_at",
+									"value": "2024-01-15"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"body": "{\n    \"success\": true,\n    \"completed_at\": \"2024-01-15\",\n    \"total_mo\": 3,\n    \"total_sessions\": 5,\n    \"data\": [\n        {\n            \"mo_number\": \"MO001\",\n            \"total_sessions\": 2,\n            \"sessions\": [\n                {\n                    \"session\": \"session_1234567890\",\n                    \"leader\": \"John Doe\",\n                    \"shift\": \"1\",\n                    \"mo_data\": [\n                        {\n                            \"mo_number\": \"MO001\",\n                            \"sku_name\": \"Product A\",\n                            \"pic\": \"PIC001\",\n                            \"production_type\": \"liquid\",\n                            \"completed_at\": \"2024-01-15T10:30:00.000Z\",\n                            \"authenticity_data\": [\n                                {\n                                    \"first_authenticity\": \"AUTH001\",\n                                    \"last_authenticity\": \"AUTH100\",\n                                    \"roll_number\": \"ROLL001\"\n                                }\n                            ],\n                            \"buffered_auth\": [],\n                            \"rejected_auth\": []\n                        }\n                    ]\n                }\n            ]\n        },\n        {\n            \"mo_number\": \"MO002\",\n            \"total_sessions\": 1,\n            \"sessions\": [...]\n        },\n        {\n            \"mo_number\": \"MO003\",\n            \"total_sessions\": 2,\n            \"sessions\": [...]\n        }\n    ]\n}"
+				},
+				{
+					"name": "Error - completed_at Required",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-data/by-date",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-data",
+								"by-date"
+							],
+							"query": []
+						}
+					},
+					"status": "Bad Request",
+					"code": 400,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"body": "{\n    \"success\": false,\n    \"error\": \"completed_at parameter is required. Format: YYYY-MM-DD\"\n}"
+				},
+				{
+					"name": "Error - Invalid API Key",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-data/by-date?completed_at=2024-01-15",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-data",
+								"by-date"
+							],
+							"query": [
+								{
+									"key": "completed_at",
+									"value": "2024-01-15"
+								}
+							]
+						}
+					},
+					"status": "Unauthorized",
+					"code": 401,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"body": "{\n    \"success\": false,\n    \"error\": \"API key is required. Please provide X-API-Key header or Authorization Bearer token.\"\n}"
+				},
+				{
+					"name": "Success - Tidak Ada MO Selesai",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-data/by-date?completed_at=2024-12-31",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-data",
+								"by-date"
+							],
+							"query": [
+								{
+									"key": "completed_at",
+									"value": "2024-12-31"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"body": "{\n    \"success\": true,\n    \"completed_at\": \"2024-12-31\",\n    \"total_mo\": 0,\n    \"total_sessions\": 0,\n    \"data\": []\n}"
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:1234",
+			"type": "string",
+			"description": "Base URL untuk API server"
+		},
+		{
+			"key": "api_key",
+			"value": "your-api-key-here",
+			"type": "string",
+			"description": "API Key untuk autentikasi"
+		},
+		{
+			"key": "target_date",
+			"value": "2024-01-15",
+			"type": "string",
+			"description": "Tanggal selesai dalam format YYYY-MM-DD. Otomatis di-set ke tanggal hari ini."
+		}
+	],
+	"auth": {
+		"type": "apikey",
+		"apikey": [
+			{
+				"key": "value",
+				"value": "{{api_key}}",
+				"type": "string"
+			},
+			{
+				"key": "key",
+				"value": "X-API-Key",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Script untuk generate tanggal hari ini secara otomatis",
+					"// Format: YYYY-MM-DD",
+					"const today = new Date();",
+					"const year = today.getFullYear();",
+					"const month = String(today.getMonth() + 1).padStart(2, '0');",
+					"const day = String(today.getDate()).padStart(2, '0');",
+					"const todayDate = `${year}-${month}-${day}`;",
+					"",
+					"// Set variable target_date jika belum di-set atau masih default",
+					"if (!pm.variables.get('target_date') || pm.variables.get('target_date') === '2024-01-15') {",
+					"    pm.variables.set('target_date', todayDate);",
+					"}"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Test script untuk validasi response",
+					"pm.test('Status code is 200', function () {",
+					"    pm.response.to.have.status(200);",
+					"});",
+					"",
+					"pm.test('Response has success field', function () {",
+					"    const jsonData = pm.response.json();",
+					"    pm.expect(jsonData).to.have.property('success');",
+					"});",
+					"",
+					"pm.test('Response contains completed_at date', function () {",
+					"    const jsonData = pm.response.json();",
+					"    if (jsonData.success) {",
+					"        pm.expect(jsonData).to.have.property('completed_at');",
+					"        pm.expect(jsonData).to.have.property('total_mo');",
+					"        pm.expect(jsonData).to.have.property('data');",
+					"    }",
+					"});"
+				]
+			}
+		}
+	]
+}
