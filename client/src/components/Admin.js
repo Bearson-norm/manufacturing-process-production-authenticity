@@ -18,10 +18,15 @@ function Admin() {
   const [message, setMessage] = useState({ type: '', text: '' });
   const [moStats, setMoStats] = useState({ total: 0, last7Days: 0, deleted: 0 });
   const [syncStats, setSyncStats] = useState({ synced: 0, total: 0 });
+  const [picList, setPicList] = useState([]);
+  const [newPicName, setNewPicName] = useState('');
+  const [editingPic, setEditingPic] = useState(null);
+  const [picMessage, setPicMessage] = useState({ type: '', text: '' });
 
   useEffect(() => {
     fetchConfig();
     fetchMoStats();
+    fetchPicList();
   }, []);
 
   const fetchConfig = async () => {
@@ -51,6 +56,78 @@ function Admin() {
     } catch (error) {
       console.error('Error fetching MO stats:', error);
     }
+  };
+
+  const fetchPicList = async () => {
+    try {
+      const response = await axios.get('/api/pic/all');
+      if (response.data.success) {
+        setPicList(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching PIC list:', error);
+    }
+  };
+
+  const handleAddPic = async () => {
+    if (!newPicName.trim()) {
+      setPicMessage({ type: 'error', text: 'Nama PIC tidak boleh kosong' });
+      return;
+    }
+
+    try {
+      const response = await axios.post('/api/pic/add', { name: newPicName.trim() });
+      if (response.data.success) {
+        setPicMessage({ type: 'success', text: 'PIC berhasil ditambahkan' });
+        setNewPicName('');
+        fetchPicList();
+      } else {
+        setPicMessage({ type: 'error', text: response.data.error || 'Gagal menambahkan PIC' });
+      }
+    } catch (error) {
+      setPicMessage({ type: 'error', text: error.response?.data?.error || 'Gagal menambahkan PIC' });
+    }
+  };
+
+  const handleUpdatePic = async (id, name, is_active) => {
+    try {
+      const response = await axios.put(`/api/pic/update/${id}`, { name, is_active });
+      if (response.data.success) {
+        setPicMessage({ type: 'success', text: 'PIC berhasil diupdate' });
+        setEditingPic(null);
+        fetchPicList();
+      } else {
+        setPicMessage({ type: 'error', text: response.data.error || 'Gagal mengupdate PIC' });
+      }
+    } catch (error) {
+      setPicMessage({ type: 'error', text: error.response?.data?.error || 'Gagal mengupdate PIC' });
+    }
+  };
+
+  const handleDeletePic = async (id) => {
+    if (!window.confirm('Apakah Anda yakin ingin menonaktifkan PIC ini?')) {
+      return;
+    }
+
+    try {
+      const response = await axios.delete(`/api/pic/delete/${id}`);
+      if (response.data.success) {
+        setPicMessage({ type: 'success', text: 'PIC berhasil dinonaktifkan' });
+        fetchPicList();
+      } else {
+        setPicMessage({ type: 'error', text: response.data.error || 'Gagal menonaktifkan PIC' });
+      }
+    } catch (error) {
+      setPicMessage({ type: 'error', text: error.response?.data?.error || 'Gagal menonaktifkan PIC' });
+    }
+  };
+
+  const handleTogglePicStatus = async (id, currentStatus) => {
+    const pic = picList.find(p => p.id === id);
+    if (!pic) return;
+    
+    const newStatus = currentStatus === 1 ? 0 : 1;
+    await handleUpdatePic(id, pic.name, newStatus);
   };
 
   const handleGenerateApiKey = async () => {
@@ -692,6 +769,175 @@ function Admin() {
                 <li>Scheduler untuk pengiriman MO list berjalan setiap 6 jam (10 menit setelah update MO data) dan menggunakan URL fallback</li>
               </ul>
             </div>
+          </div>
+        </div>
+
+        {/* PIC Management Section */}
+        <div className="config-section" style={{ marginTop: '24px' }}>
+          <h2>📋 PIC (Person in Charge) Management</h2>
+          <p className="section-description">
+            Kelola daftar PIC yang dapat dipilih pada form Input Authenticity. PIC yang aktif akan muncul di dropdown.
+          </p>
+
+          {picMessage.text && (
+            <div className={`message ${picMessage.type}`} style={{ marginBottom: '16px' }}>
+              {picMessage.text}
+            </div>
+          )}
+
+          {/* Add New PIC */}
+          <div className="pic-add-section" style={{ marginBottom: '24px', padding: '16px', background: '#1e293b', borderRadius: '8px', border: '1px solid #334155' }}>
+            <h3 style={{ color: '#e2e8f0', fontSize: '16px', marginBottom: '12px' }}>Tambah PIC Baru</h3>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <input
+                type="text"
+                value={newPicName}
+                onChange={(e) => setNewPicName(e.target.value)}
+                placeholder="Masukkan nama PIC"
+                onKeyPress={(e) => e.key === 'Enter' && handleAddPic()}
+                style={{
+                  flex: 1,
+                  padding: '10px 12px',
+                  background: '#0f172a',
+                  border: '1px solid #374151',
+                  borderRadius: '6px',
+                  color: '#e2e8f0',
+                  fontSize: '14px'
+                }}
+              />
+              <button 
+                onClick={handleAddPic}
+                style={{
+                  padding: '10px 24px',
+                  background: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Tambah
+              </button>
+            </div>
+          </div>
+
+          {/* PIC List */}
+          <div className="pic-list-section">
+            <h3 style={{ color: '#e2e8f0', fontSize: '16px', marginBottom: '12px' }}>Daftar PIC ({picList.length})</h3>
+            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              {picList.length === 0 ? (
+                <p style={{ color: '#94a3b8', textAlign: 'center', padding: '24px' }}>Tidak ada PIC</p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#1e293b', zIndex: 1 }}>
+                    <tr style={{ borderBottom: '2px solid #334155' }}>
+                      <th style={{ padding: '12px', textAlign: 'left', color: '#e2e8f0', fontWeight: '600', fontSize: '14px' }}>No</th>
+                      <th style={{ padding: '12px', textAlign: 'left', color: '#e2e8f0', fontWeight: '600', fontSize: '14px' }}>Nama PIC</th>
+                      <th style={{ padding: '12px', textAlign: 'center', color: '#e2e8f0', fontWeight: '600', fontSize: '14px' }}>Status</th>
+                      <th style={{ padding: '12px', textAlign: 'center', color: '#e2e8f0', fontWeight: '600', fontSize: '14px' }}>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {picList.map((pic, index) => (
+                      <tr key={pic.id} style={{ borderBottom: '1px solid #334155' }}>
+                        <td style={{ padding: '12px', color: '#cbd5e1', fontSize: '14px' }}>{index + 1}</td>
+                        <td style={{ padding: '12px', color: '#e2e8f0', fontSize: '14px' }}>
+                          {editingPic === pic.id ? (
+                            <input
+                              type="text"
+                              defaultValue={pic.name}
+                              onBlur={(e) => {
+                                if (e.target.value.trim() && e.target.value !== pic.name) {
+                                  handleUpdatePic(pic.id, e.target.value.trim(), pic.is_active);
+                                } else {
+                                  setEditingPic(null);
+                                }
+                              }}
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter') {
+                                  if (e.target.value.trim() && e.target.value !== pic.name) {
+                                    handleUpdatePic(pic.id, e.target.value.trim(), pic.is_active);
+                                  } else {
+                                    setEditingPic(null);
+                                  }
+                                }
+                              }}
+                              autoFocus
+                              style={{
+                                padding: '6px 10px',
+                                background: '#0f172a',
+                                border: '1px solid #3b82f6',
+                                borderRadius: '4px',
+                                color: '#e2e8f0',
+                                fontSize: '14px',
+                                width: '100%'
+                              }}
+                            />
+                          ) : (
+                            pic.name
+                          )}
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <span style={{
+                            padding: '4px 12px',
+                            borderRadius: '12px',
+                            fontSize: '12px',
+                            fontWeight: '600',
+                            background: pic.is_active === 1 ? '#10b98180' : '#6b728080',
+                            color: pic.is_active === 1 ? '#10b981' : '#9ca3af',
+                            border: `1px solid ${pic.is_active === 1 ? '#10b981' : '#6b7280'}`
+                          }}>
+                            {pic.is_active === 1 ? 'Aktif' : 'Nonaktif'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                            {editingPic !== pic.id && (
+                              <button
+                                onClick={() => setEditingPic(pic.id)}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: '#3b82f6',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Edit
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleTogglePicStatus(pic.id, pic.is_active)}
+                              style={{
+                                padding: '6px 12px',
+                                background: pic.is_active === 1 ? '#ef4444' : '#10b981',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {pic.is_active === 1 ? 'Nonaktifkan' : 'Aktifkan'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          <div style={{ marginTop: '16px', padding: '12px', background: '#1e293b', borderRadius: '6px', border: '1px solid #334155' }}>
+            <p style={{ fontSize: '13px', color: '#94a3b8', margin: 0, lineHeight: '1.6' }}>
+              <strong style={{ color: '#e2e8f0' }}>📌 Catatan:</strong> PIC yang dinonaktifkan tidak akan muncul di dropdown form Input Authenticity, tetapi data lama yang sudah menggunakan PIC tersebut tetap akan tersimpan.
+            </p>
           </div>
         </div>
       </div>

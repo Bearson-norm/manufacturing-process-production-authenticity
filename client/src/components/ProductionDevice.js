@@ -96,11 +96,18 @@ function ProductionDevice() {
   const [editingInput, setEditingInput] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
   const [moSearchTerm, setMoSearchTerm] = useState('');
+  const [bufferMoSearchTerm, setBufferMoSearchTerm] = useState('');
+  const [rejectMoSearchTerm, setRejectMoSearchTerm] = useState('');
+  const [selectedBufferMo, setSelectedBufferMo] = useState(null);
+  const [selectedRejectMo, setSelectedRejectMo] = useState(null);
+  const [picList, setPicList] = useState([]);
+  const [picSearchTerm, setPicSearchTerm] = useState('');
   const [editingMoNumber, setEditingMoNumber] = useState(null);
   const [editingSessionId, setEditingSessionId] = useState(null);
 
   useEffect(() => {
     fetchData();
+    fetchPicList();
     // Load session from localStorage
     const savedSession = localStorage.getItem('production_device_session');
     if (savedSession) {
@@ -172,6 +179,17 @@ function ProductionDevice() {
       setRejectDataMap(rejectMap);
     } catch (error) {
       console.error('Error fetching data:', error);
+    }
+  };
+
+  const fetchPicList = async () => {
+    try {
+      const response = await axios.get('/api/pic/list');
+      if (response.data.success) {
+        setPicList(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching PIC list:', error);
     }
   };
 
@@ -260,12 +278,50 @@ function ProductionDevice() {
     }
   };
 
-  const handleInputBuffer = () => {
+  const handleInputBuffer = async () => {
     setShowBufferModal(true);
+    setBufferMoSearchTerm('');
+    setSelectedBufferMo(null);
+    // Fetch MO list from cache (filtered by production type) when modal opens
+    try {
+      const response = await axios.get('/api/odoo/mo-list', {
+        params: { productionType: 'device' }
+      });
+      if (response.data.success) {
+        const moData = response.data.data || [];
+        // Filter out SKU names that start with "MIXING"
+        const filteredMoData = moData.filter(mo => {
+          return !(mo.sku_name && mo.sku_name.toUpperCase().startsWith('MIXING'));
+        });
+        setMoList(filteredMoData);
+      }
+    } catch (error) {
+      console.error('Error fetching MO list:', error);
+      alert('Error loading MO list. Please try again.');
+    }
   };
 
-  const handleInputReject = () => {
+  const handleInputReject = async () => {
     setShowRejectModal(true);
+    setRejectMoSearchTerm('');
+    setSelectedRejectMo(null);
+    // Fetch MO list from cache (filtered by production type) when modal opens
+    try {
+      const response = await axios.get('/api/odoo/mo-list', {
+        params: { productionType: 'device' }
+      });
+      if (response.data.success) {
+        const moData = response.data.data || [];
+        // Filter out SKU names that start with "MIXING"
+        const filteredMoData = moData.filter(mo => {
+          return !(mo.sku_name && mo.sku_name.toUpperCase().startsWith('MIXING'));
+        });
+        setMoList(filteredMoData);
+      }
+    } catch (error) {
+      console.error('Error fetching MO list:', error);
+      alert('Error loading MO list. Please try again.');
+    }
   };
 
   const handleAddBufferNumber = () => {
@@ -421,6 +477,84 @@ function ProductionDevice() {
     });
   };
 
+  // Handle Enter key press for scanner input (auto-advance to next field)
+  const handleScannerKeyDown = (e, rowIndex, currentField) => {
+    if (e.key === 'Enter' || e.keyCode === 13) {
+      e.preventDefault();
+      
+      // Find the next input field
+      const inputs = document.querySelectorAll('.authenticity-row-input input[type="text"]');
+      const currentIndex = Array.from(inputs).findIndex(input => input === e.target);
+      
+      if (currentIndex !== -1 && currentIndex < inputs.length - 1) {
+        // Move to next input
+        inputs[currentIndex + 1].focus();
+      } else if (currentIndex === inputs.length - 1) {
+        // Last field in last row - add new row and focus on first field of new row
+        handleAddRow();
+        // Delay to allow new row to be rendered
+        setTimeout(() => {
+          const newInputs = document.querySelectorAll('.authenticity-row-input input[type="text"]');
+          if (newInputs.length > inputs.length) {
+            newInputs[inputs.length].focus();
+          }
+        }, 50);
+      }
+    }
+  };
+
+  // Handle Enter key for buffer authenticity numbers (scanner support)
+  const handleBufferScannerKeyDown = (e, index) => {
+    if (e.key === 'Enter' || e.keyCode === 13) {
+      e.preventDefault();
+      
+      // If this is the last input, add a new one
+      if (index === bufferData.authenticityNumbers.length - 1) {
+        handleAddBufferNumber();
+        // Focus on the new input after it's rendered
+        setTimeout(() => {
+          const inputs = document.querySelectorAll('.buffer-row-input input[type="text"]');
+          if (inputs[index + 1]) {
+            inputs[index + 1].focus();
+          }
+        }, 50);
+      } else {
+        // Move to next input
+        const inputs = document.querySelectorAll('.buffer-row-input input[type="text"]');
+        if (inputs[index + 1]) {
+          inputs[index + 1].focus();
+        }
+      }
+    }
+  };
+
+  // Handle Enter key for reject authenticity numbers (scanner support)
+  const handleRejectScannerKeyDown = (e, index) => {
+    if (e.key === 'Enter' || e.keyCode === 13) {
+      e.preventDefault();
+      
+      // If this is the last input, add a new one
+      if (index === rejectData.authenticityNumbers.length - 1) {
+        handleAddRejectNumber();
+        // Focus on the new input after it's rendered
+        setTimeout(() => {
+          const inputs = document.querySelectorAll('.buffer-row-input input[type="text"]');
+          const currentIndex = Array.from(inputs).findIndex(input => input === e.target);
+          if (currentIndex !== -1 && inputs[currentIndex + 1]) {
+            inputs[currentIndex + 1].focus();
+          }
+        }, 50);
+      } else {
+        // Move to next input
+        const inputs = document.querySelectorAll('.buffer-row-input input[type="text"]');
+        const currentIndex = Array.from(inputs).findIndex(input => input === e.target);
+        if (currentIndex !== -1 && inputs[currentIndex + 1]) {
+          inputs[currentIndex + 1].focus();
+        }
+      }
+    }
+  };
+
   const handleEndManufacturing = async () => {
     if (window.confirm('Apakah Anda yakin ingin mengakhiri proses manufacturing?')) {
       try {
@@ -455,6 +589,28 @@ function ProductionDevice() {
     setMoSearchTerm(mo ? `${mo.mo_number} - ${mo.sku_name}` : '');
     setFormData({
       ...formData,
+      moNumber: moNumber,
+      skuName: mo ? mo.sku_name : ''
+    });
+  };
+
+  const handleBufferMoChange = (moNumber) => {
+    const mo = moList.find(m => m.mo_number === moNumber);
+    setSelectedBufferMo(mo);
+    setBufferMoSearchTerm(mo ? `${mo.mo_number} - ${mo.sku_name}` : '');
+    setBufferData({
+      ...bufferData,
+      moNumber: moNumber,
+      skuName: mo ? mo.sku_name : ''
+    });
+  };
+
+  const handleRejectMoChange = (moNumber) => {
+    const mo = moList.find(m => m.mo_number === moNumber);
+    setSelectedRejectMo(mo);
+    setRejectMoSearchTerm(mo ? `${mo.mo_number} - ${mo.sku_name}` : '');
+    setRejectData({
+      ...rejectData,
       moNumber: moNumber,
       skuName: mo ? mo.sku_name : ''
     });
@@ -1109,10 +1265,27 @@ function ProductionDevice() {
               <label>PIC *</label>
               <input
                 type="text"
+                list="pic-datalist-device"
                 value={formData.pic}
-                onChange={(e) => setFormData({ ...formData, pic: e.target.value })}
-                placeholder="Enter PIC"
+                onChange={(e) => {
+                  setFormData({ ...formData, pic: e.target.value });
+                  setPicSearchTerm(e.target.value);
+                }}
+                placeholder="Ketik untuk mencari atau pilih PIC..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
               />
+              <datalist id="pic-datalist-device">
+                {picList
+                  .filter(pic => 
+                    pic.name.toLowerCase().includes((formData.pic || '').toLowerCase())
+                  )
+                  .map((pic) => (
+                    <option key={pic.id} value={pic.name}>
+                      {pic.name}
+                    </option>
+                  ))
+                }
+              </datalist>
             </div>
             <div className="form-group">
               <label>MO Number *</label>
@@ -1178,18 +1351,21 @@ function ProductionDevice() {
                     placeholder="First Authenticity at"
                     value={row.firstAuthenticity}
                     onChange={(e) => handleRowChange(index, 'firstAuthenticity', e.target.value)}
+                    onKeyDown={(e) => handleScannerKeyDown(e, index, 'firstAuthenticity')}
                   />
                   <input
                     type="text"
                     placeholder="Last Authenticity at"
                     value={row.lastAuthenticity}
                     onChange={(e) => handleRowChange(index, 'lastAuthenticity', e.target.value)}
+                    onKeyDown={(e) => handleScannerKeyDown(e, index, 'lastAuthenticity')}
                   />
                   <input
                     type="text"
                     placeholder="Roll Number"
                     value={row.rollNumber}
                     onChange={(e) => handleRowChange(index, 'rollNumber', e.target.value)}
+                    onKeyDown={(e) => handleScannerKeyDown(e, index, 'rollNumber')}
                   />
                   {formData.authenticityRows.length > 1 && (
                     <button
@@ -1232,19 +1408,69 @@ function ProductionDevice() {
               <label>Nama PIC *</label>
               <input
                 type="text"
+                list="pic-datalist-buffer-device"
                 value={bufferData.pic}
                 onChange={(e) => setBufferData({ ...bufferData, pic: e.target.value })}
-                placeholder="Enter PIC name"
+                placeholder="Ketik untuk mencari atau pilih PIC..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
               />
+              <datalist id="pic-datalist-buffer-device">
+                {picList
+                  .filter(pic => 
+                    pic.name.toLowerCase().includes((bufferData.pic || '').toLowerCase())
+                  )
+                  .map((pic) => (
+                    <option key={pic.id} value={pic.name}>
+                      {pic.name}
+                    </option>
+                  ))
+                }
+              </datalist>
             </div>
             <div className="form-group">
               <label>MO Number *</label>
               <input
                 type="text"
-                value={bufferData.moNumber}
-                onChange={(e) => setBufferData({ ...bufferData, moNumber: e.target.value })}
-                placeholder="Enter MO Number"
+                list="mo-datalist-buffer-device"
+                value={bufferMoSearchTerm}
+                onChange={(e) => {
+                  setBufferMoSearchTerm(e.target.value);
+                  // Auto-select if exact match
+                  const exactMatch = moList.find(mo => 
+                    mo.mo_number === e.target.value || 
+                    `${mo.mo_number} - ${mo.sku_name}` === e.target.value
+                  );
+                  if (exactMatch) {
+                    handleBufferMoChange(exactMatch.mo_number);
+                  } else {
+                    setSelectedBufferMo(null);
+                    setBufferData({ ...bufferData, moNumber: '', skuName: '' });
+                  }
+                }}
+                placeholder="Type to search MO Number or SKU Name..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
               />
+              <datalist id="mo-datalist-buffer-device">
+                {moList
+                  .filter(mo => 
+                    bufferMoSearchTerm === '' ||
+                    mo.mo_number.toLowerCase().includes(bufferMoSearchTerm.toLowerCase()) ||
+                    mo.sku_name.toLowerCase().includes(bufferMoSearchTerm.toLowerCase())
+                  )
+                  .map((mo) => (
+                    <option key={mo.mo_number} value={mo.mo_number}>
+                      {mo.mo_number} - {mo.sku_name}
+                    </option>
+                  ))
+                }
+              </datalist>
+              {selectedBufferMo && (
+                <div className="mo-info-display">
+                  <p><strong>SKU Name:</strong> {selectedBufferMo.sku_name}</p>
+                  <p><strong>Quantity:</strong> {selectedBufferMo.quantity} {selectedBufferMo.uom}</p>
+                  <p><strong>Created:</strong> {formatDateIndonesia(selectedBufferMo.create_date)}</p>
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label>SKU Name *</label>
@@ -1253,6 +1479,7 @@ function ProductionDevice() {
                 value={bufferData.skuName}
                 onChange={(e) => setBufferData({ ...bufferData, skuName: e.target.value })}
                 placeholder="Enter SKU Name"
+                readOnly={selectedBufferMo !== null}
               />
             </div>
             <div className="authenticity-section">
@@ -1264,6 +1491,7 @@ function ProductionDevice() {
                     placeholder="Enter authenticity number"
                     value={number}
                     onChange={(e) => handleBufferNumberChange(index, e.target.value)}
+                    onKeyDown={(e) => handleBufferScannerKeyDown(e, index)}
                   />
                   {bufferData.authenticityNumbers.length > 1 && (
                     <button
@@ -1302,19 +1530,69 @@ function ProductionDevice() {
               <label>Nama PIC *</label>
               <input
                 type="text"
+                list="pic-datalist-reject-device"
                 value={rejectData.pic}
                 onChange={(e) => setRejectData({ ...rejectData, pic: e.target.value })}
-                placeholder="Enter PIC name"
+                placeholder="Ketik untuk mencari atau pilih PIC..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
               />
+              <datalist id="pic-datalist-reject-device">
+                {picList
+                  .filter(pic => 
+                    pic.name.toLowerCase().includes((rejectData.pic || '').toLowerCase())
+                  )
+                  .map((pic) => (
+                    <option key={pic.id} value={pic.name}>
+                      {pic.name}
+                    </option>
+                  ))
+                }
+              </datalist>
             </div>
             <div className="form-group">
               <label>MO Number *</label>
               <input
                 type="text"
-                value={rejectData.moNumber}
-                onChange={(e) => setRejectData({ ...rejectData, moNumber: e.target.value })}
-                placeholder="Enter MO Number"
+                list="mo-datalist-reject-device"
+                value={rejectMoSearchTerm}
+                onChange={(e) => {
+                  setRejectMoSearchTerm(e.target.value);
+                  // Auto-select if exact match
+                  const exactMatch = moList.find(mo => 
+                    mo.mo_number === e.target.value || 
+                    `${mo.mo_number} - ${mo.sku_name}` === e.target.value
+                  );
+                  if (exactMatch) {
+                    handleRejectMoChange(exactMatch.mo_number);
+                  } else {
+                    setSelectedRejectMo(null);
+                    setRejectData({ ...rejectData, moNumber: '', skuName: '' });
+                  }
+                }}
+                placeholder="Type to search MO Number or SKU Name..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
               />
+              <datalist id="mo-datalist-reject-device">
+                {moList
+                  .filter(mo => 
+                    rejectMoSearchTerm === '' ||
+                    mo.mo_number.toLowerCase().includes(rejectMoSearchTerm.toLowerCase()) ||
+                    mo.sku_name.toLowerCase().includes(rejectMoSearchTerm.toLowerCase())
+                  )
+                  .map((mo) => (
+                    <option key={mo.mo_number} value={mo.mo_number}>
+                      {mo.mo_number} - {mo.sku_name}
+                    </option>
+                  ))
+                }
+              </datalist>
+              {selectedRejectMo && (
+                <div className="mo-info-display">
+                  <p><strong>SKU Name:</strong> {selectedRejectMo.sku_name}</p>
+                  <p><strong>Quantity:</strong> {selectedRejectMo.quantity} {selectedRejectMo.uom}</p>
+                  <p><strong>Created:</strong> {formatDateIndonesia(selectedRejectMo.create_date)}</p>
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label>SKU Name *</label>
@@ -1323,6 +1601,7 @@ function ProductionDevice() {
                 value={rejectData.skuName}
                 onChange={(e) => setRejectData({ ...rejectData, skuName: e.target.value })}
                 placeholder="Enter SKU Name"
+                readOnly={selectedRejectMo !== null}
               />
             </div>
             <div className="authenticity-section">
@@ -1334,6 +1613,7 @@ function ProductionDevice() {
                     placeholder="Enter authenticity number"
                     value={number}
                     onChange={(e) => handleRejectNumberChange(index, e.target.value)}
+                    onKeyDown={(e) => handleRejectScannerKeyDown(e, index)}
                   />
                   {rejectData.authenticityNumbers.length > 1 && (
                     <button

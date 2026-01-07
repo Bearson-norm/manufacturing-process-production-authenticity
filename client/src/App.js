@@ -6,6 +6,8 @@ import ProductionLiquid from './components/ProductionLiquid';
 import ProductionDevice from './components/ProductionDevice';
 import ProductionCartridge from './components/ProductionCartridge';
 import Admin from './components/Admin';
+import ReportDashboard from './components/ReportDashboard';
+import ProductionChart from './components/ProductionChart';
 import './App.css';
 
 function App() {
@@ -62,6 +64,22 @@ function App() {
             element={
               isAuthenticated ? 
                 <Admin /> : 
+                <Navigate to="/login" />
+            } 
+          />
+          <Route 
+            path="/report-dashboard" 
+            element={
+              isAuthenticated ? 
+                <ReportDashboard /> : 
+                <Navigate to="/login" />
+            } 
+          />
+          <Route 
+            path="/production-chart" 
+            element={
+              isAuthenticated ? 
+                <ProductionChart /> : 
                 <Navigate to="/login" />
             } 
           />

@@ -216,6 +216,63 @@ db.serialize(() => {
     config_value TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  // PIC (Person in Charge) List table
+  db.run(`CREATE TABLE IF NOT EXISTS pic_list (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating pic_list table:', err);
+      return;
+    }
+    
+    // Insert default PIC data if table is empty
+    db.get('SELECT COUNT(*) as count FROM pic_list', (err, row) => {
+      if (err || !row || row.count > 0) return;
+      
+      const defaultPICs = [
+        'Puput Wijanarko', 'Adhari Wijaya', 'Qurotul Aini', 'Fita Estikasari',
+        'Dela Wahyu Handayani', 'Thania Novelia Suseno', 'Astikaria Nababan', 'Yati Sumiati',
+        'Faliq Humam Zulian', 'Pria Nanda Pratama', 'Rendy Join Prayoga Hutapea', 'Rizqi Mahendra',
+        'Muhammad Irfan Perdinan', 'Ahmad Buseri', 'Ilyas Safiq', 'Ganjar Ferdianto',
+        'Martunis Hidayatulloh', 'Selly Juniar Andriyani', 'Irma Anggraeni', 'Evi Dwi Setiani',
+        'Siti Sopiah', 'Dede Mustika Alawiah', 'Diah Ayu Novianti', 'Anisa Putri Ramadani',
+        'Ahmad Ari Ripa\'i', 'Andre Romadoni', 'Dwi Nova Safitri', 'Sahroni',
+        'Niken Susanti', 'Ubedilah', 'Aulia Rachma Putri', 'Zimam Mulhakam',
+        'Yuliyanti Putri Pratiwi', 'Meitya Rifai Yusnah', 'Nurhadi', 'Bagas Prasetya',
+        'Hendra Azwar Eka Saputra', 'Rini Rokhimah', 'Iin Silpiana Dewi', 'Muhammad Abdul Halim',
+        'Ahmad Muhaimin', 'Sharani Noor padilah', 'Iin Rofizah', 'Frisca Nurjannah',
+        'Windi Nur Azizah', 'Muhammad Ilham', 'Jonathan Claudio P', 'Teguh Santoso',
+        'Adi Ardiansyah', 'Widi Dwi Gita', 'Nurul Amelia', 'Dini Milati',
+        'Sofhie Angellita', 'Annisa Rahmawati', 'Dessy Indriyani', 'Suhendra Jaya Kusuma',
+        'Ardani', 'Rohiah', 'Novita Astriani', 'Nurul Khofiduriah',
+        'Galing Resdianto', 'Nurbaiti', 'Andri Mulyadi', 'Tiaruli Nababan',
+        'Indadari Windrayanti', 'Muhammad Apandi', 'Vini Claras Anatasyia', 'Siti Mahidah',
+        'Rusnia Ningsih', 'Randy Virmansyah', 'Silvia Fransiska', 'Armah Wati',
+        'Euis Santi', 'Hermawan', 'Linda Haryati', 'Aditya Rachman',
+        'Calvin Lama Tokan', 'Norris Samuel Silaban', 'Dora Nopinda', 'Vita Lativa',
+        'Nur Azizah', 'Devi Yanti', 'Ita Purnamasari', 'Rizky Septian',
+        'Laila Arifatul Hilmi', 'Erfild Ardi Mahardika', 'Hanun Dhiya Imtiaz', 'Mayang Puspitaningrum',
+        'Hikmatul Iman', 'Muhammad Tedi Al Bukhori', 'Mahardika', 'Sevira Yunita Andini',
+        'Gista Nadia', 'Parjiyanti', 'Rifki Maulana Rafif', 'Sri hoviya',
+        'Amanda Tifara', 'Laras Wati', 'Dwi Setia Putri', 'Putri Bela Savira',
+        'Siti Hasanah', 'Farhan Rizky Wahyudi', 'Adam Rizki', 'Tomi Wijaya',
+        'Syahrizal', 'Sherly Triananda Lisa', 'Henry Daniarto', 'Sindy Yusnia',
+        'Inka Purnama Sari', 'Larasati', 'Muhamad Hojaji Muslim', 'Sopiyana', 'Yuyun'
+      ];
+      
+      const stmt = db.prepare('INSERT INTO pic_list (name) VALUES (?)');
+      defaultPICs.forEach(name => {
+        stmt.run(name);
+      });
+      stmt.finalize();
+      console.log('✅ Default PIC list initialized');
+    });
+  });
 });
 
 // Health check endpoint for Traefik and monitoring
@@ -1948,6 +2005,550 @@ app.post('/api/reject/cartridge', (req, res) => {
         id: this.lastID, 
         message: 'Reject data saved successfully'
       });
+    }
+  );
+});
+
+// Manufacturing Report API Endpoint
+// GET manufacturing report data with calculations
+app.get('/api/reports/manufacturing', async (req, res) => {
+  try {
+    const { type, startDate, endDate, moNumber } = req.query;
+    
+    // Build WHERE clause for filtering
+    let whereConditions = [];
+    let params = [];
+    
+    // Filter by production type if specified
+    if (type && type !== 'all') {
+      whereConditions.push('production_type = ?');
+      params.push(type);
+    }
+    
+    // Filter by date range if specified
+    if (startDate) {
+      whereConditions.push('DATE(created_at) >= DATE(?)');
+      params.push(startDate);
+    }
+    
+    if (endDate) {
+      whereConditions.push('DATE(created_at) <= DATE(?)');
+      params.push(endDate);
+    }
+    
+    // Filter by MO Number if specified
+    if (moNumber) {
+      whereConditions.push('mo_number LIKE ?');
+      params.push(`%${moNumber}%`);
+    }
+    
+    const whereClause = whereConditions.length > 0 
+      ? 'WHERE ' + whereConditions.join(' AND ')
+      : '';
+    
+    // Query production data from all tables
+    const queries = {
+      liquid: `SELECT 'liquid' as production_type, * FROM production_liquid ${whereClause}`,
+      device: `SELECT 'device' as production_type, * FROM production_device ${whereClause}`,
+      cartridge: `SELECT 'cartridge' as production_type, * FROM production_cartridge ${whereClause}`
+    };
+    
+    // If type is specified, only query that table
+    let queryToRun;
+    if (type && type !== 'all') {
+      queryToRun = queries[type];
+    } else {
+      // Combine all queries with UNION
+      queryToRun = `${queries.liquid} UNION ${queries.device} UNION ${queries.cartridge} ORDER BY created_at DESC`;
+    }
+    
+    // Execute production query
+    db.all(queryToRun, params, async (err, productionRows) => {
+      if (err) {
+        console.error('Error fetching production data:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      
+      // Parse authenticity data
+      const parsedRows = productionRows.map(row => ({
+        ...row,
+        authenticity_data: typeof row.authenticity_data === 'string' 
+          ? JSON.parse(row.authenticity_data) 
+          : row.authenticity_data
+      }));
+      
+      // Get all unique MO numbers and production types
+      const moMap = new Map();
+      parsedRows.forEach(row => {
+        const key = `${row.mo_number}_${row.production_type}`;
+        if (!moMap.has(key)) {
+          moMap.set(key, { mo_number: row.mo_number, production_type: row.production_type });
+        }
+      });
+      
+      // Fetch buffer and reject counts for each MO
+      const bufferRejectPromises = Array.from(moMap.values()).map(async ({ mo_number, production_type }) => {
+        return new Promise((resolve) => {
+          // Get buffer count
+          db.all(
+            `SELECT * FROM buffer_${production_type} WHERE mo_number = ?`,
+            [mo_number],
+            (bufferErr, bufferRows) => {
+              if (bufferErr) {
+                console.error(`Error fetching buffer for ${mo_number}:`, bufferErr);
+                resolve({ mo_number, buffers: [], rejects: [] });
+                return;
+              }
+              
+              // Get reject count
+              db.all(
+                `SELECT * FROM reject_${production_type} WHERE mo_number = ?`,
+                [mo_number],
+                (rejectErr, rejectRows) => {
+                  if (rejectErr) {
+                    console.error(`Error fetching reject for ${mo_number}:`, rejectErr);
+                    resolve({ mo_number, buffers: bufferRows || [], rejects: [] });
+                    return;
+                  }
+                  
+                  // Parse buffer and reject data
+                  const parsedBuffers = (bufferRows || []).map(row => ({
+                    ...row,
+                    authenticity_numbers: typeof row.authenticity_numbers === 'string'
+                      ? JSON.parse(row.authenticity_numbers)
+                      : row.authenticity_numbers
+                  }));
+                  
+                  const parsedRejects = (rejectRows || []).map(row => ({
+                    ...row,
+                    authenticity_numbers: typeof row.authenticity_numbers === 'string'
+                      ? JSON.parse(row.authenticity_numbers)
+                      : row.authenticity_numbers
+                  }));
+                  
+                  resolve({ mo_number, buffers: parsedBuffers, rejects: parsedRejects });
+                }
+              );
+            }
+          );
+        });
+      });
+      
+      // Wait for all buffer/reject queries
+      const bufferRejectData = await Promise.all(bufferRejectPromises);
+      
+      // Create a map for quick lookup
+      const bufferRejectMap = new Map();
+      bufferRejectData.forEach(data => {
+        bufferRejectMap.set(data.mo_number, {
+          buffers: data.buffers,
+          rejects: data.rejects
+        });
+      });
+      
+      // Attach buffer and reject data to production rows
+      const enrichedRows = parsedRows.map(row => {
+        const bufferReject = bufferRejectMap.get(row.mo_number);
+        
+        // Calculate buffer count
+        let buffer_count = 0;
+        if (bufferReject && bufferReject.buffers) {
+          bufferReject.buffers.forEach(buffer => {
+            if (Array.isArray(buffer.authenticity_numbers)) {
+              buffer_count += buffer.authenticity_numbers.filter(n => n && n.trim() !== '').length;
+            }
+          });
+        }
+        
+        // Calculate reject count
+        let reject_count = 0;
+        if (bufferReject && bufferReject.rejects) {
+          bufferReject.rejects.forEach(reject => {
+            if (Array.isArray(reject.authenticity_numbers)) {
+              reject_count += reject.authenticity_numbers.filter(n => n && n.trim() !== '').length;
+            }
+          });
+        }
+        
+        return {
+          ...row,
+          buffer_count,
+          reject_count
+        };
+      });
+      
+      res.json(enrichedRows);
+    });
+  } catch (error) {
+    console.error('Error in manufacturing report:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Production Statistics API Endpoints
+// GET production statistics by leader
+app.get('/api/statistics/production-by-leader', (req, res) => {
+  const { period, startDate, endDate, productionType } = req.query;
+  
+  // Build date filter based on period
+  let dateFilter = '';
+  if (period === 'day') {
+    // Last 7 days
+    dateFilter = "AND DATE(created_at) >= DATE('now', '-7 days')";
+  } else if (period === 'week') {
+    // Last 8 weeks
+    dateFilter = "AND DATE(created_at) >= DATE('now', '-56 days')";
+  } else if (period === 'month') {
+    // Last 12 months
+    dateFilter = "AND DATE(created_at) >= DATE('now', '-12 months')";
+  } else if (startDate && endDate) {
+    // Custom date range
+    dateFilter = `AND DATE(created_at) BETWEEN DATE('${startDate}') AND DATE('${endDate}')`;
+  }
+  
+  // Build production type filter
+  const types = [];
+  if (!productionType || productionType === 'all') {
+    types.push('liquid', 'device', 'cartridge');
+  } else {
+    types.push(productionType);
+  }
+  
+  // Query each production type
+  const queries = types.map(type => {
+    return new Promise((resolve, reject) => {
+      const query = `
+        SELECT 
+          '${type}' as production_type,
+          leader_name,
+          DATE(created_at) as date,
+          session_id,
+          mo_number,
+          authenticity_data
+        FROM production_${type}
+        WHERE 1=1 ${dateFilter}
+        ORDER BY created_at DESC
+      `;
+      
+      db.all(query, [], (err, rows) => {
+        if (err) {
+          console.error(`Error querying production_${type}:`, err);
+          reject(err);
+        } else {
+          // Parse authenticity data and calculate quantities
+          const parsedRows = rows.map(row => {
+            let authenticityData;
+            try {
+              authenticityData = typeof row.authenticity_data === 'string' 
+                ? JSON.parse(row.authenticity_data) 
+                : row.authenticity_data;
+            } catch (e) {
+              authenticityData = [];
+            }
+            
+            // Calculate production quantity from authenticity data
+            let productionQty = 0;
+            if (Array.isArray(authenticityData)) {
+              authenticityData.forEach(auth => {
+                if (auth.firstAuthenticity && auth.lastAuthenticity) {
+                  const first = parseInt(auth.firstAuthenticity) || 0;
+                  const last = parseInt(auth.lastAuthenticity) || 0;
+                  productionQty += (last - first);
+                }
+              });
+            }
+            
+            return {
+              ...row,
+              production_qty: productionQty
+            };
+          });
+          
+          // Get buffer and reject data for each MO
+          const moNumbers = [...new Set(parsedRows.map(r => r.mo_number))];
+          
+          const bufferRejectPromises = moNumbers.map(moNumber => {
+            return new Promise((resolveInner) => {
+              // Get buffer count
+              db.all(
+                `SELECT authenticity_numbers FROM buffer_${type} WHERE mo_number = ?`,
+                [moNumber],
+                (bufferErr, bufferRows) => {
+                  let bufferCount = 0;
+                  if (!bufferErr && bufferRows) {
+                    bufferRows.forEach(buffer => {
+                      try {
+                        const numbers = typeof buffer.authenticity_numbers === 'string'
+                          ? JSON.parse(buffer.authenticity_numbers)
+                          : buffer.authenticity_numbers;
+                        if (Array.isArray(numbers)) {
+                          bufferCount += numbers.filter(n => n && n.trim() !== '').length;
+                        }
+                      } catch (e) {}
+                    });
+                  }
+                  
+                  // Get reject count
+                  db.all(
+                    `SELECT authenticity_numbers FROM reject_${type} WHERE mo_number = ?`,
+                    [moNumber],
+                    (rejectErr, rejectRows) => {
+                      let rejectCount = 0;
+                      if (!rejectErr && rejectRows) {
+                        rejectRows.forEach(reject => {
+                          try {
+                            const numbers = typeof reject.authenticity_numbers === 'string'
+                              ? JSON.parse(reject.authenticity_numbers)
+                              : reject.authenticity_numbers;
+                            if (Array.isArray(numbers)) {
+                              rejectCount += numbers.filter(n => n && n.trim() !== '').length;
+                            }
+                          } catch (e) {}
+                        });
+                      }
+                      
+                      resolveInner({ 
+                        mo_number: moNumber, 
+                        buffer_count: bufferCount, 
+                        reject_count: rejectCount 
+                      });
+                    }
+                  );
+                }
+              );
+            });
+          });
+          
+          Promise.all(bufferRejectPromises).then(bufferRejectData => {
+            const bufferRejectMap = new Map();
+            bufferRejectData.forEach(data => {
+              bufferRejectMap.set(data.mo_number, {
+                buffer: data.buffer_count,
+                reject: data.reject_count
+              });
+            });
+            
+            // Add buffer and reject to each row
+            const enrichedRows = parsedRows.map(row => {
+              const bufferReject = bufferRejectMap.get(row.mo_number);
+              const buffer = bufferReject?.buffer || 0;
+              const reject = bufferReject?.reject || 0;
+              
+              return {
+                ...row,
+                buffer_count: buffer,
+                reject_count: reject,
+                net_production: row.production_qty - reject + buffer
+              };
+            });
+            
+            resolve(enrichedRows);
+          });
+        }
+      });
+    });
+  });
+  
+  Promise.all(queries)
+    .then(results => {
+      // Combine all results
+      const combinedData = results.flat();
+      
+      // Group by period
+      const groupedData = {};
+      const sessionSet = {};
+      
+      combinedData.forEach(row => {
+        let periodKey;
+        const date = new Date(row.date + 'T00:00:00');
+        
+        if (period === 'day') {
+          // Group by day
+          periodKey = row.date;
+        } else if (period === 'week') {
+          // Group by week (start of week)
+          const dayOfWeek = date.getDay();
+          const diff = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust to Monday
+          const weekStart = new Date(date.setDate(diff));
+          periodKey = weekStart.toISOString().split('T')[0];
+        } else if (period === 'month') {
+          // Group by month
+          periodKey = row.date.substring(0, 7); // YYYY-MM
+        } else {
+          periodKey = row.date;
+        }
+        
+        const key = `${periodKey}_${row.leader_name}_${row.production_type}`;
+        
+        if (!groupedData[key]) {
+          groupedData[key] = {
+            period: periodKey,
+            leader_name: row.leader_name,
+            production_type: row.production_type,
+            session_count: 0,
+            input_count: 0,
+            production_qty: 0,
+            buffer_count: 0,
+            reject_count: 0,
+            net_production: 0
+          };
+          sessionSet[key] = new Set();
+        }
+        
+        // Count unique sessions
+        sessionSet[key].add(row.session_id);
+        
+        // Sum up quantities
+        groupedData[key].input_count += 1;
+        groupedData[key].production_qty += row.production_qty || 0;
+        groupedData[key].buffer_count += row.buffer_count || 0;
+        groupedData[key].reject_count += row.reject_count || 0;
+        groupedData[key].net_production += row.net_production || 0;
+      });
+      
+      // Update session counts
+      Object.keys(groupedData).forEach(key => {
+        groupedData[key].session_count = sessionSet[key].size;
+      });
+      
+      // Convert to array and sort
+      const resultArray = Object.values(groupedData).sort((a, b) => {
+        if (a.period !== b.period) return b.period.localeCompare(a.period);
+        if (a.leader_name !== b.leader_name) return a.leader_name.localeCompare(b.leader_name);
+        return a.production_type.localeCompare(b.production_type);
+      });
+      
+      res.json({ success: true, data: resultArray, period: period || 'custom' });
+    })
+    .catch(err => {
+      console.error('Error fetching production statistics:', err);
+      res.status(500).json({ success: false, error: err.message });
+    });
+});
+
+// GET leader list for filter
+app.get('/api/statistics/leaders', (req, res) => {
+  const queries = [
+    'SELECT DISTINCT leader_name FROM production_liquid WHERE leader_name IS NOT NULL',
+    'SELECT DISTINCT leader_name FROM production_device WHERE leader_name IS NOT NULL',
+    'SELECT DISTINCT leader_name FROM production_cartridge WHERE leader_name IS NOT NULL'
+  ];
+  
+  Promise.all(queries.map(query => {
+    return new Promise((resolve, reject) => {
+      db.all(query, [], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+  }))
+    .then(results => {
+      // Combine and deduplicate leader names
+      const leaders = new Set();
+      results.flat().forEach(row => {
+        if (row.leader_name) leaders.add(row.leader_name);
+      });
+      
+      const sortedLeaders = Array.from(leaders).sort();
+      res.json({ success: true, data: sortedLeaders });
+    })
+    .catch(err => {
+      console.error('Error fetching leaders:', err);
+      res.status(500).json({ success: false, error: err.message });
+    });
+});
+
+// PIC (Person in Charge) API Endpoints
+// GET all active PICs
+app.get('/api/pic/list', (req, res) => {
+  db.all('SELECT * FROM pic_list WHERE is_active = 1 ORDER BY name ASC', (err, rows) => {
+    if (err) {
+      console.error('Error fetching PIC list:', err);
+      return res.status(500).json({ error: err.message });
+    }
+    res.json({ success: true, data: rows });
+  });
+});
+
+// GET all PICs (including inactive)
+app.get('/api/pic/all', (req, res) => {
+  db.all('SELECT * FROM pic_list ORDER BY name ASC', (err, rows) => {
+    if (err) {
+      console.error('Error fetching all PIC list:', err);
+      return res.status(500).json({ error: err.message });
+    }
+    res.json({ success: true, data: rows });
+  });
+});
+
+// POST add new PIC
+app.post('/api/pic/add', (req, res) => {
+  const { name } = req.body;
+  
+  if (!name || name.trim() === '') {
+    return res.status(400).json({ success: false, error: 'PIC name is required' });
+  }
+  
+  db.run(
+    'INSERT INTO pic_list (name) VALUES (?)',
+    [name.trim()],
+    function(err) {
+      if (err) {
+        if (err.message.includes('UNIQUE constraint failed')) {
+          return res.status(400).json({ success: false, error: 'PIC name already exists' });
+        }
+        console.error('Error adding PIC:', err);
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      res.json({ success: true, id: this.lastID, message: 'PIC added successfully' });
+    }
+  );
+});
+
+// PUT update PIC
+app.put('/api/pic/update/:id', (req, res) => {
+  const { id } = req.params;
+  const { name, is_active } = req.body;
+  
+  if (!name || name.trim() === '') {
+    return res.status(400).json({ success: false, error: 'PIC name is required' });
+  }
+  
+  db.run(
+    'UPDATE pic_list SET name = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [name.trim(), is_active !== undefined ? is_active : 1, id],
+    function(err) {
+      if (err) {
+        if (err.message.includes('UNIQUE constraint failed')) {
+          return res.status(400).json({ success: false, error: 'PIC name already exists' });
+        }
+        console.error('Error updating PIC:', err);
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      if (this.changes === 0) {
+        return res.status(404).json({ success: false, error: 'PIC not found' });
+      }
+      res.json({ success: true, message: 'PIC updated successfully' });
+    }
+  );
+});
+
+// DELETE PIC (soft delete by setting is_active to 0)
+app.delete('/api/pic/delete/:id', (req, res) => {
+  const { id } = req.params;
+  
+  db.run(
+    'UPDATE pic_list SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [id],
+    function(err) {
+      if (err) {
+        console.error('Error deleting PIC:', err);
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      if (this.changes === 0) {
+        return res.status(404).json({ success: false, error: 'PIC not found' });
+      }
+      res.json({ success: true, message: 'PIC deleted successfully' });
     }
   );
 });
