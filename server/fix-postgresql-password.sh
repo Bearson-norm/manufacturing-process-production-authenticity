@@ -19,36 +19,31 @@ fi
 
 echo "🔄 Resetting password for PostgreSQL user 'admin'..."
 
-# Method 1: Using ALTER USER (if user exists)
-sudo -u postgres psql << 'PSQL'
-    -- Check if user exists
-    DO \$\$
-    BEGIN
-        IF EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'admin') THEN
-            ALTER USER admin WITH PASSWORD 'Admin123';
-            RAISE NOTICE 'Password updated for existing user admin';
-        ELSE
-            CREATE USER admin WITH PASSWORD 'Admin123';
-            RAISE NOTICE 'Created new user admin';
-        END IF;
-    END
-    \$\$;
-    
-    -- Ensure database exists
-    SELECT 'CREATE DATABASE manufacturing_db OWNER admin' 
-    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'manufacturing_db')\gexec
-    
-    -- Grant privileges
-    GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
-    
-    -- Connect and grant schema privileges
-    \c manufacturing_db
-    GRANT ALL ON SCHEMA public TO admin;
-    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO admin;
-    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO admin;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO admin;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO admin;
-PSQL
+# Check if user exists and create/update accordingly
+sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='admin'" | grep -q 1 && {
+    echo "   User 'admin' exists, updating password..."
+    sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';"
+} || {
+    echo "   User 'admin' does not exist, creating..."
+    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'Admin123';"
+}
+
+# Check if database exists and create if not
+sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='manufacturing_db'" | grep -q 1 && {
+    echo "   Database 'manufacturing_db' exists"
+} || {
+    echo "   Database 'manufacturing_db' does not exist, creating..."
+    sudo -u postgres psql -c "CREATE DATABASE manufacturing_db OWNER admin;"
+}
+
+# Grant privileges
+echo "   Granting privileges..."
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;"
+sudo -u postgres psql -d manufacturing_db -c "GRANT ALL ON SCHEMA public TO admin;"
+sudo -u postgres psql -d manufacturing_db -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO admin;"
+sudo -u postgres psql -d manufacturing_db -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO admin;"
+sudo -u postgres psql -d manufacturing_db -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO admin;"
+sudo -u postgres psql -d manufacturing_db -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO admin;"
 
 echo ""
 echo "✅ PostgreSQL password fixed!"
