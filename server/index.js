@@ -818,6 +818,118 @@ app.get('/api/production/cartridge', (req, res) => {
   });
 });
 
+// Production Report API - Get detailed report with PIC, SKU, MO ID, Roll, First/Last Authenticity ID
+app.get('/api/production/report', (req, res) => {
+  const { type, mo_number, pic, date_from, date_to, status, limit, offset } = req.query;
+  
+  // Determine which tables to query
+  const tables = [];
+  if (!type || type === 'all' || type === 'liquid') {
+    tables.push({ name: 'production_liquid', type: 'liquid' });
+  }
+  if (!type || type === 'all' || type === 'device') {
+    tables.push({ name: 'production_device', type: 'device' });
+  }
+  if (!type || type === 'all' || type === 'cartridge') {
+    tables.push({ name: 'production_cartridge', type: 'cartridge' });
+  }
+  
+  const allResults = [];
+  let completedQueries = 0;
+  
+  // Query each table
+  tables.forEach((table) => {
+    let query = `
+      SELECT 
+        pic as pic_input,
+        sku_name,
+        mo_number,
+        json_extract(authenticity_data, '$[0].rollNumber') as roll,
+        json_extract(authenticity_data, '$[0].firstAuthenticity') as first_authenticity_id,
+        json_extract(authenticity_data, '$[0].lastAuthenticity') as last_authenticity_id,
+        leader_name,
+        shift_number,
+        status,
+        created_at,
+        completed_at,
+        '${table.type}' as production_type
+      FROM ${table.name}
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    // Apply filters
+    if (mo_number) {
+      query += ' AND mo_number = ?';
+      params.push(mo_number);
+    }
+    
+    if (pic) {
+      query += ' AND pic LIKE ?';
+      params.push(`%${pic}%`);
+    }
+    
+    if (date_from) {
+      query += ' AND date(created_at) >= ?';
+      params.push(date_from);
+    }
+    
+    if (date_to) {
+      query += ' AND date(created_at) <= ?';
+      params.push(date_to);
+    }
+    
+    if (status && status !== 'all') {
+      query += ' AND status = ?';
+      params.push(status);
+    }
+    
+    query += ' ORDER BY created_at DESC';
+    
+    db.all(query, params, (err, rows) => {
+      if (err) {
+        console.error(`Error querying ${table.name}:`, err);
+      } else {
+        allResults.push(...rows);
+      }
+      
+      completedQueries++;
+      
+      // When all tables have been queried
+      if (completedQueries === tables.length) {
+        // Sort by created_at descending
+        allResults.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        
+        // Apply pagination if specified
+        let paginatedResults = allResults;
+        const limitNum = parseInt(limit) || 0;
+        const offsetNum = parseInt(offset) || 0;
+        
+        if (limitNum > 0) {
+          paginatedResults = allResults.slice(offsetNum, offsetNum + limitNum);
+        }
+        
+        res.json({
+          success: true,
+          total: allResults.length,
+          limit: limitNum || null,
+          offset: offsetNum || 0,
+          data: paginatedResults
+        });
+      }
+    });
+  });
+  
+  // Handle case where no tables to query
+  if (tables.length === 0) {
+    res.status(400).json({
+      success: false,
+      error: 'Invalid production type'
+    });
+  }
+});
+
 // External API endpoints for authenticity data
 app.get('/api/external/authenticity', apiKeyAuth, async (req, res) => {
   try {
