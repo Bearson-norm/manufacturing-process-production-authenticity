@@ -11,6 +11,7 @@ require('dotenv').config();
 const sqliteDbPath = path.join(__dirname, 'database.sqlite');
 
 // PostgreSQL connection dari .env
+// Pastikan .env file ada dan dikonfigurasi dengan benar
 const pgConfig = {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432', 10),
@@ -19,8 +20,17 @@ const pgConfig = {
   password: process.env.DB_PASSWORD || 'Admin123',
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 5000, // Increased timeout
 };
+
+// Debug: Show config (without password)
+console.log('📋 PostgreSQL Configuration:');
+console.log(`   Host: ${pgConfig.host}`);
+console.log(`   Port: ${pgConfig.port}`);
+console.log(`   Database: ${pgConfig.database}`);
+console.log(`   User: ${pgConfig.user}`);
+console.log(`   Password: ${pgConfig.password ? '***' + pgConfig.password.slice(-3) : 'NOT SET'}`);
+console.log('');
 
 const pool = new Pool(pgConfig);
 
@@ -178,7 +188,24 @@ async function migrate() {
     console.log('✅ PostgreSQL connection successful');
   } catch (err) {
     console.error('❌ Cannot connect to PostgreSQL:', err.message);
-    console.error('   Please check your .env file and ensure PostgreSQL is running');
+    console.error('');
+    console.error('🔧 Troubleshooting steps:');
+    console.error('   1. Check if PostgreSQL is running:');
+    console.error('      sudo systemctl status postgresql');
+    console.error('');
+    console.error('   2. Fix PostgreSQL password:');
+    console.error('      cd ~/deployments/manufacturing-app/server');
+    console.error('      bash fix-postgresql-password.sh');
+    console.error('');
+    console.error('   3. Test connection manually:');
+    console.error('      PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"');
+    console.error('');
+    console.error('   4. Check .env file:');
+    console.error('      cat ~/deployments/manufacturing-app/server/.env | grep DB_');
+    console.error('');
+    console.error('   5. If user/password is wrong, run:');
+    console.error('      sudo bash fix-postgresql-password.sh');
+    console.error('');
     process.exit(1);
   }
 

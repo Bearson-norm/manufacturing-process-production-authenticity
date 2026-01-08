@@ -128,8 +128,8 @@ ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
 ENDSSH
 echo "✅ Dependencies installed"
 
-# Step 6: Run migration
-echo -e "${YELLOW}[6/8] Running database migration...${NC}"
+# Step 6: Setup PostgreSQL user and test connection
+echo -e "${YELLOW}[6/8] Setting up PostgreSQL user...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     cd ~/deployments/manufacturing-app/server
     
@@ -139,21 +139,70 @@ ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
         echo "✅ Created .env file from env.example"
     fi
     
+    # Ensure .env has correct PostgreSQL config
+    if ! grep -q "DB_USER=admin" .env; then
+        echo "DB_USER=admin" >> .env
+    fi
+    if ! grep -q "DB_PASSWORD=Admin123" .env; then
+        echo "DB_PASSWORD=Admin123" >> .env
+    fi
+    if ! grep -q "DB_NAME=manufacturing_db" .env; then
+        echo "DB_NAME=manufacturing_db" >> .env
+    fi
+    if ! grep -q "DB_HOST=localhost" .env; then
+        echo "DB_HOST=localhost" >> .env
+    fi
+    
+    # Setup PostgreSQL user (fix password if needed)
+    if [ -f setup-postgresql-user.sh ]; then
+        chmod +x setup-postgresql-user.sh
+        sudo bash setup-postgresql-user.sh || {
+            echo "⚠️  Setup script failed, trying fix-password script..."
+            if [ -f fix-postgresql-password.sh ]; then
+                chmod +x fix-postgresql-password.sh
+                sudo bash fix-postgresql-password.sh
+            fi
+        }
+    elif [ -f fix-postgresql-password.sh ]; then
+        chmod +x fix-postgresql-password.sh
+        sudo bash fix-postgresql-password.sh
+    fi
+    
+    # Test connection
+    if [ -f test-postgresql-connection.js ]; then
+        echo "🔍 Testing PostgreSQL connection..."
+        node test-postgresql-connection.js || {
+            echo "⚠️  Connection test failed, but continuing..."
+        }
+    fi
+ENDSSH
+
+# Step 7: Run migration
+echo -e "${YELLOW}[7/8] Running database migration...${NC}"
+ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    
     # Run migration
-    node migrate-to-postgresql.js
+    node migrate-to-postgresql.js || {
+        echo "⚠️  Migration failed, trying alternative script..."
+        node migrate-sqlite-to-postgresql-vps.js || {
+            echo "❌ Migration failed with both scripts"
+            exit 1
+        }
+    }
 ENDSSH
 echo "✅ Migration completed"
 
-# Step 7: Build client
-echo -e "${YELLOW}[7/8] Building client...${NC}"
+# Step 8: Build client
+echo -e "${YELLOW}[8/9] Building client...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     cd ~/deployments/manufacturing-app/client
     npm run build
 ENDSSH
 echo "✅ Client built"
 
-# Step 8: Start application
-echo -e "${YELLOW}[8/8] Starting application...${NC}"
+# Step 9: Start application
+echo -e "${YELLOW}[9/9] Starting application...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     cd ~/deployments/manufacturing-app/server
     pm2 restart ecosystem.config.js || pm2 start ecosystem.config.js
