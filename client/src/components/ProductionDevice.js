@@ -104,6 +104,10 @@ function ProductionDevice() {
   const [picSearchTerm, setPicSearchTerm] = useState('');
   const [editingMoNumber, setEditingMoNumber] = useState(null);
   const [editingSessionId, setEditingSessionId] = useState(null);
+  const [editingBuffer, setEditingBuffer] = useState(null);
+  const [editingReject, setEditingReject] = useState(null);
+  const [editBufferData, setEditBufferData] = useState(null);
+  const [editRejectData, setEditRejectData] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -446,6 +450,118 @@ function ProductionDevice() {
       console.error('Error saving reject data:', error);
       alert('Error menyimpan data reject');
     }
+  };
+
+  const handleUpdateBuffer = async () => {
+    if (!editBufferData.pic || !editBufferData.moNumber || !editBufferData.skuName) {
+      alert('Silakan isi semua field yang wajib diisi');
+      return;
+    }
+
+    const validNumbers = editBufferData.authenticityNumbers.filter(num => num.trim() !== '');
+    if (validNumbers.length === 0) {
+      alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    try {
+      await axios.put(`/api/buffer/device/${editingBuffer.id}`, {
+        pic: editBufferData.pic,
+        mo_number: editBufferData.moNumber,
+        sku_name: editBufferData.skuName,
+        authenticity_numbers: validNumbers
+      });
+
+      setEditingBuffer(null);
+      setEditBufferData(null);
+      fetchData();
+      alert('Buffer data berhasil diperbarui');
+    } catch (error) {
+      console.error('Error updating buffer data:', error);
+      alert('Error memperbarui data buffer');
+    }
+  };
+
+  const handleUpdateReject = async () => {
+    if (!editRejectData.pic || !editRejectData.moNumber || !editRejectData.skuName) {
+      alert('Silakan isi semua field yang wajib diisi');
+      return;
+    }
+
+    const validNumbers = editRejectData.authenticityNumbers.filter(num => num.trim() !== '');
+    if (validNumbers.length === 0) {
+      alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    try {
+      await axios.put(`/api/reject/device/${editingReject.id}`, {
+        pic: editRejectData.pic,
+        mo_number: editRejectData.moNumber,
+        sku_name: editRejectData.skuName,
+        authenticity_numbers: validNumbers
+      });
+
+      setEditingReject(null);
+      setEditRejectData(null);
+      fetchData();
+      alert('Reject data berhasil diperbarui');
+    } catch (error) {
+      console.error('Error updating reject data:', error);
+      alert('Error memperbarui data reject');
+    }
+  };
+
+  const handleAddEditBufferNumber = () => {
+    setEditBufferData({
+      ...editBufferData,
+      authenticityNumbers: [...editBufferData.authenticityNumbers, '']
+    });
+  };
+
+  const handleRemoveEditBufferNumber = (index) => {
+    if (editBufferData.authenticityNumbers.length > 1) {
+      const newNumbers = editBufferData.authenticityNumbers.filter((_, i) => i !== index);
+      setEditBufferData({
+        ...editBufferData,
+        authenticityNumbers: newNumbers
+      });
+    }
+  };
+
+  const handleEditBufferNumberChange = (index, value) => {
+    const newNumbers = [...editBufferData.authenticityNumbers];
+    newNumbers[index] = value;
+    setEditBufferData({
+      ...editBufferData,
+      authenticityNumbers: newNumbers
+    });
+  };
+
+  const handleAddEditRejectNumber = () => {
+    setEditRejectData({
+      ...editRejectData,
+      authenticityNumbers: [...editRejectData.authenticityNumbers, '']
+    });
+  };
+
+  const handleRemoveEditRejectNumber = (index) => {
+    if (editRejectData.authenticityNumbers.length > 1) {
+      const newNumbers = editRejectData.authenticityNumbers.filter((_, i) => i !== index);
+      setEditRejectData({
+        ...editRejectData,
+        authenticityNumbers: newNumbers
+      });
+    }
+  };
+
+  const handleEditRejectNumberChange = (index, value) => {
+    const newNumbers = [...editRejectData.authenticityNumbers];
+    newNumbers[index] = value;
+    setEditRejectData({
+      ...editRejectData,
+      authenticityNumbers: newNumbers
+    });
   };
 
   const handleAddRow = () => {
@@ -1161,6 +1277,22 @@ function ProductionDevice() {
                                 <div className="buffer-card">
                                   <div className="buffer-card-header">
                                     <strong>Buffer Authenticity</strong>
+                                    <button 
+                                      className="edit-button"
+                                      onClick={() => {
+                                        const firstBuffer = bufferDataMap[moNumber][0];
+                                        setEditingBuffer(firstBuffer);
+                                        setEditBufferData({
+                                          pic: firstBuffer.pic,
+                                          moNumber: firstBuffer.mo_number,
+                                          skuName: firstBuffer.sku_name,
+                                          authenticityNumbers: [...firstBuffer.authenticity_numbers]
+                                        });
+                                      }}
+                                      title="Edit Buffer"
+                                    >
+                                      ✏️ Edit
+                                    </button>
                                   </div>
                                   <div className="buffer-card-body">
                                     {bufferDataMap[moNumber].map((buffer, bufferIdx) => (
@@ -1183,6 +1315,22 @@ function ProductionDevice() {
                                 <div className="reject-card">
                                   <div className="reject-card-header">
                                     <strong>Reject Authenticity</strong>
+                                    <button 
+                                      className="edit-button"
+                                      onClick={() => {
+                                        const firstReject = rejectDataMap[moNumber][0];
+                                        setEditingReject(firstReject);
+                                        setEditRejectData({
+                                          pic: firstReject.pic,
+                                          moNumber: firstReject.mo_number,
+                                          skuName: firstReject.sku_name,
+                                          authenticityNumbers: [...firstReject.authenticity_numbers]
+                                        });
+                                      }}
+                                      title="Edit Reject"
+                                    >
+                                      ✏️ Edit
+                                    </button>
                                   </div>
                                   <div className="reject-card-body">
                                     {rejectDataMap[moNumber].map((reject, rejectIdx) => (
@@ -1637,6 +1785,216 @@ function ProductionDevice() {
               </button>
               <button onClick={handleConfirmReject} className="confirm-button">
                 Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Buffer Modal */}
+      {editingBuffer && editBufferData && (
+        <div className="modal-overlay" onClick={() => {
+          setEditingBuffer(null);
+          setEditBufferData(null);
+        }}>
+          <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Edit Buffer Authenticity</h2>
+            <div className="form-group">
+              <label>Nama PIC *</label>
+              <input
+                type="text"
+                list="pic-datalist-edit-buffer-device"
+                value={editBufferData.pic}
+                onChange={(e) => setEditBufferData({ ...editBufferData, pic: e.target.value })}
+                placeholder="Ketik untuk mencari atau pilih PIC..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              />
+              <datalist id="pic-datalist-edit-buffer-device">
+                {picList
+                  .filter(pic => 
+                    pic.name.toLowerCase().includes((editBufferData.pic || '').toLowerCase())
+                  )
+                  .map((pic) => (
+                    <option key={pic.id} value={pic.name}>
+                      {pic.name}
+                    </option>
+                  ))
+                }
+              </datalist>
+            </div>
+            <div className="form-group">
+              <label>MO Number *</label>
+              <input
+                type="text"
+                value={editBufferData.moNumber}
+                onChange={(e) => setEditBufferData({ ...editBufferData, moNumber: e.target.value })}
+                placeholder="MO Number"
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                readOnly
+              />
+            </div>
+            <div className="form-group">
+              <label>SKU Name *</label>
+              <input
+                type="text"
+                value={editBufferData.skuName}
+                onChange={(e) => setEditBufferData({ ...editBufferData, skuName: e.target.value })}
+                placeholder="SKU Name"
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              />
+            </div>
+            <div className="form-group">
+              <label>Authenticity Numbers *</label>
+              {editBufferData.authenticityNumbers.map((num, index) => (
+                <div key={index} className="buffer-row-input" style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                  <input
+                    type="text"
+                    value={num}
+                    onChange={(e) => handleEditBufferNumberChange(index, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (index === editBufferData.authenticityNumbers.length - 1) {
+                          handleAddEditBufferNumber();
+                        }
+                      }
+                    }}
+                    placeholder={`Authenticity Number ${index + 1}`}
+                    style={{ flex: 1, padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  />
+                  {editBufferData.authenticityNumbers.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveEditBufferNumber(index)}
+                      style={{ padding: '8px 12px', background: '#dc2626', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                      Hapus
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={handleAddEditBufferNumber}
+                style={{ marginTop: '8px', padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+              >
+                + Tambah Nomor
+              </button>
+            </div>
+            <div className="modal-buttons">
+              <button onClick={() => {
+                setEditingBuffer(null);
+                setEditBufferData(null);
+              }} className="cancel-button">
+                Cancel
+              </button>
+              <button onClick={handleUpdateBuffer} className="confirm-button">
+                Update
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Reject Modal */}
+      {editingReject && editRejectData && (
+        <div className="modal-overlay" onClick={() => {
+          setEditingReject(null);
+          setEditRejectData(null);
+        }}>
+          <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Edit Reject Authenticity</h2>
+            <div className="form-group">
+              <label>Nama PIC *</label>
+              <input
+                type="text"
+                list="pic-datalist-edit-reject-device"
+                value={editRejectData.pic}
+                onChange={(e) => setEditRejectData({ ...editRejectData, pic: e.target.value })}
+                placeholder="Ketik untuk mencari atau pilih PIC..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              />
+              <datalist id="pic-datalist-edit-reject-device">
+                {picList
+                  .filter(pic => 
+                    pic.name.toLowerCase().includes((editRejectData.pic || '').toLowerCase())
+                  )
+                  .map((pic) => (
+                    <option key={pic.id} value={pic.name}>
+                      {pic.name}
+                    </option>
+                  ))
+                }
+              </datalist>
+            </div>
+            <div className="form-group">
+              <label>MO Number *</label>
+              <input
+                type="text"
+                value={editRejectData.moNumber}
+                onChange={(e) => setEditRejectData({ ...editRejectData, moNumber: e.target.value })}
+                placeholder="MO Number"
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                readOnly
+              />
+            </div>
+            <div className="form-group">
+              <label>SKU Name *</label>
+              <input
+                type="text"
+                value={editRejectData.skuName}
+                onChange={(e) => setEditRejectData({ ...editRejectData, skuName: e.target.value })}
+                placeholder="SKU Name"
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              />
+            </div>
+            <div className="form-group">
+              <label>Authenticity Numbers *</label>
+              {editRejectData.authenticityNumbers.map((num, index) => (
+                <div key={index} className="reject-row-input" style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                  <input
+                    type="text"
+                    value={num}
+                    onChange={(e) => handleEditRejectNumberChange(index, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (index === editRejectData.authenticityNumbers.length - 1) {
+                          handleAddEditRejectNumber();
+                        }
+                      }
+                    }}
+                    placeholder={`Authenticity Number ${index + 1}`}
+                    style={{ flex: 1, padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                  />
+                  {editRejectData.authenticityNumbers.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveEditRejectNumber(index)}
+                      style={{ padding: '8px 12px', background: '#dc2626', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                      Hapus
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={handleAddEditRejectNumber}
+                style={{ marginTop: '8px', padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+              >
+                + Tambah Nomor
+              </button>
+            </div>
+            <div className="modal-buttons">
+              <button onClick={() => {
+                setEditingReject(null);
+                setEditRejectData(null);
+              }} className="cancel-button">
+                Cancel
+              </button>
+              <button onClick={handleUpdateReject} className="confirm-button">
+                Update
               </button>
             </div>
           </div>

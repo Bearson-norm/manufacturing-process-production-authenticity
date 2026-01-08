@@ -1,0 +1,535 @@
+{
+  "info": {
+    "name": "Production Report API",
+    "description": "API Collection untuk Production Report - Get data PIC Input, SKU, MO ID, Roll, First/Last Authenticity ID",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "production-report-api"
+  },
+  "item": [
+    {
+      "name": "Production Report",
+      "item": [
+        {
+          "name": "Get All Production Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"]
+            },
+            "description": "Get all production data tanpa filter"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by Type - Liquid",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?type=liquid",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "liquid",
+                  "description": "Production type: liquid, device, cartridge, all"
+                }
+              ]
+            },
+            "description": "Get data production liquid saja"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by Type - Device",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?type=device",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "device",
+                  "description": "Production type: liquid, device, cartridge, all"
+                }
+              ]
+            },
+            "description": "Get data production device saja"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by Type - Cartridge",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?type=cartridge",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "cartridge",
+                  "description": "Production type: liquid, device, cartridge, all"
+                }
+              ]
+            },
+            "description": "Get data production cartridge saja"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by MO Number",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?mo_number={{mo_number}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "mo_number",
+                  "value": "{{mo_number}}",
+                  "description": "Manufacturing Order Number"
+                }
+              ]
+            },
+            "description": "Get data berdasarkan MO Number tertentu"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by PIC Name",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?pic={{pic_name}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "pic",
+                  "value": "{{pic_name}}",
+                  "description": "PIC name (partial match)"
+                }
+              ]
+            },
+            "description": "Get data berdasarkan nama PIC (partial match)"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by Status - Active",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?status=active",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "Status: active, completed, all"
+                }
+              ]
+            },
+            "description": "Get data dengan status active"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by Status - Completed",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?status=completed",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "completed",
+                  "description": "Status: active, completed, all"
+                }
+              ]
+            },
+            "description": "Get data dengan status completed"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by Date - Single Date",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?date_from=2025-01-07&date_to=2025-01-07",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "date_from",
+                  "value": "2025-01-07",
+                  "description": "Start date (YYYY-MM-DD)"
+                },
+                {
+                  "key": "date_to",
+                  "value": "2025-01-07",
+                  "description": "End date (YYYY-MM-DD)"
+                }
+              ]
+            },
+            "description": "Get data untuk tanggal tertentu"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by Date Range",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?date_from=2025-01-01&date_to=2025-01-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "date_from",
+                  "value": "2025-01-01",
+                  "description": "Start date (YYYY-MM-DD)"
+                },
+                {
+                  "key": "date_to",
+                  "value": "2025-01-31",
+                  "description": "End date (YYYY-MM-DD)"
+                }
+              ]
+            },
+            "description": "Get data dalam range tanggal tertentu"
+          },
+          "response": []
+        },
+        {
+          "name": "Pagination - First Page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Number of records per page"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Starting position (0 for first page)"
+                }
+              ]
+            },
+            "description": "Get first page (20 records)"
+          },
+          "response": []
+        },
+        {
+          "name": "Pagination - Second Page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?limit=20&offset=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Number of records per page"
+                },
+                {
+                  "key": "offset",
+                  "value": "20",
+                  "description": "Starting position (20 for second page)"
+                }
+              ]
+            },
+            "description": "Get second page (records 21-40)"
+          },
+          "response": []
+        },
+        {
+          "name": "Combined Filters - Liquid + Active + Date",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?type=liquid&status=active&date_from=2025-01-01&date_to=2025-01-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "liquid",
+                  "description": "Production type"
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "Status filter"
+                },
+                {
+                  "key": "date_from",
+                  "value": "2025-01-01",
+                  "description": "Start date"
+                },
+                {
+                  "key": "date_to",
+                  "value": "2025-01-31",
+                  "description": "End date"
+                }
+              ]
+            },
+            "description": "Kombinasi filter: liquid + active + date range"
+          },
+          "response": []
+        },
+        {
+          "name": "Combined Filters - MO + Type",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?type=liquid&mo_number={{mo_number}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "liquid",
+                  "description": "Production type"
+                },
+                {
+                  "key": "mo_number",
+                  "value": "{{mo_number}}",
+                  "description": "MO Number"
+                }
+              ]
+            },
+            "description": "Filter berdasarkan type dan MO number"
+          },
+          "response": []
+        },
+        {
+          "name": "Combined Filters - PIC + Date + Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?pic={{pic_name}}&status=active&date_from=2025-01-01&date_to=2025-01-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "pic",
+                  "value": "{{pic_name}}",
+                  "description": "PIC name"
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "Status"
+                },
+                {
+                  "key": "date_from",
+                  "value": "2025-01-01",
+                  "description": "Start date"
+                },
+                {
+                  "key": "date_to",
+                  "value": "2025-01-31",
+                  "description": "End date"
+                }
+              ]
+            },
+            "description": "Filter berdasarkan PIC, status, dan date range"
+          },
+          "response": []
+        },
+        {
+          "name": "Full Example - All Filters",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/report?type=liquid&mo_number={{mo_number}}&pic={{pic_name}}&status=active&date_from=2025-01-01&date_to=2025-01-31&limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "report"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "liquid",
+                  "description": "Production type: liquid, device, cartridge, all"
+                },
+                {
+                  "key": "mo_number",
+                  "value": "{{mo_number}}",
+                  "description": "Manufacturing Order Number"
+                },
+                {
+                  "key": "pic",
+                  "value": "{{pic_name}}",
+                  "description": "PIC name (partial match)"
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "Status: active, completed, all"
+                },
+                {
+                  "key": "date_from",
+                  "value": "2025-01-01",
+                  "description": "Start date (YYYY-MM-DD)"
+                },
+                {
+                  "key": "date_to",
+                  "value": "2025-01-31",
+                  "description": "End date (YYYY-MM-DD)"
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Limit results"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Offset for pagination"
+                }
+              ]
+            },
+            "description": "Example dengan semua filter tersedia"
+          },
+          "response": []
+        }
+      ],
+      "description": "Production Report API endpoints"
+    },
+    {
+      "name": "Other Production APIs",
+      "item": [
+        {
+          "name": "Get Production Liquid",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/liquid",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "liquid"]
+            },
+            "description": "Get all production liquid data (original endpoint)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Production Device",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/device",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "device"]
+            },
+            "description": "Get all production device data (original endpoint)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Production Cartridge",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/cartridge",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "cartridge"]
+            },
+            "description": "Get all production cartridge data (original endpoint)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Production Combined",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/production/combined",
+              "host": ["{{base_url}}"],
+              "path": ["api", "production", "combined"]
+            },
+            "description": "Get combined production data (original endpoint)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Other production-related API endpoints"
+    },
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check server health status"
+          },
+          "response": []
+        }
+      ],
+      "description": "Health check endpoint"
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:1234",
+      "type": "string"
+    },
+    {
+      "key": "mo_number",
+      "value": "MO001",
+      "type": "string"
+    },
+    {
+      "key": "pic_name",
+      "value": "Puput Wijanarko",
+      "type": "string"
+    }
+  ]
+}
+

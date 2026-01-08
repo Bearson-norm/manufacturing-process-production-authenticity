@@ -1,11 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
 const crypto = require('crypto');
+const { db, initializeTables } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 1234;
@@ -15,264 +15,12 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Database setup with connection pooling for concurrent requests
-const dbPath = path.join(__dirname, 'database.sqlite');
-
-// Create database connection with WAL mode for better concurrency
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database:', err);
-  } else {
-    // Enable WAL mode for better concurrent read/write performance
-    db.run('PRAGMA journal_mode = WAL;');
-    db.run('PRAGMA synchronous = NORMAL;');
-    db.run('PRAGMA cache_size = 10000;');
-    db.run('PRAGMA foreign_keys = ON;');
-    console.log('Database connected with WAL mode enabled');
-  }
-});
-
-// Initialize database tables
-db.serialize(() => {
-  // Production Liquid table
-  db.run(`CREATE TABLE IF NOT EXISTS production_liquid (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    leader_name TEXT NOT NULL,
-    shift_number TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_data TEXT NOT NULL,
-    status TEXT DEFAULT 'active',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Production Device table
-  db.run(`CREATE TABLE IF NOT EXISTS production_device (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    leader_name TEXT NOT NULL,
-    shift_number TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_data TEXT NOT NULL,
-    status TEXT DEFAULT 'active',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Production Cartridge table
-  db.run(`CREATE TABLE IF NOT EXISTS production_cartridge (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    leader_name TEXT NOT NULL,
-    shift_number TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_data TEXT NOT NULL,
-    status TEXT DEFAULT 'active',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Add new columns to existing tables if they don't exist (migration)
-  db.run(`ALTER TABLE production_liquid ADD COLUMN session_id TEXT`, () => {});
-  db.run(`ALTER TABLE production_liquid ADD COLUMN status TEXT DEFAULT 'active'`, () => {});
-  db.run(`ALTER TABLE production_liquid ADD COLUMN completed_at DATETIME`, () => {});
-  db.run(`ALTER TABLE production_device ADD COLUMN session_id TEXT`, () => {});
-  db.run(`ALTER TABLE production_device ADD COLUMN status TEXT DEFAULT 'active'`, () => {});
-  db.run(`ALTER TABLE production_device ADD COLUMN completed_at DATETIME`, () => {});
-  db.run(`ALTER TABLE production_cartridge ADD COLUMN session_id TEXT`, () => {});
-  db.run(`ALTER TABLE production_cartridge ADD COLUMN status TEXT DEFAULT 'active'`, () => {});
-  db.run(`ALTER TABLE production_cartridge ADD COLUMN completed_at DATETIME`, () => {});
-
-  // Buffer Authenticity tables
-  db.run(`CREATE TABLE IF NOT EXISTS buffer_liquid (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_numbers TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS buffer_device (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_numbers TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS buffer_cartridge (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_numbers TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Reject Authenticity tables
-  db.run(`CREATE TABLE IF NOT EXISTS reject_liquid (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_numbers TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS reject_device (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_numbers TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS reject_cartridge (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_numbers TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Combined Production table - gabungan dari production_liquid, production_device, dan production_cartridge
-  db.run(`CREATE TABLE IF NOT EXISTS production_combined (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    production_type TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    leader_name TEXT NOT NULL,
-    shift_number TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    authenticity_data TEXT NOT NULL,
-    status TEXT DEFAULT 'active',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Create index for faster queries
-  db.run(`CREATE INDEX IF NOT EXISTS idx_production_combined_mo_number ON production_combined(mo_number)`, () => {});
-  db.run(`CREATE INDEX IF NOT EXISTS idx_production_combined_created_at ON production_combined(created_at)`, () => {});
-  db.run(`CREATE INDEX IF NOT EXISTS idx_production_combined_type ON production_combined(production_type)`, () => {});
-
-  // Production Results table - unified table for all production inputs
-  db.run(`CREATE TABLE IF NOT EXISTS production_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    production_type TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    leader_name TEXT NOT NULL,
-    shift_number TEXT NOT NULL,
-    pic TEXT NOT NULL,
-    mo_number TEXT NOT NULL,
-    sku_name TEXT NOT NULL,
-    quantity REAL,
-    authenticity_data TEXT NOT NULL,
-    status TEXT DEFAULT 'active',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Create indexes for production_results
-  db.run(`CREATE INDEX IF NOT EXISTS idx_production_results_mo_number ON production_results(mo_number)`, () => {});
-  db.run(`CREATE INDEX IF NOT EXISTS idx_production_results_created_at ON production_results(created_at)`, () => {});
-  db.run(`CREATE INDEX IF NOT EXISTS idx_production_results_type ON production_results(production_type)`, () => {});
-  db.run(`CREATE INDEX IF NOT EXISTS idx_production_results_status ON production_results(status)`, () => {});
-
-  // Odoo MO Cache table - untuk menyimpan MO data dari Odoo (7 hari terakhir)
-  db.run(`CREATE TABLE IF NOT EXISTS odoo_mo_cache (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    mo_number TEXT NOT NULL UNIQUE,
-    sku_name TEXT NOT NULL,
-    quantity REAL,
-    uom TEXT,
-    note TEXT,
-    create_date TEXT,
-    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // Create indexes for odoo_mo_cache
-  db.run(`CREATE INDEX IF NOT EXISTS idx_odoo_mo_cache_mo_number ON odoo_mo_cache(mo_number)`, () => {});
-  db.run(`CREATE INDEX IF NOT EXISTS idx_odoo_mo_cache_fetched_at ON odoo_mo_cache(fetched_at)`, () => {});
-
-  // Admin Configuration table
-  db.run(`CREATE TABLE IF NOT EXISTS admin_config (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    config_key TEXT NOT NULL UNIQUE,
-    config_value TEXT,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // PIC (Person in Charge) List table
-  db.run(`CREATE TABLE IF NOT EXISTS pic_list (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    is_active INTEGER DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`, (err) => {
-    if (err) {
-      console.error('Error creating pic_list table:', err);
-      return;
-    }
-    
-    // Insert default PIC data if table is empty
-    db.get('SELECT COUNT(*) as count FROM pic_list', (err, row) => {
-      if (err || !row || row.count > 0) return;
-      
-      const defaultPICs = [
-        'Puput Wijanarko', 'Adhari Wijaya', 'Qurotul Aini', 'Fita Estikasari',
-        'Dela Wahyu Handayani', 'Thania Novelia Suseno', 'Astikaria Nababan', 'Yati Sumiati',
-        'Faliq Humam Zulian', 'Pria Nanda Pratama', 'Rendy Join Prayoga Hutapea', 'Rizqi Mahendra',
-        'Muhammad Irfan Perdinan', 'Ahmad Buseri', 'Ilyas Safiq', 'Ganjar Ferdianto',
-        'Martunis Hidayatulloh', 'Selly Juniar Andriyani', 'Irma Anggraeni', 'Evi Dwi Setiani',
-        'Siti Sopiah', 'Dede Mustika Alawiah', 'Diah Ayu Novianti', 'Anisa Putri Ramadani',
-        'Ahmad Ari Ripa\'i', 'Andre Romadoni', 'Dwi Nova Safitri', 'Sahroni',
-        'Niken Susanti', 'Ubedilah', 'Aulia Rachma Putri', 'Zimam Mulhakam',
-        'Yuliyanti Putri Pratiwi', 'Meitya Rifai Yusnah', 'Nurhadi', 'Bagas Prasetya',
-        'Hendra Azwar Eka Saputra', 'Rini Rokhimah', 'Iin Silpiana Dewi', 'Muhammad Abdul Halim',
-        'Ahmad Muhaimin', 'Sharani Noor padilah', 'Iin Rofizah', 'Frisca Nurjannah',
-        'Windi Nur Azizah', 'Muhammad Ilham', 'Jonathan Claudio P', 'Teguh Santoso',
-        'Adi Ardiansyah', 'Widi Dwi Gita', 'Nurul Amelia', 'Dini Milati',
-        'Sofhie Angellita', 'Annisa Rahmawati', 'Dessy Indriyani', 'Suhendra Jaya Kusuma',
-        'Ardani', 'Rohiah', 'Novita Astriani', 'Nurul Khofiduriah',
-        'Galing Resdianto', 'Nurbaiti', 'Andri Mulyadi', 'Tiaruli Nababan',
-        'Indadari Windrayanti', 'Muhammad Apandi', 'Vini Claras Anatasyia', 'Siti Mahidah',
-        'Rusnia Ningsih', 'Randy Virmansyah', 'Silvia Fransiska', 'Armah Wati',
-        'Euis Santi', 'Hermawan', 'Linda Haryati', 'Aditya Rachman',
-        'Calvin Lama Tokan', 'Norris Samuel Silaban', 'Dora Nopinda', 'Vita Lativa',
-        'Nur Azizah', 'Devi Yanti', 'Ita Purnamasari', 'Rizky Septian',
-        'Laila Arifatul Hilmi', 'Erfild Ardi Mahardika', 'Hanun Dhiya Imtiaz', 'Mayang Puspitaningrum',
-        'Hikmatul Iman', 'Muhammad Tedi Al Bukhori', 'Mahardika', 'Sevira Yunita Andini',
-        'Gista Nadia', 'Parjiyanti', 'Rifki Maulana Rafif', 'Sri hoviya',
-        'Amanda Tifara', 'Laras Wati', 'Dwi Setia Putri', 'Putri Bela Savira',
-        'Siti Hasanah', 'Farhan Rizky Wahyudi', 'Adam Rizki', 'Tomi Wijaya',
-        'Syahrizal', 'Sherly Triananda Lisa', 'Henry Daniarto', 'Sindy Yusnia',
-        'Inka Purnama Sari', 'Larasati', 'Muhamad Hojaji Muslim', 'Sopiyana', 'Yuyun'
-      ];
-      
-      const stmt = db.prepare('INSERT INTO pic_list (name) VALUES (?)');
-      defaultPICs.forEach(name => {
-        stmt.run(name);
-      });
-      stmt.finalize();
-      console.log('✅ Default PIC list initialized');
-    });
-  });
+// Initialize database tables using PostgreSQL
+initializeTables().then(() => {
+  console.log('Database initialized and ready');
+}).catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
 });
 
 // Health check endpoint for Traefik and monitoring
@@ -1349,7 +1097,6 @@ app.get('/api/external/manufacturing-data/by-date', apiKeyAuth, async (req, res)
     const moGroups = {};
     uniqueMoNumbers.forEach(moNumber => {
       moGroups[moNumber] = {
-        mo_number: moNumber,
         sessions: {}
       };
     });
@@ -1391,7 +1138,6 @@ app.get('/api/external/manufacturing-data/by-date', apiKeyAuth, async (req, res)
 
     // Convert to array format
     const result = Object.values(moGroups).map(moGroup => ({
-      mo_number: moGroup.mo_number,
       total_sessions: Object.keys(moGroup.sessions).length,
       sessions: Object.values(moGroup.sessions)
     }));
@@ -1406,6 +1152,131 @@ app.get('/api/external/manufacturing-data/by-date', apiKeyAuth, async (req, res)
 
   } catch (error) {
     console.error('Error fetching manufacturing data by date:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+// Endpoint untuk mendapatkan data MO dengan format sederhana berdasarkan range waktu
+app.get('/api/external/manufacturing-report/simple', apiKeyAuth, async (req, res) => {
+  try {
+    const { start_date, end_date, completed_at } = req.query;
+    
+    // Jika completed_at diberikan, gunakan untuk single date
+    // Jika start_date dan end_date diberikan, gunakan untuk range
+    let dateCondition = '';
+    let params = [];
+    
+    if (completed_at) {
+      // Single date query
+      dateCondition = 'DATE(completed_at) = DATE(?)';
+      params = [completed_at];
+    } else if (start_date && end_date) {
+      // Date range query
+      dateCondition = 'DATE(completed_at) BETWEEN DATE(?) AND DATE(?)';
+      params = [start_date, end_date];
+    } else if (start_date) {
+      // Only start_date provided, get from that date onwards
+      dateCondition = 'DATE(completed_at) >= DATE(?)';
+      params = [start_date];
+    } else if (end_date) {
+      // Only end_date provided, get up to that date
+      dateCondition = 'DATE(completed_at) <= DATE(?)';
+      params = [end_date];
+    } else {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Parameter required: completed_at (YYYY-MM-DD) OR start_date and/or end_date (YYYY-MM-DD)' 
+      });
+    }
+
+    // Query semua tabel production
+    const tables = [
+      { name: 'production_liquid', type: 'liquid' },
+      { name: 'production_device', type: 'device' },
+      { name: 'production_cartridge', type: 'cartridge' }
+    ];
+
+    const productionPromises = tables.map(table => {
+      return new Promise((resolve, reject) => {
+        const query = `
+          SELECT 
+            pic as pic_input,
+            sku_name,
+            mo_number as mo_id,
+            authenticity_data,
+            completed_at,
+            '${table.type}' as production_type
+          FROM ${table.name}
+          WHERE status = 'completed' 
+            AND completed_at IS NOT NULL 
+            AND ${dateCondition}
+          ORDER BY completed_at ASC, mo_number ASC
+        `;
+        
+        db.all(query, params, (err, rows) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve(rows);
+        });
+      });
+    });
+
+    const productionResults = await Promise.all(productionPromises);
+    const allProduction = productionResults.flat();
+
+    if (allProduction.length === 0) {
+      return res.json({
+        success: true,
+        filter: completed_at ? { completed_at } : { start_date, end_date },
+        total_records: 0,
+        data: []
+      });
+    }
+
+    // Parse dan flatten data untuk setiap roll
+    const flattenedData = [];
+    
+    allProduction.forEach(row => {
+      let authenticityData;
+      try {
+        authenticityData = typeof row.authenticity_data === 'string' 
+          ? JSON.parse(row.authenticity_data) 
+          : row.authenticity_data;
+      } catch (e) {
+        authenticityData = [];
+      }
+
+      // Setiap roll mendapat row tersendiri
+      if (Array.isArray(authenticityData)) {
+        authenticityData.forEach(auth => {
+          flattenedData.push({
+            pic_input: row.pic_input || '',
+            sku: row.sku_name || '',
+            mo_id: row.mo_id || '',
+            roll: auth.rollNumber || '',
+            first_authenticity_id: auth.firstAuthenticity || '',
+            last_authenticity_id: auth.lastAuthenticity || '',
+            completed_at: row.completed_at || null,
+            production_type: row.production_type || ''
+          });
+        });
+      }
+    });
+
+    res.json({
+      success: true,
+      filter: completed_at ? { completed_at } : { start_date, end_date },
+      total_records: flattenedData.length,
+      data: flattenedData
+    });
+
+  } catch (error) {
+    console.error('Error fetching simple manufacturing report:', error);
     res.status(500).json({ 
       success: false,
       error: error.message 
@@ -2121,6 +1992,158 @@ app.post('/api/reject/cartridge', (req, res) => {
   );
 });
 
+// PUT endpoints to update buffer data
+app.put('/api/buffer/liquid/:id', (req, res) => {
+  const { id } = req.params;
+  const { pic, mo_number, sku_name, authenticity_numbers } = req.body;
+  const normalizedNumbers = normalizeAuthenticityNumbers(authenticity_numbers);
+  
+  db.run(
+    `UPDATE buffer_liquid SET pic = ?, mo_number = ?, sku_name = ?, authenticity_numbers = ? WHERE id = ?`,
+    [pic, mo_number, sku_name, JSON.stringify(normalizedNumbers), id],
+    function(err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Buffer data not found' });
+        return;
+      }
+      res.json({ 
+        id: id, 
+        message: 'Buffer data updated successfully'
+      });
+    }
+  );
+});
+
+app.put('/api/buffer/device/:id', (req, res) => {
+  const { id } = req.params;
+  const { pic, mo_number, sku_name, authenticity_numbers } = req.body;
+  const normalizedNumbers = normalizeAuthenticityNumbers(authenticity_numbers);
+  
+  db.run(
+    `UPDATE buffer_device SET pic = ?, mo_number = ?, sku_name = ?, authenticity_numbers = ? WHERE id = ?`,
+    [pic, mo_number, sku_name, JSON.stringify(normalizedNumbers), id],
+    function(err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Buffer data not found' });
+        return;
+      }
+      res.json({ 
+        id: id, 
+        message: 'Buffer data updated successfully'
+      });
+    }
+  );
+});
+
+app.put('/api/buffer/cartridge/:id', (req, res) => {
+  const { id } = req.params;
+  const { pic, mo_number, sku_name, authenticity_numbers } = req.body;
+  const normalizedNumbers = normalizeAuthenticityNumbers(authenticity_numbers);
+  
+  db.run(
+    `UPDATE buffer_cartridge SET pic = ?, mo_number = ?, sku_name = ?, authenticity_numbers = ? WHERE id = ?`,
+    [pic, mo_number, sku_name, JSON.stringify(normalizedNumbers), id],
+    function(err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Buffer data not found' });
+        return;
+      }
+      res.json({ 
+        id: id, 
+        message: 'Buffer data updated successfully'
+      });
+    }
+  );
+});
+
+// PUT endpoints to update reject data
+app.put('/api/reject/liquid/:id', (req, res) => {
+  const { id } = req.params;
+  const { pic, mo_number, sku_name, authenticity_numbers } = req.body;
+  const normalizedNumbers = normalizeAuthenticityNumbers(authenticity_numbers);
+  
+  db.run(
+    `UPDATE reject_liquid SET pic = ?, mo_number = ?, sku_name = ?, authenticity_numbers = ? WHERE id = ?`,
+    [pic, mo_number, sku_name, JSON.stringify(normalizedNumbers), id],
+    function(err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Reject data not found' });
+        return;
+      }
+      res.json({ 
+        id: id, 
+        message: 'Reject data updated successfully'
+      });
+    }
+  );
+});
+
+app.put('/api/reject/device/:id', (req, res) => {
+  const { id } = req.params;
+  const { pic, mo_number, sku_name, authenticity_numbers } = req.body;
+  const normalizedNumbers = normalizeAuthenticityNumbers(authenticity_numbers);
+  
+  db.run(
+    `UPDATE reject_device SET pic = ?, mo_number = ?, sku_name = ?, authenticity_numbers = ? WHERE id = ?`,
+    [pic, mo_number, sku_name, JSON.stringify(normalizedNumbers), id],
+    function(err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Reject data not found' });
+        return;
+      }
+      res.json({ 
+        id: id, 
+        message: 'Reject data updated successfully'
+      });
+    }
+  );
+});
+
+app.put('/api/reject/cartridge/:id', (req, res) => {
+  const { id } = req.params;
+  const { pic, mo_number, sku_name, authenticity_numbers } = req.body;
+  const normalizedNumbers = normalizeAuthenticityNumbers(authenticity_numbers);
+  
+  db.run(
+    `UPDATE reject_cartridge SET pic = ?, mo_number = ?, sku_name = ?, authenticity_numbers = ? WHERE id = ?`,
+    [pic, mo_number, sku_name, JSON.stringify(normalizedNumbers), id],
+    function(err) {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Reject data not found' });
+        return;
+      }
+      res.json({ 
+        id: id, 
+        message: 'Reject data updated successfully'
+      });
+    }
+  );
+});
+
 // Manufacturing Report API Endpoint
 // GET manufacturing report data with calculations
 app.get('/api/reports/manufacturing', async (req, res) => {
@@ -2139,12 +2162,12 @@ app.get('/api/reports/manufacturing', async (req, res) => {
     
     // Filter by date range if specified
     if (startDate) {
-      whereConditions.push('DATE(created_at) >= DATE(?)');
+      whereConditions.push('created_at::date >= $' + (params.length + 1) + '::date');
       params.push(startDate);
     }
     
     if (endDate) {
-      whereConditions.push('DATE(created_at) <= DATE(?)');
+      whereConditions.push('created_at::date <= $' + (params.length + 1) + '::date');
       params.push(endDate);
     }
     
@@ -2302,20 +2325,20 @@ app.get('/api/reports/manufacturing', async (req, res) => {
 app.get('/api/statistics/production-by-leader', (req, res) => {
   const { period, startDate, endDate, productionType } = req.query;
   
-  // Build date filter based on period
+  // Build date filter based on period (PostgreSQL syntax)
   let dateFilter = '';
   if (period === 'day') {
     // Last 7 days
-    dateFilter = "AND DATE(created_at) >= DATE('now', '-7 days')";
+    dateFilter = "AND created_at::date >= CURRENT_DATE - INTERVAL '7 days'";
   } else if (period === 'week') {
     // Last 8 weeks
-    dateFilter = "AND DATE(created_at) >= DATE('now', '-56 days')";
+    dateFilter = "AND created_at::date >= CURRENT_DATE - INTERVAL '56 days'";
   } else if (period === 'month') {
     // Last 12 months
-    dateFilter = "AND DATE(created_at) >= DATE('now', '-12 months')";
+    dateFilter = "AND created_at::date >= CURRENT_DATE - INTERVAL '12 months'";
   } else if (startDate && endDate) {
     // Custom date range
-    dateFilter = `AND DATE(created_at) BETWEEN DATE('${startDate}') AND DATE('${endDate}')`;
+    dateFilter = `AND created_at::date BETWEEN '${startDate}'::date AND '${endDate}'::date`;
   }
   
   // Build production type filter
@@ -2329,11 +2352,17 @@ app.get('/api/statistics/production-by-leader', (req, res) => {
   // Query each production type
   const queries = types.map(type => {
     return new Promise((resolve, reject) => {
+      // Validate type to prevent SQL injection
+      const validTypes = ['liquid', 'device', 'cartridge'];
+      if (!validTypes.includes(type)) {
+        return reject(new Error(`Invalid production type: ${type}`));
+      }
+      
       const query = `
         SELECT 
-          '${type}' as production_type,
+          $1 as production_type,
           leader_name,
-          DATE(created_at) as date,
+          created_at::date as date,
           session_id,
           mo_number,
           authenticity_data
@@ -2342,9 +2371,11 @@ app.get('/api/statistics/production-by-leader', (req, res) => {
         ORDER BY created_at DESC
       `;
       
-      db.all(query, [], (err, rows) => {
+      db.all(query, [type], (err, rows) => {
         if (err) {
           console.error(`Error querying production_${type}:`, err);
+          console.error('Query:', query);
+          console.error('Error details:', err.message);
           reject(err);
         } else {
           // Parse authenticity data and calculate quantities
@@ -2381,9 +2412,13 @@ app.get('/api/statistics/production-by-leader', (req, res) => {
           
           const bufferRejectPromises = moNumbers.map(moNumber => {
             return new Promise((resolveInner) => {
-              // Get buffer count
+              // Get buffer count - validate type first
+              if (!['liquid', 'device', 'cartridge'].includes(type)) {
+                return resolveInner({ mo_number: moNumber, buffer_count: 0, reject_count: 0 });
+              }
+              
               db.all(
-                `SELECT authenticity_numbers FROM buffer_${type} WHERE mo_number = ?`,
+                `SELECT authenticity_numbers FROM buffer_${type} WHERE mo_number = $1`,
                 [moNumber],
                 (bufferErr, bufferRows) => {
                   let bufferCount = 0;
@@ -2402,7 +2437,7 @@ app.get('/api/statistics/production-by-leader', (req, res) => {
                   
                   // Get reject count
                   db.all(
-                    `SELECT authenticity_numbers FROM reject_${type} WHERE mo_number = ?`,
+                    `SELECT authenticity_numbers FROM reject_${type} WHERE mo_number = $1`,
                     [moNumber],
                     (rejectErr, rejectRows) => {
                       let rejectCount = 0;
@@ -2471,23 +2506,36 @@ app.get('/api/statistics/production-by-leader', (req, res) => {
       const sessionSet = {};
       
       combinedData.forEach(row => {
+        // Skip rows without date
+        if (!row.date) {
+          return;
+        }
+        
         let periodKey;
-        const date = new Date(row.date + 'T00:00:00');
+        const dateStr = String(row.date);
+        const date = new Date(dateStr + (dateStr.includes('T') ? '' : 'T00:00:00'));
+        
+        // Check if date is valid
+        if (isNaN(date.getTime())) {
+          console.warn('Invalid date:', row.date);
+          return;
+        }
         
         if (period === 'day') {
           // Group by day
-          periodKey = row.date;
+          periodKey = dateStr.split('T')[0]; // Get YYYY-MM-DD part
         } else if (period === 'week') {
           // Group by week (start of week)
           const dayOfWeek = date.getDay();
           const diff = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust to Monday
-          const weekStart = new Date(date.setDate(diff));
+          const weekStart = new Date(date);
+          weekStart.setDate(diff);
           periodKey = weekStart.toISOString().split('T')[0];
         } else if (period === 'month') {
           // Group by month
-          periodKey = row.date.substring(0, 7); // YYYY-MM
+          periodKey = dateStr.substring(0, 7); // YYYY-MM
         } else {
-          periodKey = row.date;
+          periodKey = dateStr.split('T')[0];
         }
         
         const key = `${periodKey}_${row.leader_name}_${row.production_type}`;
@@ -2525,9 +2573,17 @@ app.get('/api/statistics/production-by-leader', (req, res) => {
       
       // Convert to array and sort
       const resultArray = Object.values(groupedData).sort((a, b) => {
-        if (a.period !== b.period) return b.period.localeCompare(a.period);
-        if (a.leader_name !== b.leader_name) return a.leader_name.localeCompare(b.leader_name);
-        return a.production_type.localeCompare(b.production_type);
+        // Ensure period is string for comparison
+        const periodA = String(a.period || '');
+        const periodB = String(b.period || '');
+        const leaderA = String(a.leader_name || '');
+        const leaderB = String(b.leader_name || '');
+        const typeA = String(a.production_type || '');
+        const typeB = String(b.production_type || '');
+        
+        if (periodA !== periodB) return periodB.localeCompare(periodA);
+        if (leaderA !== leaderB) return leaderA.localeCompare(leaderB);
+        return typeA.localeCompare(typeB);
       });
       
       res.json({ success: true, data: resultArray, period: period || 'custom' });
@@ -2681,7 +2737,7 @@ app.get('/api/admin/config', (req, res) => {
     }
 
     // Check if table exists first
-    db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='admin_config'", (tableErr, tableRow) => {
+    db.get("SELECT table_name as name FROM information_schema.tables WHERE table_schema='public' AND table_name='admin_config'", (tableErr, tableRow) => {
       if (tableErr) {
         console.error('Error checking admin_config table:', tableErr);
         // Return default values on error
@@ -2854,7 +2910,7 @@ app.put('/api/admin/config', (req, res) => {
   }
 
   // Check if table exists, if not create it
-  db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='admin_config'", (tableErr, tableRow) => {
+  db.get("SELECT table_name as name FROM information_schema.tables WHERE table_schema='public' AND table_name='admin_config'", (tableErr, tableRow) => {
     if (tableErr || !tableRow) {
       // Create table if it doesn't exist
       db.run(`CREATE TABLE IF NOT EXISTS admin_config (
@@ -2879,9 +2935,10 @@ app.put('/api/admin/config', (req, res) => {
     // Save sessionId if provided
     if (sessionId) {
       db.run(
-        `INSERT OR REPLACE INTO admin_config (config_key, config_value, updated_at) 
-         VALUES ('odoo_session_id', ?, CURRENT_TIMESTAMP)`,
-        [sessionId],
+        `INSERT INTO admin_config (config_key, config_value, updated_at) 
+         VALUES ($1, $2, CURRENT_TIMESTAMP)
+         ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+        ['odoo_session_id', sessionId],
         function(err) {
           if (err) {
             console.error('Error saving session_id config:', err);
@@ -2899,9 +2956,10 @@ app.put('/api/admin/config', (req, res) => {
       // Save odooBaseUrl if provided
       if (odooBaseUrl !== undefined) {
         db.run(
-          `INSERT OR REPLACE INTO admin_config (config_key, config_value, updated_at) 
-           VALUES ('odoo_base_url', ?, CURRENT_TIMESTAMP)`,
-          [odooBaseUrl || 'https://foomx.odoo.com'],
+          `INSERT INTO admin_config (config_key, config_value, updated_at) 
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+          ['odoo_base_url', odooBaseUrl || 'https://foomx.odoo.com'],
           function(err2) {
             if (err2) {
               console.error('Error saving base_url config:', err2);
@@ -2920,9 +2978,10 @@ app.put('/api/admin/config', (req, res) => {
       // Save externalApiUrl (general/fallback) if provided
       if (externalApiUrl !== undefined) {
         db.run(
-          `INSERT OR REPLACE INTO admin_config (config_key, config_value, updated_at) 
-           VALUES ('external_api_url', ?, CURRENT_TIMESTAMP)`,
-          [externalApiUrl || 'https://foom-dash.vercel.app/API'],
+          `INSERT INTO admin_config (config_key, config_value, updated_at) 
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+          ['external_api_url', externalApiUrl || 'https://foom-dash.vercel.app/API'],
           function(err3) {
             if (err3) {
               console.error('Error saving external_api_url config:', err3);
@@ -2941,9 +3000,10 @@ app.put('/api/admin/config', (req, res) => {
       // Save externalApiUrlActive if provided
       if (externalApiUrlActive !== undefined) {
         db.run(
-          `INSERT OR REPLACE INTO admin_config (config_key, config_value, updated_at) 
-           VALUES ('external_api_url_active', ?, CURRENT_TIMESTAMP)`,
-          [externalApiUrlActive || 'https://foom-dash.vercel.app/API'],
+          `INSERT INTO admin_config (config_key, config_value, updated_at) 
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+          ['external_api_url_active', externalApiUrlActive || 'https://foom-dash.vercel.app/API'],
           function(err4) {
             if (err4) {
               console.error('Error saving external_api_url_active config:', err4);
@@ -2962,9 +3022,10 @@ app.put('/api/admin/config', (req, res) => {
       // Save externalApiUrlCompleted if provided
       if (externalApiUrlCompleted !== undefined) {
         db.run(
-          `INSERT OR REPLACE INTO admin_config (config_key, config_value, updated_at) 
-           VALUES ('external_api_url_completed', ?, CURRENT_TIMESTAMP)`,
-          [externalApiUrlCompleted || 'https://foom-dash.vercel.app/API'],
+          `INSERT INTO admin_config (config_key, config_value, updated_at) 
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+          ['external_api_url_completed', externalApiUrlCompleted || 'https://foom-dash.vercel.app/API'],
           function(err5) {
             if (err5) {
               console.error('Error saving external_api_url_completed config:', err5);
@@ -2983,9 +3044,10 @@ app.put('/api/admin/config', (req, res) => {
       // Save API key if provided (only if explicitly set, not on every config save)
       if (apiKey !== undefined && apiKey !== null && apiKey !== '') {
         db.run(
-          `INSERT OR REPLACE INTO admin_config (config_key, config_value, updated_at) 
-           VALUES ('api_key', ?, CURRENT_TIMESTAMP)`,
-          [apiKey],
+          `INSERT INTO admin_config (config_key, config_value, updated_at) 
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+          ['api_key', apiKey],
           function(err6) {
             if (err6) {
               console.error('Error saving api_key config:', err6);
@@ -3009,7 +3071,7 @@ app.post('/api/admin/generate-api-key', (req, res) => {
     const apiKey = crypto.randomBytes(32).toString('hex');
     
     // Check if table exists, if not create it
-    db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='admin_config'", (tableErr, tableRow) => {
+    db.get("SELECT table_name as name FROM information_schema.tables WHERE table_schema='public' AND table_name='admin_config'", (tableErr, tableRow) => {
       if (tableErr || !tableRow) {
         // Create table if it doesn't exist
         db.run(`CREATE TABLE IF NOT EXISTS admin_config (
@@ -3032,9 +3094,10 @@ app.post('/api/admin/generate-api-key', (req, res) => {
     
     function saveApiKey() {
       db.run(
-        `INSERT OR REPLACE INTO admin_config (config_key, config_value, updated_at) 
-         VALUES ('api_key', ?, CURRENT_TIMESTAMP)`,
-        [apiKey],
+        `INSERT INTO admin_config (config_key, config_value, updated_at) 
+         VALUES ($1, $2, CURRENT_TIMESTAMP)
+         ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+        ['api_key', apiKey],
         function(err) {
           if (err) {
             console.error('Error saving API key:', err);
@@ -3092,10 +3155,10 @@ app.get('/api/admin/mo-cache-details', (req, res) => {
     // Get sample of old records based on create_date (not fetched_at)
     db.all(
       `SELECT mo_number, fetched_at, create_date, 
-              datetime('now') as current_time,
-              datetime('now', '-7 days') as threshold
+              NOW() as current_time,
+              NOW() - INTERVAL '7 days' as threshold
        FROM odoo_mo_cache 
-       WHERE datetime(create_date) < datetime('now', '-7 days')
+       WHERE create_date < NOW() - INTERVAL '7 days'
        ORDER BY create_date ASC 
        LIMIT 10`,
       [],
@@ -3108,7 +3171,7 @@ app.get('/api/admin/mo-cache-details', (req, res) => {
         db.all(
           `SELECT mo_number, fetched_at, create_date 
            FROM odoo_mo_cache 
-           WHERE datetime(create_date) >= datetime('now', '-7 days')
+           WHERE create_date >= NOW() - INTERVAL '7 days'
            ORDER BY create_date DESC 
            LIMIT 10`,
           [],
@@ -3125,8 +3188,8 @@ app.get('/api/admin/mo-cache-details', (req, res) => {
                  MIN(fetched_at) as oldest_fetched,
                  MAX(fetched_at) as newest_fetched,
                  COUNT(*) as total,
-                 datetime('now') as current_time,
-                 datetime('now', '-7 days') as threshold
+                 NOW() as current_time,
+                 NOW() - INTERVAL '7 days' as threshold
                FROM odoo_mo_cache`,
               (err3, rangeRow) => {
                 if (err3) {
@@ -3364,7 +3427,7 @@ app.get('/api/admin/mo-stats', (req, res) => {
     }
 
     // Check if table exists first
-    db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='odoo_mo_cache'", (tableErr, tableRow) => {
+    db.get("SELECT table_name as name FROM information_schema.tables WHERE table_schema='public' AND table_name='odoo_mo_cache'", (tableErr, tableRow) => {
       if (tableErr) {
         console.error('Error checking odoo_mo_cache table:', tableErr);
         // Return zero stats on error
@@ -3407,7 +3470,7 @@ app.get('/api/admin/mo-stats', (req, res) => {
         const total = row ? row.total : 0;
         
         // Calculate 7 days ago using datetime arithmetic
-        // SQLite uses datetime('now', '-7 days') for proper date calculation
+        // PostgreSQL uses NOW() - INTERVAL '7 days' for proper date calculation
         const now = new Date();
         const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
         const sevenDaysAgoStr = sevenDaysAgo.toISOString().replace('T', ' ').substring(0, 19);
@@ -3420,7 +3483,7 @@ app.get('/api/admin/mo-stats', (req, res) => {
         // Use create_date, not fetched_at
         db.get(
           `SELECT COUNT(*) as count FROM odoo_mo_cache 
-           WHERE datetime(create_date) >= datetime('now', '-7 days')`,
+           WHERE create_date >= NOW() - INTERVAL '7 days'`,
           [],
           (err2, row2) => {
             if (err2) {
@@ -3440,7 +3503,7 @@ app.get('/api/admin/mo-stats', (req, res) => {
             // Count records older than 7 days based on create_date
             db.get(
               `SELECT COUNT(*) as count FROM odoo_mo_cache 
-               WHERE datetime(create_date) < datetime('now', '-7 days')`,
+               WHERE create_date < NOW() - INTERVAL '7 days'`,
               [],
               (err3, row3) => {
                 if (err3) {
@@ -3578,7 +3641,7 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
       // We use create_date (from Odoo) not fetched_at (when we cached it)
       db.get(
         `SELECT COUNT(*) as count FROM odoo_mo_cache 
-         WHERE datetime(create_date) < datetime('now', '-7 days')`,
+         WHERE create_date < NOW() - INTERVAL '7 days'`,
         (countErr, countRow) => {
           if (countErr) {
             console.error('❌ [Cleanup] Error counting old records:', countErr);
@@ -3591,10 +3654,10 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
           // Also get sample of old records for debugging
           db.all(
             `SELECT mo_number, create_date, fetched_at, 
-                    datetime('now') as current_time, 
-                    datetime('now', '-7 days') as threshold
+                    NOW() as current_time, 
+                    NOW() - INTERVAL '7 days' as threshold
              FROM odoo_mo_cache 
-             WHERE datetime(create_date) < datetime('now', '-7 days')
+             WHERE create_date < NOW() - INTERVAL '7 days'
              LIMIT 5`,
             (sampleErr, sampleRows) => {
               if (!sampleErr && sampleRows && sampleRows.length > 0) {
@@ -3604,7 +3667,7 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
               // Delete MO records where create_date is older than 7 days
               // This is based on when the MO was created in Odoo, not when we cached it
               const deleteQuery = `DELETE FROM odoo_mo_cache 
-                                   WHERE datetime(create_date) < datetime('now', '-7 days')`;
+                                   WHERE create_date < NOW() - INTERVAL '7 days'`;
 
               console.log(`🗑️  [Cleanup] Executing delete query to remove records with create_date older than 7 days...`);
               console.log(`🗑️  [Cleanup] Query: ${deleteQuery}`);
@@ -3805,7 +3868,7 @@ app.get('/api/odoo/mo-list', async (req, res) => {
       SELECT mo_number, sku_name, quantity, uom, note, create_date
       FROM odoo_mo_cache
       WHERE LOWER(note) LIKE LOWER(?)
-        AND datetime(create_date) >= datetime('now', '-7 days')
+        AND create_date >= NOW() - INTERVAL '7 days'
       ORDER BY create_date DESC
       LIMIT 1000
     `;
@@ -3876,18 +3939,18 @@ app.get('/api/production/combined', (req, res) => {
   
   // Filter by exact Created_at
   if (created_at) {
-    query += ' AND DATE(created_at) = DATE(?)';
+    query += ' AND created_at::date = $' + (params.length + 1) + '::date';
     params.push(created_at);
   }
   
   // Filter by date range
   if (startDate) {
-    query += ' AND DATE(created_at) >= DATE(?)';
+    query += ' AND created_at::date >= $' + (params.length + 1) + '::date';
     params.push(startDate);
   }
   
   if (endDate) {
-    query += ' AND DATE(created_at) <= DATE(?)';
+    query += ' AND created_at::date <= $' + (params.length + 1) + '::date';
     params.push(endDate);
   }
   
@@ -4248,17 +4311,24 @@ async function updateMoDataFromOdoo() {
             return new Promise((resolve, reject) => {
               // Parse create_date from Odoo to ensure we have the original date
               const moCreateDate = mo.create_date || new Date().toISOString();
+              const productName = mo.product_id ? mo.product_id[1] : 'N/A';
+              const productQty = mo.product_qty || 0;
+              const productUom = mo.product_uom_id ? mo.product_uom_id[1] : '';
+              const moNote = mo.note || '';
               
               db.run(
-                `INSERT OR REPLACE INTO odoo_mo_cache 
+                `INSERT INTO odoo_mo_cache 
                  (mo_number, sku_name, quantity, uom, note, create_date, fetched_at, last_updated) 
-                 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+                 VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                 ON CONFLICT (mo_number) DO UPDATE SET 
+                   sku_name = $2, quantity = $3, uom = $4, note = $5, 
+                   create_date = $6, last_updated = CURRENT_TIMESTAMP`,
                 [
                   mo.name,
-                  mo.product_id ? mo.product_id[1] : 'N/A',
-                  mo.product_qty || 0,
-                  mo.product_uom_id ? mo.product_uom_id[1] : '',
-                  mo.note || '',
+                  productName,
+                  productQty,
+                  productUom,
+                  moNote,
                   moCreateDate
                 ],
                 function(insertErr) {
@@ -4385,8 +4455,8 @@ function cleanupOldMoData() {
       // Delete MO records older than 7 days
       db.run(
         `DELETE FROM odoo_mo_cache 
-         WHERE DATE(fetched_at) < DATE('now', '-7 days') 
-         AND mo_number NOT IN (${Array.from(moNumbersFrom7Days).map(() => '?').join(',')})`,
+         WHERE fetched_at::date < CURRENT_DATE - INTERVAL '7 days' 
+         AND mo_number NOT IN (${Array.from(moNumbersFrom7Days).map((_, idx) => `$${idx + 1}`).join(',')})`,
         Array.from(moNumbersFrom7Days),
         function(deleteErr) {
           if (deleteErr) {
@@ -4521,7 +4591,7 @@ async function sendMoListToExternalAPI() {
       SELECT mo_number, sku_name, quantity
       FROM odoo_mo_cache
       WHERE LOWER(note) LIKE LOWER('%liquid%')
-        AND datetime(create_date) >= datetime('now', '-7 days')
+        AND create_date >= NOW() - INTERVAL '7 days'
       ORDER BY create_date DESC
     `;
     

@@ -1,487 +1,510 @@
-# VPS Deployment Guide - Manufacturing Process API
+# 📘 Panduan Deployment dan Migrasi ke VPS
 
-## Prerequisites
+Panduan lengkap untuk mengupdate sistem dari SQLite ke PostgreSQL di VPS.
 
-- VPS dengan Ubuntu 20.04/22.04 atau CentOS 7/8
-- Node.js v14.x atau lebih baru
-- PM2 untuk process management
-- Nginx untuk reverse proxy (optional)
-- Domain name (optional, tapi recommended)
+---
 
-## Step 1: Persiapan VPS
+## 📋 Daftar Isi
 
-### 1.1 Update System
-```bash
-sudo apt update && sudo apt upgrade -y
-```
+1. [Persiapan](#persiapan)
+2. [Backup Database](#backup-database)
+3. [Deployment ke VPS](#deployment-ke-vps)
+4. [Setup PostgreSQL](#setup-postgresql)
+5. [Migrasi Database](#migrasi-database)
+6. [Verifikasi](#verifikasi)
+7. [Rollback (Jika Gagal)](#rollback-jika-gagal)
+8. [Troubleshooting](#troubleshooting)
 
-### 1.2 Install Node.js
-```bash
-# Install Node.js 18.x LTS
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt install -y nodejs
+---
 
-# Verify installation
-node --version
-npm --version
-```
+## 🎯 Persiapan
 
-### 1.3 Install PM2
-```bash
-sudo npm install -g pm2
-```
-
-## Step 2: Upload Project ke VPS
-
-### Option A: Using Git (Recommended)
-```bash
-cd /var/www
-sudo mkdir manufacturing-api
-sudo chown $USER:$USER manufacturing-api
-cd manufacturing-api
-
-git clone <your-repo-url> .
-```
-
-### Option B: Using SCP/SFTP
-```bash
-# From local machine
-scp -r Manufacturing-Process-Production-Authenticity user@your-vps-ip:/var/www/
-```
-
-## Step 3: Setup Project
-
-### 3.1 Install Dependencies
-```bash
-cd /var/www/manufacturing-api
-
-# Install server dependencies
-cd server
-npm install --production
-cd ..
-
-# Install client dependencies and build
-cd client
-npm install
-npm run build
-cd ..
-```
-
-### 3.2 Create Environment File
-```bash
-cd server
-cp ../.env.example .env
-nano .env
-```
-
-Edit `.env` file:
-```env
-NODE_ENV=production
-PORT=3000
-
-# IMPORTANT: Change this to a secure random string
-API_KEY=your_very_secure_random_api_key_12345
-
-# Add your VPS IP or domain
-ALLOWED_ORIGINS=https://yourdomain.com,http://your-vps-ip:3000
-
-# Odoo Configuration
-ODOO_API_URL=https://foomx.odoo.com
-ODOO_SESSION_ID=your_actual_session_id
-
-DATABASE_PATH=./database.sqlite
-LOG_LEVEL=info
-
-# Rate Limiting
-RATE_LIMIT_WINDOW_MS=900000
-RATE_LIMIT_MAX_REQUESTS=100
-```
-
-### 3.3 Setup Database Permissions
-```bash
-cd server
-touch database.sqlite
-chmod 664 database.sqlite
-```
-
-## Step 4: Configure PM2
-
-### 4.1 Create PM2 Ecosystem File
-```bash
-cd /var/www/manufacturing-api
-nano ecosystem.config.js
-```
-
-Add this content:
-```javascript
-module.exports = {
-  apps: [{
-    name: 'manufacturing-api',
-    cwd: './server',
-    script: 'index.js',
-    instances: 2,
-    exec_mode: 'cluster',
-    env: {
-      NODE_ENV: 'production',
-      PORT: 3000
-    },
-    error_file: './logs/err.log',
-    out_file: './logs/out.log',
-    log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-    merge_logs: true,
-    autorestart: true,
-    max_memory_restart: '500M',
-    watch: false
-  }]
-};
-```
-
-### 4.2 Create Log Directory
-```bash
-mkdir -p server/logs
-```
-
-### 4.3 Start Application with PM2
-```bash
-pm2 start ecosystem.config.js
-pm2 save
-pm2 startup
-```
-
-### 4.4 Monitor Application
-```bash
-# View logs
-pm2 logs manufacturing-api
-
-# View status
-pm2 status
-
-# Restart app
-pm2 restart manufacturing-api
-
-# Stop app
-pm2 stop manufacturing-api
-```
-
-## Step 5: Setup Nginx (Optional but Recommended)
-
-### 5.1 Install Nginx
-```bash
-sudo apt install -y nginx
-```
-
-### 5.2 Create Nginx Configuration
-```bash
-sudo nano /etc/nginx/sites-available/manufacturing-api
-```
-
-Add this configuration:
-```nginx
-server {
-    listen 80;
-    server_name yourdomain.com www.yourdomain.com;  # Change this
-
-    # Client (Frontend)
-    location / {
-        root /var/www/manufacturing-api/client/build;
-        try_files $uri $uri/ /index.html;
-        index index.html;
-    }
-
-    # API (Backend)
-    location /api/ {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-        
-        # Timeout settings
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-
-    # Health check endpoint
-    location /health {
-        proxy_pass http://localhost:3000/health;
-        access_log off;
-    }
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
-
-    # Gzip compression
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json;
-}
-```
-
-### 5.3 Enable Site
-```bash
-sudo ln -s /etc/nginx/sites-available/manufacturing-api /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl restart nginx
-```
-
-## Step 6: Setup SSL with Let's Encrypt (Recommended)
-
-### 6.1 Install Certbot
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-```
-
-### 6.2 Obtain SSL Certificate
-```bash
-sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
-```
-
-### 6.3 Auto-renewal
-```bash
-# Test auto-renewal
-sudo certbot renew --dry-run
-
-# Certbot will automatically setup cron job for renewal
-```
-
-## Step 7: Setup Firewall
+### 1. Pastikan Akses ke VPS
 
 ```bash
-# Enable UFW
-sudo ufw enable
-
-# Allow SSH
-sudo ufw allow 22/tcp
-
-# Allow HTTP and HTTPS
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-
-# Check status
-sudo ufw status
+# Test SSH connection
+ssh foom@103.31.39.189
 ```
 
-## Step 8: Testing the Deployment
+### 2. Cek Struktur Direktori di VPS
 
-### 8.1 Test Backend Health
 ```bash
-curl http://localhost:3000/health
+ssh foom@103.31.39.189 "ls -la ~/deployments/manufacturing-app/server"
 ```
 
-### 8.2 Test External API
+Pastikan direktori ada dan aplikasi sedang berjalan.
+
+### 3. Backup Lokal (Opsional)
+
+Sebelum deployment, backup kode lokal Anda:
+
 ```bash
-curl -X GET "http://localhost:3000/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all" \
-  -H "X-API-Key: your_api_key_here"
+git add .
+git commit -m "Pre-deployment backup"
+git push
 ```
 
-### 8.3 Test from External
+---
+
+## 💾 Backup Database
+
+**PENTING**: Selalu backup database sebelum migrasi!
+
+### Metode 1: Backup Otomatis (Recommended)
+
+Script deployment akan otomatis backup database, tapi Anda bisa backup manual:
+
 ```bash
-# From your local machine
-curl -X GET "http://your-vps-ip/api/health"
-curl -X GET "https://yourdomain.com/api/health"
+# Di VPS
+cd ~/deployments/manufacturing-app/server
+bash backup-database-vps.sh
 ```
 
-## Step 9: Monitoring & Maintenance
+### Metode 2: Backup Manual
 
-### 9.1 Monitor PM2 Processes
 ```bash
-pm2 monit
-```
+# SSH ke VPS
+ssh foom@103.31.39.189
 
-### 9.2 View Logs
-```bash
-# PM2 logs
-pm2 logs manufacturing-api --lines 100
-
-# Nginx logs
-sudo tail -f /var/log/nginx/access.log
-sudo tail -f /var/log/nginx/error.log
-```
-
-### 9.3 Database Backup
-```bash
-# Create backup script
-nano /var/www/manufacturing-api/backup.sh
-```
-
-Add:
-```bash
-#!/bin/bash
-BACKUP_DIR="/var/backups/manufacturing-api"
-DATE=$(date +%Y%m%d_%H%M%S)
-mkdir -p $BACKUP_DIR
+# Buat direktori backup
+mkdir -p ~/backups/manufacturing-app
 
 # Backup database
-cp /var/www/manufacturing-api/server/database.sqlite $BACKUP_DIR/database_$DATE.sqlite
-
-# Keep only last 7 days of backups
-find $BACKUP_DIR -name "database_*.sqlite" -mtime +7 -delete
-
-echo "Backup completed: database_$DATE.sqlite"
+cd ~/deployments/manufacturing-app/server
+cp database.sqlite ~/backups/manufacturing-app/database.sqlite.$(date +%Y%m%d-%H%M%S)
+cp database.sqlite-wal ~/backups/manufacturing-app/database.sqlite-wal.$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+cp database.sqlite-shm ~/backups/manufacturing-app/database.sqlite-shm.$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
 ```
 
-Make executable:
-```bash
-chmod +x /var/www/manufacturing-api/backup.sh
-```
-
-Setup cron job:
-```bash
-crontab -e
-```
-
-Add:
-```
-# Backup database daily at 2 AM
-0 2 * * * /var/www/manufacturing-api/backup.sh
-```
-
-## Step 10: Security Best Practices
-
-### 10.1 Change Default Credentials
-- Change login credentials in production
-- Use environment variables for sensitive data
-
-### 10.2 Regular Updates
-```bash
-# Update system packages
-sudo apt update && sudo apt upgrade -y
-
-# Update Node packages
-cd /var/www/manufacturing-api/server
-npm audit
-npm update
-```
-
-### 10.3 Monitor Server Resources
-```bash
-# Install htop
-sudo apt install htop
-
-# Check CPU and Memory
-htop
-
-# Check disk usage
-df -h
-
-# Check database size
-du -sh /var/www/manufacturing-api/server/database.sqlite
-```
-
-## Troubleshooting
-
-### Issue: Port already in use
-```bash
-# Find process using port 3000
-sudo lsof -i :3000
-sudo kill -9 <PID>
-```
-
-### Issue: Permission denied
-```bash
-# Fix file permissions
-sudo chown -R $USER:$USER /var/www/manufacturing-api
-chmod -R 755 /var/www/manufacturing-api
-```
-
-### Issue: Database locked
-```bash
-# Stop all PM2 processes
-pm2 stop all
-
-# Remove database lock
-rm -f /var/www/manufacturing-api/server/database.sqlite-wal
-rm -f /var/www/manufacturing-api/server/database.sqlite-shm
-
-# Restart
-pm2 start ecosystem.config.js
-```
-
-### Issue: High memory usage
-```bash
-# Check PM2 processes
-pm2 status
-
-# Restart specific app
-pm2 restart manufacturing-api
-
-# Flush logs if too large
-pm2 flush
-```
-
-## API Key Security
-
-### For External API Access:
-
-When calling the external API from other applications, include the API key in the header:
+### Verifikasi Backup
 
 ```bash
-curl -X GET "https://yourdomain.com/api/external/manufacturing-data?mo_number=PROD/MO/28204&completed_at=all" \
-  -H "X-API-Key: your_secure_api_key"
+ls -lh ~/backups/manufacturing-app/
 ```
 
-```javascript
-// JavaScript/Axios example
-const response = await axios.get('https://yourdomain.com/api/external/manufacturing-data', {
-  params: {
-    mo_number: 'PROD/MO/28204',
-    completed_at: 'all'
-  },
-  headers: {
-    'X-API-Key': 'your_secure_api_key'
-  }
-});
-```
+---
 
-## Performance Optimization
+## 🚀 Deployment ke VPS
 
-### Enable Node.js Cluster Mode
-Already configured in PM2 ecosystem file with 2 instances.
+### Metode 1: Deployment Otomatis (Recommended)
 
-### Database Optimization
+Gunakan script deployment otomatis:
+
 ```bash
-# Run SQLite VACUUM periodically
-sqlite3 /var/www/manufacturing-api/server/database.sqlite "VACUUM;"
+# Dari komputer lokal
+chmod +x deploy-to-vps.sh
+./deploy-to-vps.sh
 ```
 
-### Nginx Caching (Optional)
-Add to Nginx config for static assets:
-```nginx
-location ~* \.(jpg|jpeg|png|gif|ico|css|js)$ {
-    expires 1y;
-    add_header Cache-Control "public, immutable";
+Script ini akan:
+1. ✅ Backup database
+2. ✅ Stop aplikasi
+3. ✅ Upload kode baru
+4. ✅ Install PostgreSQL (jika belum ada)
+5. ✅ Install dependencies
+6. ✅ Run migrasi database
+7. ✅ Build client
+8. ✅ Start aplikasi
+
+### Metode 2: Deployment Manual
+
+Jika ingin melakukan step-by-step manual:
+
+#### Step 1: Stop Aplikasi
+
+```bash
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && pm2 stop manufacturing-app"
+```
+
+#### Step 2: Upload Kode
+
+```bash
+# Dari komputer lokal
+rsync -avz --exclude 'node_modules' --exclude '.git' --exclude 'database.sqlite*' \
+    ./ foom@103.31.39.189:~/deployments/manufacturing-app/
+```
+
+#### Step 3: Install Dependencies
+
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    cd ~/deployments/manufacturing-app
+    npm install
+    
+    cd ~/deployments/manufacturing-app/server
+    npm install
+    
+    cd ~/deployments/manufacturing-app/client
+    npm install
+ENDSSH
+```
+
+#### Step 4: Setup PostgreSQL (lihat section berikutnya)
+
+#### Step 5: Run Migrasi (lihat section migrasi)
+
+#### Step 6: Build Client
+
+```bash
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/client && npm run build"
+```
+
+#### Step 7: Start Aplikasi
+
+```bash
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && pm2 start ecosystem.config.js"
+```
+
+---
+
+## 🗄️ Setup PostgreSQL
+
+### Install PostgreSQL
+
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    # Update package list
+    sudo apt-get update
+    
+    # Install PostgreSQL
+    sudo apt-get install -y postgresql postgresql-contrib
+    
+    # Start PostgreSQL service
+    sudo systemctl start postgresql
+    sudo systemctl enable postgresql
+    
+    # Create database and user
+    sudo -u postgres psql << 'PSQL'
+        CREATE USER admin WITH PASSWORD 'Admin123';
+        CREATE DATABASE manufacturing_db OWNER admin;
+        GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
+        \c manufacturing_db
+        GRANT ALL ON SCHEMA public TO admin;
+PSQL
+    
+    echo "✅ PostgreSQL installed and configured"
+ENDSSH
+```
+
+### Verifikasi PostgreSQL
+
+```bash
+ssh foom@103.31.39.189 "sudo -u postgres psql -c '\l' | grep manufacturing_db"
+```
+
+### Setup .env File
+
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    
+    # Copy env.example jika .env belum ada
+    if [ ! -f .env ]; then
+        cp env.example .env
+    fi
+    
+    # Edit .env file (gunakan nano atau vi)
+    # Pastikan konfigurasi PostgreSQL:
+    # DB_HOST=localhost
+    # DB_PORT=5432
+    # DB_NAME=manufacturing_db
+    # DB_USER=admin
+    # DB_PASSWORD=Admin123
+ENDSSH
+```
+
+---
+
+## 🔄 Migrasi Database
+
+### Metode 1: Migrasi Otomatis
+
+Script deployment sudah include migrasi, tapi bisa dijalankan manual:
+
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    
+    # Pastikan .env sudah dikonfigurasi
+    # Run migrasi
+    node migrate-sqlite-to-postgresql-vps.js
+ENDSSH
+```
+
+### Metode 2: Migrasi Manual
+
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    
+    # Run migrasi
+    node migrate-to-postgresql.js
+ENDSSH
+```
+
+### Apa yang Dilakukan Migrasi?
+
+1. ✅ Membaca semua data dari SQLite
+2. ✅ Membuat tabel di PostgreSQL (jika belum ada)
+3. ✅ Migrasi data dari SQLite ke PostgreSQL
+4. ✅ Verifikasi data yang dimigrasi
+
+### Tabel yang Dimigrasi
+
+- `production_liquid`
+- `production_device`
+- `production_cartridge`
+- `buffer_liquid`, `buffer_device`, `buffer_cartridge`
+- `reject_liquid`, `reject_device`, `reject_cartridge`
+- `production_combined`
+- `production_results`
+- `odoo_mo_cache`
+- `admin_config`
+- `pic_list`
+
+---
+
+## ✅ Verifikasi
+
+### 1. Cek Status Aplikasi
+
+```bash
+ssh foom@103.31.39.189 "pm2 status"
+```
+
+Pastikan `manufacturing-app` statusnya `online`.
+
+### 2. Cek Logs
+
+```bash
+ssh foom@103.31.39.189 "pm2 logs manufacturing-app --lines 50"
+```
+
+Cari error terkait database.
+
+### 3. Cek Data di PostgreSQL
+
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    node check-data.js
+ENDSSH
+```
+
+### 4. Test Health Endpoint
+
+```bash
+curl http://103.31.39.189:1234/health
+```
+
+Harus return:
+```json
+{
+  "status": "healthy",
+  "database": "connected"
 }
 ```
 
-## Updating the Application
+### 5. Test API Endpoints
 
 ```bash
-cd /var/www/manufacturing-api
+# Test login
+curl -X POST http://103.31.39.189:1234/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}'
 
-# Pull latest changes
-git pull origin main
-
-# Update dependencies
-cd server && npm install --production && cd ..
-cd client && npm install && npm run build && cd ..
-
-# Restart PM2
-pm2 restart manufacturing-api
-
-# Check logs
-pm2 logs manufacturing-api --lines 50
+# Test production data
+curl http://103.31.39.189:1234/api/production/combined
 ```
 
-## Contact & Support
+---
 
-For issues or questions, refer to the main README.md or API_DOCUMENTATION.md
+## 🔙 Rollback (Jika Gagal)
 
+Jika migrasi gagal atau ada masalah, rollback ke SQLite:
+
+### Step 1: Stop Aplikasi
+
+```bash
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && pm2 stop manufacturing-app"
+```
+
+### Step 2: Restore Database dari Backup
+
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    bash rollback-to-sqlite.sh
+ENDSSH
+```
+
+Atau manual:
+
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    # Cari backup terbaru
+    LATEST_BACKUP=$(ls -t ~/backups/manufacturing-app/database.sqlite.* | head -1)
+    
+    # Restore
+    cp "$LATEST_BACKUP" ~/deployments/manufacturing-app/server/database.sqlite
+    
+    # Restore WAL files jika ada
+    WAL_BACKUP="${LATEST_BACKUP%-*}-wal.${LATEST_BACKUP##*.}"
+    if [ -f "$WAL_BACKUP" ]; then
+        cp "$WAL_BACKUP" ~/deployments/manufacturing-app/server/database.sqlite-wal
+    fi
+ENDSSH
+```
+
+### Step 3: Revert Code (Jika Perlu)
+
+Jika perlu revert ke versi SQLite:
+
+```bash
+# Git checkout versi sebelumnya
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app && git checkout <commit-hash>"
+```
+
+### Step 4: Restart Aplikasi
+
+```bash
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && pm2 start ecosystem.config.js"
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### Error: "Cannot connect to PostgreSQL"
+
+**Penyebab**: PostgreSQL tidak berjalan atau kredensial salah.
+
+**Solusi**:
+```bash
+# Cek status PostgreSQL
+ssh foom@103.31.39.189 "sudo systemctl status postgresql"
+
+# Start PostgreSQL jika tidak berjalan
+ssh foom@103.31.39.189 "sudo systemctl start postgresql"
+
+# Cek kredensial di .env
+ssh foom@103.31.39.189 "cat ~/deployments/manufacturing-app/server/.env | grep DB_"
+```
+
+### Error: "Database does not exist"
+
+**Penyebab**: Database belum dibuat.
+
+**Solusi**:
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    sudo -u postgres psql << 'PSQL'
+        CREATE DATABASE manufacturing_db OWNER admin;
+        GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
+PSQL
+ENDSSH
+```
+
+### Error: "Permission denied"
+
+**Penyebab**: User tidak punya permission.
+
+**Solusi**:
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    sudo -u postgres psql -d manufacturing_db << 'PSQL'
+        GRANT ALL ON SCHEMA public TO admin;
+        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO admin;
+        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO admin;
+PSQL
+ENDSSH
+```
+
+### Error: "Table already exists"
+
+**Penyebab**: Tabel sudah ada dari migrasi sebelumnya.
+
+**Solusi**: Ini normal, migrasi akan skip data yang sudah ada (ON CONFLICT DO NOTHING).
+
+### Error: "Application won't start"
+
+**Penyebab**: Database connection error atau code error.
+
+**Solusi**:
+```bash
+# Cek logs
+ssh foom@103.31.39.189 "pm2 logs manufacturing-app --lines 100"
+
+# Test database connection
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && node -e \"require('./database').db.testConnection((err, result) => console.log(err || 'OK'))\""
+```
+
+### Error: "No data after migration"
+
+**Penyebab**: Data tidak ter-migrasi dengan benar.
+
+**Solusi**:
+```bash
+# Cek data di PostgreSQL
+ssh foom@103.31.39.189 << 'ENDSSH'
+    sudo -u postgres psql -d manufacturing_db -c "SELECT COUNT(*) FROM production_liquid;"
+    sudo -u postgres psql -d manufacturing_db -c "SELECT COUNT(*) FROM production_device;"
+    sudo -u postgres psql -d manufacturing_db -c "SELECT COUNT(*) FROM production_cartridge;"
+ENDSSH
+
+# Re-run migrasi jika perlu
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && node migrate-sqlite-to-postgresql-vps.js"
+```
+
+---
+
+## 📝 Checklist Deployment
+
+Sebelum deployment, pastikan:
+
+- [ ] Backup database sudah dibuat
+- [ ] Kode sudah di-commit dan push ke git
+- [ ] PostgreSQL sudah terinstall di VPS
+- [ ] .env file sudah dikonfigurasi dengan benar
+- [ ] Dependencies sudah terinstall
+- [ ] Migrasi berhasil tanpa error
+- [ ] Aplikasi berjalan dengan status `online`
+- [ ] Health endpoint return `healthy`
+- [ ] Data terlihat di frontend
+- [ ] API endpoints berfungsi
+
+---
+
+## 🎉 Setelah Deployment Berhasil
+
+1. **Monitor aplikasi** selama beberapa jam pertama
+2. **Cek logs** secara berkala: `pm2 logs manufacturing-app`
+3. **Verifikasi data** masih lengkap
+4. **Test semua fitur** di frontend
+5. **Backup PostgreSQL** secara berkala
+
+### Backup PostgreSQL Berkala
+
+```bash
+# Tambahkan ke crontab
+ssh foom@103.31.39.189 << 'ENDSSH'
+    # Backup PostgreSQL setiap hari jam 2 pagi
+    (crontab -l 2>/dev/null; echo "0 2 * * * pg_dump -h localhost -U admin manufacturing_db > ~/backups/manufacturing-app/postgresql-backup-\$(date +\\%Y\\%m\\%d).sql") | crontab -
+ENDSSH
+```
+
+---
+
+## 📞 Support
+
+Jika ada masalah:
+
+1. Cek logs: `pm2 logs manufacturing-app`
+2. Cek database connection
+3. Verifikasi .env configuration
+4. Cek PostgreSQL status: `sudo systemctl status postgresql`
+
+---
+
+**Last Updated**: 2026-01-08  
+**Version**: 1.0.0

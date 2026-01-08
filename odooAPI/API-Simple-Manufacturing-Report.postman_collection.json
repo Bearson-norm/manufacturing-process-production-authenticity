@@ -1,0 +1,668 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+		"name": "Manufacturing Report - Simple Format",
+		"description": "Koleksi Postman untuk mendapatkan laporan Manufacturing Order (MO) dalam format sederhana dengan kolom: PIC Input, SKU, MO ID, Roll, First Authenticity ID, Last Authenticity ID. Endpoint ini mendukung filter berdasarkan satu tanggal atau range tanggal.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Get MO Report - Single Date",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"description": "API Key untuk autentikasi",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-report/simple?completed_at={{target_date}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-report",
+						"simple"
+					],
+					"query": [
+						{
+							"key": "completed_at",
+							"value": "{{target_date}}",
+							"description": "Tanggal selesai dalam format YYYY-MM-DD (contoh: 2024-01-15)"
+						}
+					]
+				},
+				"description": "Mendapatkan laporan MO yang selesai pada tanggal tertentu dalam format sederhana."
+			},
+			"response": [
+				{
+					"name": "Success - Single Date",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-report/simple?completed_at=2024-01-15",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-report",
+								"simple"
+							],
+							"query": [
+								{
+									"key": "completed_at",
+									"value": "2024-01-15"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"filter\": {\n        \"completed_at\": \"2024-01-15\"\n    },\n    \"total_records\": 5,\n    \"data\": [\n        {\n            \"pic_input\": \"John Doe\",\n            \"sku\": \"Product A - 100ml\",\n            \"mo_id\": \"MO001\",\n            \"roll\": \"ROLL001\",\n            \"first_authenticity_id\": \"AUTH001\",\n            \"last_authenticity_id\": \"AUTH100\",\n            \"completed_at\": \"2024-01-15T10:30:00.000Z\",\n            \"production_type\": \"liquid\"\n        },\n        {\n            \"pic_input\": \"John Doe\",\n            \"sku\": \"Product A - 100ml\",\n            \"mo_id\": \"MO001\",\n            \"roll\": \"ROLL002\",\n            \"first_authenticity_id\": \"AUTH101\",\n            \"last_authenticity_id\": \"AUTH200\",\n            \"completed_at\": \"2024-01-15T15:45:00.000Z\",\n            \"production_type\": \"liquid\"\n        },\n        {\n            \"pic_input\": \"Jane Smith\",\n            \"sku\": \"Product B - Device\",\n            \"mo_id\": \"MO002\",\n            \"roll\": \"ROLL003\",\n            \"first_authenticity_id\": \"AUTH201\",\n            \"last_authenticity_id\": \"AUTH300\",\n            \"completed_at\": \"2024-01-15T11:20:00.000Z\",\n            \"production_type\": \"device\"\n        },\n        {\n            \"pic_input\": \"Bob Wilson\",\n            \"sku\": \"Product C - Cartridge\",\n            \"mo_id\": \"MO003\",\n            \"roll\": \"ROLL004\",\n            \"first_authenticity_id\": \"AUTH401\",\n            \"last_authenticity_id\": \"AUTH500\",\n            \"completed_at\": \"2024-01-15T14:00:00.000Z\",\n            \"production_type\": \"cartridge\"\n        },\n        {\n            \"pic_input\": \"Bob Wilson\",\n            \"sku\": \"Product C - Cartridge\",\n            \"mo_id\": \"MO003\",\n            \"roll\": \"ROLL005\",\n            \"first_authenticity_id\": \"AUTH601\",\n            \"last_authenticity_id\": \"AUTH700\",\n            \"completed_at\": \"2024-01-15T18:30:00.000Z\",\n            \"production_type\": \"cartridge\"\n        }\n    ]\n}"
+				}
+			]
+		},
+		{
+			"name": "Get MO Report - Date Range",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"description": "API Key untuk autentikasi",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-report/simple?start_date={{start_date}}&end_date={{end_date}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-report",
+						"simple"
+					],
+					"query": [
+						{
+							"key": "start_date",
+							"value": "{{start_date}}",
+							"description": "Tanggal mulai dalam format YYYY-MM-DD (contoh: 2024-01-01)"
+						},
+						{
+							"key": "end_date",
+							"value": "{{end_date}}",
+							"description": "Tanggal akhir dalam format YYYY-MM-DD (contoh: 2024-01-31)"
+						}
+					]
+				},
+				"description": "Mendapatkan laporan MO yang selesai dalam range tanggal tertentu."
+			},
+			"response": [
+				{
+					"name": "Success - Date Range",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-report/simple?start_date=2024-01-01&end_date=2024-01-31",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-report",
+								"simple"
+							],
+							"query": [
+								{
+									"key": "start_date",
+									"value": "2024-01-01"
+								},
+								{
+									"key": "end_date",
+									"value": "2024-01-31"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"filter\": {\n        \"start_date\": \"2024-01-01\",\n        \"end_date\": \"2024-01-31\"\n    },\n    \"total_records\": 12,\n    \"data\": [\n        {\n            \"pic_input\": \"John Doe\",\n            \"sku\": \"Product A - 100ml\",\n            \"mo_id\": \"MO001\",\n            \"roll\": \"ROLL001\",\n            \"first_authenticity_id\": \"AUTH001\",\n            \"last_authenticity_id\": \"AUTH100\",\n            \"completed_at\": \"2024-01-10T10:30:00.000Z\",\n            \"production_type\": \"liquid\"\n        },\n        {\n            \"pic_input\": \"Jane Smith\",\n            \"sku\": \"Product B - Device\",\n            \"mo_id\": \"MO002\",\n            \"roll\": \"ROLL002\",\n            \"first_authenticity_id\": \"AUTH101\",\n            \"last_authenticity_id\": \"AUTH200\",\n            \"completed_at\": \"2024-01-15T11:20:00.000Z\",\n            \"production_type\": \"device\"\n        },\n        {\n            \"pic_input\": \"Bob Wilson\",\n            \"sku\": \"Product C - Cartridge\",\n            \"mo_id\": \"MO003\",\n            \"roll\": \"ROLL003\",\n            \"first_authenticity_id\": \"AUTH201\",\n            \"last_authenticity_id\": \"AUTH300\",\n            \"completed_at\": \"2024-01-20T14:00:00.000Z\",\n            \"production_type\": \"cartridge\"\n        }\n    ]\n}"
+				}
+			]
+		},
+		{
+			"name": "Get MO Report - From Start Date Only",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"description": "API Key untuk autentikasi",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-report/simple?start_date={{start_date}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-report",
+						"simple"
+					],
+					"query": [
+						{
+							"key": "start_date",
+							"value": "{{start_date}}",
+							"description": "Tanggal mulai dalam format YYYY-MM-DD (contoh: 2024-01-01)"
+						}
+					]
+				},
+				"description": "Mendapatkan laporan MO yang selesai dari tanggal tertentu hingga sekarang."
+			},
+			"response": [
+				{
+					"name": "Success - From Start Date",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-report/simple?start_date=2024-01-15",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-report",
+								"simple"
+							],
+							"query": [
+								{
+									"key": "start_date",
+									"value": "2024-01-15"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"filter\": {\n        \"start_date\": \"2024-01-15\",\n        \"end_date\": null\n    },\n    \"total_records\": 8,\n    \"data\": [\n        {\n            \"pic_input\": \"John Doe\",\n            \"sku\": \"Product A - 100ml\",\n            \"mo_id\": \"MO001\",\n            \"roll\": \"ROLL001\",\n            \"first_authenticity_id\": \"AUTH001\",\n            \"last_authenticity_id\": \"AUTH100\",\n            \"completed_at\": \"2024-01-15T10:30:00.000Z\",\n            \"production_type\": \"liquid\"\n        }\n    ]\n}"
+				}
+			]
+		},
+		{
+			"name": "Get MO Report - Until End Date Only",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"description": "API Key untuk autentikasi",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-report/simple?end_date={{end_date}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-report",
+						"simple"
+					],
+					"query": [
+						{
+							"key": "end_date",
+							"value": "{{end_date}}",
+							"description": "Tanggal akhir dalam format YYYY-MM-DD (contoh: 2024-01-31)"
+						}
+					]
+				},
+				"description": "Mendapatkan laporan MO yang selesai hingga tanggal tertentu."
+			},
+			"response": [
+				{
+					"name": "Success - Until End Date",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-report/simple?end_date=2024-01-31",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-report",
+								"simple"
+							],
+							"query": [
+								{
+									"key": "end_date",
+									"value": "2024-01-31"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"filter\": {\n        \"start_date\": null,\n        \"end_date\": \"2024-01-31\"\n    },\n    \"total_records\": 15,\n    \"data\": [\n        {\n            \"pic_input\": \"John Doe\",\n            \"sku\": \"Product A - 100ml\",\n            \"mo_id\": \"MO001\",\n            \"roll\": \"ROLL001\",\n            \"first_authenticity_id\": \"AUTH001\",\n            \"last_authenticity_id\": \"AUTH100\",\n            \"completed_at\": \"2024-01-15T10:30:00.000Z\",\n            \"production_type\": \"liquid\"\n        }\n    ]\n}"
+				}
+			]
+		},
+		{
+			"name": "Error - No Parameters",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"description": "API Key untuk autentikasi",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-report/simple",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-report",
+						"simple"
+					]
+				},
+				"description": "Error ketika tidak ada parameter tanggal yang diberikan."
+			},
+			"response": [
+				{
+					"name": "Error - No Parameters",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-report/simple",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-report",
+								"simple"
+							]
+						}
+					},
+					"status": "Bad Request",
+					"code": 400,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": false,\n    \"error\": \"Parameter required: completed_at (YYYY-MM-DD) OR start_date and/or end_date (YYYY-MM-DD)\"\n}"
+				}
+			]
+		},
+		{
+			"name": "Error - Invalid API Key",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-report/simple?completed_at=2024-01-15",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-report",
+						"simple"
+					],
+					"query": [
+						{
+							"key": "completed_at",
+							"value": "2024-01-15"
+						}
+					]
+				},
+				"description": "Error ketika API key tidak valid atau tidak diberikan."
+			},
+			"response": [
+				{
+					"name": "Error - Invalid API Key",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-report/simple?completed_at=2024-01-15",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-report",
+								"simple"
+							],
+							"query": [
+								{
+									"key": "completed_at",
+									"value": "2024-01-15"
+								}
+							]
+						}
+					},
+					"status": "Unauthorized",
+					"code": 401,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": false,\n    \"error\": \"API key is required. Please provide X-API-Key header or Authorization Bearer token.\"\n}"
+				}
+			]
+		},
+		{
+			"name": "Success - No Data Found",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/external/manufacturing-report/simple?completed_at=2025-12-31",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"external",
+						"manufacturing-report",
+						"simple"
+					],
+					"query": [
+						{
+							"key": "completed_at",
+							"value": "2025-12-31"
+						}
+					]
+				},
+				"description": "Response ketika tidak ada data pada tanggal yang ditentukan."
+			},
+			"response": [
+				{
+					"name": "Success - No Data Found",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/external/manufacturing-report/simple?completed_at=2025-12-31",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"external",
+								"manufacturing-report",
+								"simple"
+							],
+							"query": [
+								{
+									"key": "completed_at",
+									"value": "2025-12-31"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"success\": true,\n    \"filter\": {\n        \"completed_at\": \"2025-12-31\"\n    },\n    \"total_records\": 0,\n    \"data\": []\n}"
+				}
+			]
+		}
+	],
+	"auth": {
+		"type": "apikey",
+		"apikey": [
+			{
+				"key": "value",
+				"value": "{{api_key}}",
+				"type": "string"
+			},
+			{
+				"key": "key",
+				"value": "X-API-Key",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Script untuk generate tanggal secara otomatis",
+					"const today = new Date();",
+					"const year = today.getFullYear();",
+					"const month = String(today.getMonth() + 1).padStart(2, '0');",
+					"const day = String(today.getDate()).padStart(2, '0');",
+					"const todayDate = `${year}-${month}-${day}`;",
+					"",
+					"// Set target_date untuk hari ini",
+					"if (!pm.variables.get('target_date')) {",
+					"    pm.variables.set('target_date', todayDate);",
+					"}",
+					"",
+					"// Set start_date untuk awal bulan ini",
+					"if (!pm.variables.get('start_date')) {",
+					"    const startOfMonth = `${year}-${month}-01`;",
+					"    pm.variables.set('start_date', startOfMonth);",
+					"}",
+					"",
+					"// Set end_date untuk hari ini",
+					"if (!pm.variables.get('end_date')) {",
+					"    pm.variables.set('end_date', todayDate);",
+					"}"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Test script untuk validasi response",
+					"pm.test('Response has success field', function () {",
+					"    const jsonData = pm.response.json();",
+					"    pm.expect(jsonData).to.have.property('success');",
+					"});",
+					"",
+					"pm.test('Response contains filter and data', function () {",
+					"    const jsonData = pm.response.json();",
+					"    if (jsonData.success) {",
+					"        pm.expect(jsonData).to.have.property('filter');",
+					"        pm.expect(jsonData).to.have.property('total_records');",
+					"        pm.expect(jsonData).to.have.property('data');",
+					"        pm.expect(jsonData.data).to.be.an('array');",
+					"    }",
+					"});",
+					"",
+					"pm.test('Data has correct structure', function () {",
+					"    const jsonData = pm.response.json();",
+					"    if (jsonData.success && jsonData.data.length > 0) {",
+					"        const firstItem = jsonData.data[0];",
+					"        pm.expect(firstItem).to.have.property('pic_input');",
+					"        pm.expect(firstItem).to.have.property('sku');",
+					"        pm.expect(firstItem).to.have.property('mo_id');",
+					"        pm.expect(firstItem).to.have.property('roll');",
+					"        pm.expect(firstItem).to.have.property('first_authenticity_id');",
+					"        pm.expect(firstItem).to.have.property('last_authenticity_id');",
+					"        pm.expect(firstItem).to.have.property('completed_at');",
+					"        pm.expect(firstItem).to.have.property('production_type');",
+					"    }",
+					"});"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:1234",
+			"type": "string",
+			"description": "Base URL untuk API server"
+		},
+		{
+			"key": "api_key",
+			"value": "your-api-key-here",
+			"type": "string",
+			"description": "API Key untuk autentikasi"
+		},
+		{
+			"key": "target_date",
+			"value": "2024-01-15",
+			"type": "string",
+			"description": "Tanggal selesai dalam format YYYY-MM-DD"
+		},
+		{
+			"key": "start_date",
+			"value": "2024-01-01",
+			"type": "string",
+			"description": "Tanggal mulai dalam format YYYY-MM-DD"
+		},
+		{
+			"key": "end_date",
+			"value": "2024-01-31",
+			"type": "string",
+			"description": "Tanggal akhir dalam format YYYY-MM-DD"
+		}
+	]
+}
+

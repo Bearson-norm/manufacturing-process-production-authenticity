@@ -398,6 +398,9 @@
   border-bottom: 1px solid #f59e0b;
   color: #fef3c7;
   font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .buffer-card-body {
@@ -445,6 +448,9 @@
   border-bottom: 1px solid #ef4444;
   color: #fee2e2;
   font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .reject-card-body {
@@ -485,6 +491,30 @@
   border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
+}
+
+.edit-button {
+  padding: 6px 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.edit-button:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+.edit-button:active {
+  transform: translateY(0);
 }
 
 .buffer-row-input {
