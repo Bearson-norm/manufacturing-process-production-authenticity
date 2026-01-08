@@ -6,29 +6,42 @@ Panduan cepat untuk mengupdate sistem dari SQLite ke PostgreSQL di VPS.
 
 ## ⚡ Deployment Cepat (5 Menit)
 
-### Step 1: Backup Database
+### Struktur Direktori di VPS
 
-```bash
-ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && bash backup-database-vps.sh"
-```
+- **Git Repository**: `/var/www/manufacturing-process-production-authenticity`
+- **Running App**: `~/deployments/manufacturing-app/server`
 
-### Step 2: Deploy
+### Opsi 1: Deploy dari Git Repository (Recommended)
 
 ```bash
 # Dari komputer lokal
-chmod +x deploy-to-vps.sh
-./deploy-to-vps.sh
+chmod +x deploy-from-git.sh
+./deploy-from-git.sh
 ```
 
 **Selesai!** Script akan otomatis:
 - ✅ Backup database
 - ✅ Stop aplikasi
-- ✅ Upload kode baru
+- ✅ Pull dari git repo (`/var/www/manufacturing-process-production-authenticity`)
+- ✅ Copy ke running directory (`~/deployments/manufacturing-app`)
 - ✅ Install PostgreSQL (jika belum ada)
 - ✅ Install dependencies
 - ✅ Migrasi database
 - ✅ Build client
 - ✅ Start aplikasi
+
+### Opsi 2: Deploy Langsung dari Lokal
+
+```bash
+# Step 1: Backup Database
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && bash backup-database-vps.sh"
+
+# Step 2: Deploy
+chmod +x deploy-to-vps.sh
+./deploy-to-vps.sh          # Direct upload
+# atau
+./deploy-to-vps.sh git      # Pull from git repo lalu copy
+```
 
 ---
 
@@ -51,8 +64,21 @@ ssh foom@103.31.39.189 << 'ENDSSH'
 ENDSSH
 ```
 
-### 3. Upload Kode
+### 3. Update Kode
 
+**Opsi A: Dari Git Repository**
+```bash
+ssh foom@103.31.39.189 << 'ENDSSH'
+    cd /var/www/manufacturing-process-production-authenticity
+    git pull origin main || git pull origin master
+    
+    # Copy ke running directory
+    rsync -av --exclude 'node_modules' --exclude '.git' --exclude 'database.sqlite*' \
+        /var/www/manufacturing-process-production-authenticity/ ~/deployments/manufacturing-app/
+ENDSSH
+```
+
+**Opsi B: Upload Langsung dari Lokal**
 ```bash
 rsync -avz --exclude 'node_modules' --exclude '.git' --exclude 'database.sqlite*' \
     ./ foom@103.31.39.189:~/deployments/manufacturing-app/

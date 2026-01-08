@@ -8,16 +8,31 @@ Sistem ini sudah dimigrasi dari SQLite ke PostgreSQL. Panduan ini membantu Anda 
 
 ### Cara Paling Cepat
 
+**Opsi 1: Deploy dari Git Repository (Recommended untuk Production)**
+```bash
+# Pull dari git repo lalu deploy
+chmod +x deploy-from-git.sh
+./deploy-from-git.sh
+```
+
+**Opsi 2: Deploy Langsung dari Lokal**
 ```bash
 # 1. Backup database
 ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && bash backup-database-vps.sh"
 
 # 2. Deploy (dari komputer lokal)
 chmod +x deploy-to-vps.sh
-./deploy-to-vps.sh
+./deploy-to-vps.sh          # Direct upload
+# atau
+./deploy-to-vps.sh git      # Pull from git repo
 ```
 
 **Selesai!** Script akan otomatis melakukan semua langkah.
+
+### Struktur Direktori di VPS
+
+- **Git Repository**: `/var/www/manufacturing-process-production-authenticity`
+- **Running App**: `~/deployments/manufacturing-app/server`
 
 ---
 

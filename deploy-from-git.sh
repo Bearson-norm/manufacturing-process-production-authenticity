@@ -1,6 +1,6 @@
 #!/bin/bash
-# Deployment Script untuk VPS
-# Script ini akan: backup, update code, install dependencies, setup PostgreSQL, dan migrasi database
+# Deployment Script dari Git Repository
+# Script ini akan pull dari git repo lalu deploy ke running directory
 
 set -e  # Exit on error
 
@@ -16,26 +16,17 @@ VPS_HOST="103.31.39.189"
 GIT_REPO_PATH="/var/www/manufacturing-process-production-authenticity"
 DEPLOY_PATH="~/deployments/manufacturing-app"
 BACKUP_DIR="~/backups/manufacturing-app"
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-
-# Deployment mode: 'git' (pull from git repo) or 'direct' (upload from local)
-DEPLOY_MODE="${1:-direct}"  # Default to 'direct'
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Manufacturing App - VPS Deployment${NC}"
+echo -e "${GREEN}Manufacturing App - Git Deployment${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo "Deployment Mode: ${DEPLOY_MODE}"
-echo "  - Git Repo: ${GIT_REPO_PATH}"
-echo "  - Deploy Path: ${DEPLOY_PATH}"
-echo ""
-echo "Usage:"
-echo "  ./deploy-to-vps.sh          # Direct upload from local"
-echo "  ./deploy-to-vps.sh git      # Pull from git repo"
+echo "Git Repo: ${GIT_REPO_PATH}"
+echo "Deploy Path: ${DEPLOY_PATH}"
 echo ""
 
 # Step 1: Backup existing database
-echo -e "${YELLOW}[1/6] Creating backup...${NC}"
+echo -e "${YELLOW}[1/8] Creating backup...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     mkdir -p ~/backups/manufacturing-app
     BACKUP_DIR=~/backups/manufacturing-app
@@ -56,39 +47,28 @@ echo -e "${YELLOW}[2/8] Stopping application...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} "cd ${DEPLOY_PATH}/server && pm2 stop manufacturing-app || true"
 echo "✅ Application stopped"
 
-# Step 3: Update code
-echo -e "${YELLOW}[3/8] Updating code...${NC}"
-if [ "$DEPLOY_MODE" = "git" ]; then
-    echo "📥 Pulling from git repository..."
-    ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
-        cd /var/www/manufacturing-process-production-authenticity
-        git pull origin main || git pull origin master || echo "⚠️  Git pull failed, continuing..."
-        
-        # Copy to deployment directory
-        echo "📋 Copying files to deployment directory..."
-        mkdir -p ~/deployments/manufacturing-app
-        rsync -av --exclude 'node_modules' --exclude '.git' --exclude 'database.sqlite*' \
-            /var/www/manufacturing-process-production-authenticity/ ~/deployments/manufacturing-app/
-        echo "✅ Code updated from git repository"
-ENDSSH
-else
-    echo "📤 Uploading code from local..."
-    rsync -avz --exclude 'node_modules' --exclude '.git' --exclude 'database.sqlite*' \
-        ./ ${VPS_USER}@${VPS_HOST}:${DEPLOY_PATH}/
+# Step 3: Pull from git and copy to deployment directory
+echo -e "${YELLOW}[3/8] Pulling from git repository...${NC}"
+ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
+    cd /var/www/manufacturing-process-production-authenticity
     
-    # Also update git repo if exists
-    ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
-        if [ -d /var/www/manufacturing-process-production-authenticity/.git ]; then
-            echo "📋 Updating git repository..."
-            rsync -av --exclude 'node_modules' --exclude '.git' --exclude 'database.sqlite*' \
-                ~/deployments/manufacturing-app/ /var/www/manufacturing-process-production-authenticity/
-            cd /var/www/manufacturing-process-production-authenticity
-            git add -A || true
-            git commit -m "Deployment update $(date +%Y%m%d-%H%M%S)" || true
-        fi
+    # Pull latest changes
+    echo "📥 Pulling latest changes from git..."
+    git pull origin main || git pull origin master || {
+        echo "⚠️  Git pull failed, using existing code"
+    }
+    
+    # Show current commit
+    echo "📌 Current commit:"
+    git log -1 --oneline || echo "⚠️  Cannot get git info"
+    
+    # Copy to deployment directory
+    echo "📋 Copying files to deployment directory..."
+    mkdir -p ~/deployments/manufacturing-app
+    rsync -av --exclude 'node_modules' --exclude '.git' --exclude 'database.sqlite*' \
+        /var/www/manufacturing-process-production-authenticity/ ~/deployments/manufacturing-app/
+    echo "✅ Code updated from git repository"
 ENDSSH
-    echo "✅ Code uploaded"
-fi
 
 # Step 4: Install PostgreSQL if not exists
 echo -e "${YELLOW}[4/8] Checking PostgreSQL installation...${NC}"
