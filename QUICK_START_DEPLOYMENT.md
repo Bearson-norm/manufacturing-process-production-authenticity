@@ -47,10 +47,35 @@ chmod +x deploy-to-vps.sh
 
 ## 📋 Manual Step-by-Step (Jika Perlu)
 
-### 1. Stop Aplikasi
+### 1. Setup .env File
 
 ```bash
-ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && pm2 stop manufacturing-app"
+ssh foom@103.31.39.189 << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    
+    # Pastikan .env ada dan benar
+    if [ ! -f .env ]; then
+        cp env.example .env
+    fi
+    
+    # Update DB_PORT ke 5433 (PostgreSQL running di port 5433)
+    sed -i 's/^DB_PORT=.*/DB_PORT=5433/' .env || echo "DB_PORT=5433" >> .env
+    
+    # Verify
+    cat .env | grep DB_
+ENDSSH
+```
+
+### 2. Test PostgreSQL Connection
+
+```bash
+ssh foom@103.31.39.189 "PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c 'SELECT 1;'"
+```
+
+### 3. Stop Aplikasi
+
+```bash
+ssh foom@103.31.39.189 "cd ~/deployments/manufacturing-app/server && pm2 stop manufacturing-app || true"
 ```
 
 ### 2. Backup Database
