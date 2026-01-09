@@ -3158,7 +3158,7 @@ app.get('/api/admin/mo-cache-details', (req, res) => {
               NOW() as current_time,
               NOW() - INTERVAL '7 days' as threshold
        FROM odoo_mo_cache 
-       WHERE create_date < NOW() - INTERVAL '7 days'
+       WHERE create_date::TIMESTAMP < NOW() - INTERVAL '7 days'
        ORDER BY create_date ASC 
        LIMIT 10`,
       [],
@@ -3171,7 +3171,7 @@ app.get('/api/admin/mo-cache-details', (req, res) => {
         db.all(
           `SELECT mo_number, fetched_at, create_date 
            FROM odoo_mo_cache 
-           WHERE create_date >= NOW() - INTERVAL '7 days'
+           WHERE create_date::TIMESTAMP >= NOW() - INTERVAL '7 days'
            ORDER BY create_date DESC 
            LIMIT 10`,
           [],
@@ -3483,7 +3483,7 @@ app.get('/api/admin/mo-stats', (req, res) => {
         // Use create_date, not fetched_at
         db.get(
           `SELECT COUNT(*) as count FROM odoo_mo_cache 
-           WHERE create_date >= NOW() - INTERVAL '7 days'`,
+           WHERE create_date::TIMESTAMP >= NOW() - INTERVAL '7 days'`,
           [],
           (err2, row2) => {
             if (err2) {
@@ -3503,7 +3503,7 @@ app.get('/api/admin/mo-stats', (req, res) => {
             // Count records older than 7 days based on create_date
             db.get(
               `SELECT COUNT(*) as count FROM odoo_mo_cache 
-               WHERE create_date < NOW() - INTERVAL '7 days'`,
+               WHERE create_date::TIMESTAMP < NOW() - INTERVAL '7 days'`,
               [],
               (err3, row3) => {
                 if (err3) {
@@ -3641,7 +3641,7 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
       // We use create_date (from Odoo) not fetched_at (when we cached it)
       db.get(
         `SELECT COUNT(*) as count FROM odoo_mo_cache 
-         WHERE create_date < NOW() - INTERVAL '7 days'`,
+         WHERE create_date::TIMESTAMP < NOW() - INTERVAL '7 days'`,
         (countErr, countRow) => {
           if (countErr) {
             console.error('❌ [Cleanup] Error counting old records:', countErr);
@@ -3657,7 +3657,7 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
                     NOW() as current_time, 
                     NOW() - INTERVAL '7 days' as threshold
              FROM odoo_mo_cache 
-             WHERE create_date < NOW() - INTERVAL '7 days'
+             WHERE create_date::TIMESTAMP < NOW() - INTERVAL '7 days'
              LIMIT 5`,
             (sampleErr, sampleRows) => {
               if (!sampleErr && sampleRows && sampleRows.length > 0) {
@@ -3667,7 +3667,7 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
               // Delete MO records where create_date is older than 7 days
               // This is based on when the MO was created in Odoo, not when we cached it
               const deleteQuery = `DELETE FROM odoo_mo_cache 
-                                   WHERE create_date < NOW() - INTERVAL '7 days'`;
+                                   WHERE create_date::TIMESTAMP < NOW() - INTERVAL '7 days'`;
 
               console.log(`🗑️  [Cleanup] Executing delete query to remove records with create_date older than 7 days...`);
               console.log(`🗑️  [Cleanup] Query: ${deleteQuery}`);
@@ -3868,7 +3868,7 @@ app.get('/api/odoo/mo-list', async (req, res) => {
       SELECT mo_number, sku_name, quantity, uom, note, create_date
       FROM odoo_mo_cache
       WHERE LOWER(note) LIKE LOWER(?)
-        AND create_date >= NOW() - INTERVAL '7 days'
+        AND create_date::TIMESTAMP >= NOW() - INTERVAL '7 days'
       ORDER BY create_date DESC
       LIMIT 1000
     `;
@@ -4591,7 +4591,7 @@ async function sendMoListToExternalAPI() {
       SELECT mo_number, sku_name, quantity
       FROM odoo_mo_cache
       WHERE LOWER(note) LIKE LOWER('%liquid%')
-        AND create_date >= NOW() - INTERVAL '7 days'
+        AND create_date::TIMESTAMP >= NOW() - INTERVAL '7 days'
       ORDER BY create_date DESC
     `;
     

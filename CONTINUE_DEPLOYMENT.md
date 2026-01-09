@@ -161,21 +161,39 @@ Seharusnya return:
 
 ---
 
-## 🔄 Deployment Otomatis (Jika Code Sudah Update)
+## 🔄 Update Sistem (Setelah Deployment Pertama)
 
-Jika Anda sudah update code di git repository, gunakan script deployment:
+### Update dari Git Repository
 
 ```bash
 # Dari komputer lokal
-chmod +x deploy-from-git.sh
-./deploy-from-git.sh
+chmod +x update-from-git.sh
+./update-from-git.sh
 ```
 
-Atau jika upload langsung dari lokal:
+Atau manual di VPS:
 ```bash
-chmod +x deploy-to-vps.sh
-./deploy-to-vps.sh
+ssh foom@103.31.39.189 << 'ENDSSH'
+    # Pull dari git
+    cd /var/www/manufacturing-process-production-authenticity
+    git pull origin main || git pull origin master
+    
+    # Copy ke running directory
+    rsync -av --exclude 'node_modules' --exclude '.git' --exclude 'database.sqlite*' \
+        /var/www/manufacturing-process-production-authenticity/ \
+        ~/deployments/manufacturing-app/
+    
+    # Install dependencies
+    cd ~/deployments/manufacturing-app/server && npm install
+    cd ~/deployments/manufacturing-app/client && npm install && npm run build
+    
+    # Restart
+    cd ~/deployments/manufacturing-app/server
+    pm2 restart manufacturing-app
+ENDSSH
 ```
+
+**Lihat**: `UPDATE_SYSTEM_VPS.md` untuk panduan lengkap update sistem.
 
 ---
 
