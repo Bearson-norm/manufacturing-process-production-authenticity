@@ -231,10 +231,12 @@ async function createPostgreSQLTables(client) {
       pic TEXT NOT NULL,
       mo_number TEXT NOT NULL,
       sku_name TEXT NOT NULL,
+      quantity REAL,
       authenticity_data TEXT NOT NULL,
       status TEXT NOT NULL,
       completed_at TIMESTAMP,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
