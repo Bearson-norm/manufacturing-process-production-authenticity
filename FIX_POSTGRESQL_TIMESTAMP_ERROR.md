@@ -1,4 +1,3 @@
-git add .
 # 🔧 Fix: PostgreSQL Timestamp Comparison Error
 
 ## 🎯 Masalah
