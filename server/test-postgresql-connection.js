@@ -6,7 +6,7 @@ const { Pool } = require('pg');
 
 const config = {
   host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
+  port: parseInt(process.env.DB_PORT || '5433', 10), // Default to 5433 (PostgreSQL running port)
   database: process.env.DB_NAME || 'manufacturing_db',
   user: process.env.DB_USER || 'admin',
   password: process.env.DB_PASSWORD || 'Admin123',

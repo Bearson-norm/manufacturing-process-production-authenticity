@@ -108,8 +108,8 @@ ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
 ENDSSH
 echo "✅ Dependencies installed"
 
-# Step 6: Run migration
-echo -e "${YELLOW}[6/8] Running database migration...${NC}"
+# Step 6: Setup .env and verify dependencies
+echo -e "${YELLOW}[6/9] Setting up .env file...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     cd ~/deployments/manufacturing-app/server
     
@@ -119,21 +119,60 @@ ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
         echo "✅ Created .env file from env.example"
     fi
     
+    # Ensure DB_PORT=5433 (PostgreSQL running port)
+    sed -i 's/^DB_PORT=.*/DB_PORT=5433/' .env || echo "DB_PORT=5433" >> .env
+    
+    # Ensure other DB settings
+    grep -q "^DB_HOST" .env || echo "DB_HOST=localhost" >> .env
+    grep -q "^DB_NAME" .env || echo "DB_NAME=manufacturing_db" >> .env
+    grep -q "^DB_USER" .env || echo "DB_USER=admin" >> .env
+    grep -q "^DB_PASSWORD" .env || echo "DB_PASSWORD=Admin123" >> .env
+    
+    echo "✅ .env file configured"
+ENDSSH
+
+# Step 7: Verify pg module installed
+echo -e "${YELLOW}[7/9] Verifying dependencies...${NC}"
+ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    
+    # Check if pg module exists
+    if ! npm list pg > /dev/null 2>&1; then
+        echo "⚠️  pg module not found, installing..."
+        npm install pg
+    else
+        echo "✅ pg module installed"
+    fi
+ENDSSH
+
+# Step 8: Run migration
+echo -e "${YELLOW}[8/9] Running database migration...${NC}"
+ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    
+    # Test connection first
+    if [ -f test-postgresql-connection.js ]; then
+        echo "🔍 Testing PostgreSQL connection..."
+        node test-postgresql-connection.js || {
+            echo "⚠️  Connection test failed, but continuing..."
+        }
+    fi
+    
     # Run migration
     node migrate-to-postgresql.js
 ENDSSH
 echo "✅ Migration completed"
 
-# Step 7: Build client
-echo -e "${YELLOW}[7/8] Building client...${NC}"
+# Step 9: Build client
+echo -e "${YELLOW}[9/10] Building client...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     cd ~/deployments/manufacturing-app/client
     npm run build
 ENDSSH
 echo "✅ Client built"
 
-# Step 8: Start application
-echo -e "${YELLOW}[8/8] Starting application...${NC}"
+# Step 10: Start application
+echo -e "${YELLOW}[10/10] Starting application...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     cd ~/deployments/manufacturing-app/server
     pm2 restart ecosystem.config.js || pm2 start ecosystem.config.js

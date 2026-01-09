@@ -152,6 +152,10 @@ ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     if ! grep -q "DB_HOST=localhost" .env; then
         echo "DB_HOST=localhost" >> .env
     fi
+    # IMPORTANT: Set DB_PORT to 5433 (PostgreSQL running port)
+    if ! grep -q "DB_PORT=5433" .env; then
+        sed -i 's/^DB_PORT=.*/DB_PORT=5433/' .env || echo "DB_PORT=5433" >> .env
+    fi
     
     # Setup PostgreSQL user (fix password if needed)
     if [ -f setup-postgresql-user.sh ]; then
@@ -177,8 +181,22 @@ ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     fi
 ENDSSH
 
-# Step 7: Run migration
-echo -e "${YELLOW}[7/8] Running database migration...${NC}"
+# Step 7: Verify Dependencies Installed
+echo -e "${YELLOW}[7/9] Verifying dependencies...${NC}"
+ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
+    cd ~/deployments/manufacturing-app/server
+    
+    # Check if pg module exists
+    if ! npm list pg > /dev/null 2>&1; then
+        echo "   Installing pg module..."
+        npm install pg
+    else
+        echo "   ✅ pg module installed"
+    fi
+ENDSSH
+
+# Step 8: Run migration
+echo -e "${YELLOW}[8/9] Running database migration...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     cd ~/deployments/manufacturing-app/server
     
@@ -193,16 +211,16 @@ ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
 ENDSSH
 echo "✅ Migration completed"
 
-# Step 8: Build client
-echo -e "${YELLOW}[8/9] Building client...${NC}"
+# Step 9: Build client
+echo -e "${YELLOW}[9/10] Building client...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     cd ~/deployments/manufacturing-app/client
     npm run build
 ENDSSH
 echo "✅ Client built"
 
-# Step 9: Start application
-echo -e "${YELLOW}[9/9] Starting application...${NC}"
+# Step 10: Start application
+echo -e "${YELLOW}[10/10] Starting application...${NC}"
 ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     cd ~/deployments/manufacturing-app/server
     pm2 restart ecosystem.config.js || pm2 start ecosystem.config.js
