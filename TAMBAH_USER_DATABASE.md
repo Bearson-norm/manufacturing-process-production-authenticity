@@ -14,6 +14,37 @@ Dokumen ini menjelaskan cara menambahkan user baru untuk mengakses database `man
 
 ## ⚡ Quick Fix untuk Connection Error
 
+### Jika Admin bisa login tapi it_foom tidak bisa
+
+Jika user `admin` bisa login dengan password `Admin123`, tapi `it_foom` tidak bisa, jalankan diagnose script:
+
+```bash
+cd ~/deployments/manufacturing-app/server
+chmod +x diagnose-user-access.sh
+./diagnose-user-access.sh
+```
+
+**Atau perbaiki manual dengan perintah berikut:**
+
+```bash
+# 1. Update password dengan method yang sama seperti admin
+sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'FOOMIT';"
+
+# 2. Cek password encryption
+sudo -u postgres psql -c "SHOW password_encryption;"
+
+# 3. Pastikan user memiliki CONNECT privilege
+sudo -u postgres psql -d manufacturing_db -c "GRANT CONNECT ON DATABASE manufacturing_db TO it_foom;"
+
+# 4. Reload PostgreSQL
+sudo systemctl reload postgresql
+
+# 5. Test koneksi
+PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user, current_database();"
+```
+
+### Jika Error "connection was aborted by the software in your host machine"
+
 Jika Anda mendapatkan error **"connection was aborted by the software in your host machine"**, jalankan script fix berikut:
 
 ```bash
@@ -467,7 +498,91 @@ DB_HOST=/var/run/postgresql
 # atau kosongkan DB_HOST
 ```
 
-### Issue 2: "password authentication failed"
+### Issue 2: "Admin bisa login tapi it_foom tidak bisa"
+
+**Masalah:** User `admin` bisa login dengan password `Admin123`, tapi user `it_foom` tidak bisa login dengan password `FOOMIT`.
+
+**Diagnosis:**
+```bash
+# 1. Jalankan diagnose script
+cd ~/deployments/manufacturing-app/server
+chmod +x diagnose-user-access.sh
+./diagnose-user-access.sh
+
+# 2. Bandingkan password hash antara admin dan it_foom
+sudo -u postgres psql -c "SELECT usename, substring(passwd::text, 1, 30) as password_hash FROM pg_shadow WHERE usename IN ('admin', 'it_foom');"
+
+# 3. Cek apakah password encryption method sama
+sudo -u postgres psql -c "SHOW password_encryption;"
+```
+
+**Solusi:**
+
+1. **Update password dengan method yang sama:**
+```bash
+# Pastikan menggunakan encryption method yang sama dengan admin
+sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'FOOMIT';"
+```
+
+2. **Pastikan CONNECT privilege diberikan:**
+```bash
+sudo -u postgres psql -d manufacturing_db -c "GRANT CONNECT ON DATABASE manufacturing_db TO it_foom;"
+```
+
+3. **Cek pg_hba.conf untuk user-specific rules:**
+```bash
+PG_HBA_FILE=$(sudo -u postgres psql -t -P format=unaligned -c 'SHOW hba_file;' | xargs)
+# Cek apakah ada rule khusus untuk user tertentu
+sudo grep -E "admin|it_foom" "$PG_HBA_FILE"
+```
+
+4. **Test dengan password yang di-hash ulang:**
+```bash
+# Force password update
+sudo -u postgres psql << 'EOF'
+ALTER USER it_foom WITH PASSWORD 'FOOMIT';
+\password it_foom
+EOF
+# Ketik: FOOMIT (2x)
+```
+
+5. **Coba dengan metode yang sama seperti admin:**
+```bash
+# Lihat bagaimana admin login
+PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT current_user;" -v ON_ERROR_STOP=1
+
+# Coba login it_foom dengan cara yang sama
+PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user;" -v ON_ERROR_STOP=1
+```
+
+6. **Gunakan Unix socket (workaround):**
+Jika TCP masih bermasalah, gunakan Unix socket:
+```bash
+# Test dengan Unix socket
+sudo -u postgres psql -d manufacturing_db -c "SET ROLE it_foom; SELECT current_user, current_database();"
+```
+
+Jika berhasil dengan Unix socket, update aplikasi untuk menggunakan:
+```env
+DB_HOST=/var/run/postgresql
+```
+
+7. **Verifikasi user dapat login sebagai postgres:**
+```bash
+# Test apakah user bisa login via postgres role
+sudo -u postgres psql -d manufacturing_db << 'EOF'
+SET ROLE it_foom;
+SELECT current_user, current_database();
+SELECT COUNT(*) FROM production_liquid;
+EOF
+```
+
+**Catatan Penting:**
+- Pastikan password di-update **SETELAH** setting `password_encryption` dibuat
+- Jika PostgreSQL menggunakan `scram-sha-256`, password harus di-update ulang
+- Jika menggunakan `md5`, pastikan semua user menggunakan method yang sama
+
+### Issue 3: "password authentication failed"
 
 **Solusi:**
 ```bash
@@ -482,7 +597,7 @@ sudo -u postgres psql -c "SHOW hba_file;"
 sudo systemctl reload postgresql
 ```
 
-### Issue 2: "permission denied for table [table_name]"
+### Issue 4: "permission denied for table [table_name]"
 
 **Solusi:**
 Error ini terjadi karena user sudah dibuat **setelah** tabel dibuat. Perlu memberikan privileges ke tabel yang sudah ada:
@@ -514,7 +629,7 @@ Anda harus melihat `it_foom=arwdDxt/admin` untuk setiap tabel.
 - `ALTER DEFAULT PRIVILEGES` memberikan hak akses ke tabel/sequences yang **akan dibuat** di masa depan
 - Jika ada tabel baru yang dibuat sebelum user dibuat, perlu jalankan GRANT lagi
 
-### Issue 3: "permission denied for schema public"
+### Issue 5: "permission denied for schema public"
 
 **Solusi:**
 ```sql
@@ -527,7 +642,7 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO it_foom;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO it_foom;
 ```
 
-### Issue 4: "role does not exist"
+### Issue 6: "role does not exist"
 
 **Solusi:**
 ```sql
@@ -538,7 +653,7 @@ sudo -u postgres psql -c "\du it_foom"
 CREATE USER it_foom WITH PASSWORD 'FOOMIT';
 ```
 
-### Issue 5: "database does not exist"
+### Issue 7: "database does not exist"
 
 **Solusi:**
 ```bash
