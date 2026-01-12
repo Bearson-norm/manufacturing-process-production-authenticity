@@ -209,10 +209,47 @@ async function measureLatency() {
     
     const dbTimestamp = new Date(dbResult.rows[0].created_at);
     const startTime = Date.now();
+    const currentTime = Date.now();
+    const timeDiff = currentTime - dbTimestamp.getTime();
+    const timeDiffSeconds = Math.abs(timeDiff / 1000);
+    
+    // Validasi: jika timestamp terlalu lama (> 5 menit), kemungkinan ada masalah
+    let useInsertTime = true;
+    if (timeDiffSeconds > 300) { // > 5 menit
+      console.log(`⚠️  WARNING: Timestamp di database terlalu lama!`);
+      console.log(`   Created At (DB): ${dbTimestamp.toISOString()}`);
+      console.log(`   Waktu Sekarang: ${new Date(currentTime).toISOString()}`);
+      console.log(`   Selisih: ${timeDiffSeconds.toFixed(0)} detik (${(timeDiffSeconds / 60).toFixed(1)} menit)`);
+      console.log(``);
+      console.log(`   🔍 Kemungkinan Masalah:`);
+      console.log(`   1. Kolom created_at tidak di-set saat insert dari DBeaver`);
+      console.log(`   2. Tabel tidak punya DEFAULT CURRENT_TIMESTAMP`);
+      console.log(`   3. Data yang di-insert adalah data lama (bukan data baru)`);
+      console.log(``);
+      console.log(`   💡 Solusi:`);
+      console.log(`   - Pastikan saat insert di DBeaver, kolom created_at di-set dengan CURRENT_TIMESTAMP`);
+      console.log(`   - Atau gunakan: INSERT ... VALUES (..., CURRENT_TIMESTAMP)`);
+      console.log(`   - Script akan menggunakan waktu query sebagai referensi\n`);
+      useInsertTime = false;
+    } else if (timeDiffSeconds < 0) {
+      // Timestamp di masa depan (tidak mungkin, kecuali timezone issue)
+      console.log(`⚠️  WARNING: Timestamp di database di masa depan!`);
+      console.log(`   Created At (DB): ${dbTimestamp.toISOString()}`);
+      console.log(`   Waktu Sekarang: ${new Date(currentTime).toISOString()}`);
+      console.log(`   💡 Kemungkinan: Timezone issue atau clock tidak sync\n`);
+      useInsertTime = false;
+    }
+    
+    // Gunakan waktu saat query jika timestamp terlalu lama
+    const referenceTime = useInsertTime ? dbTimestamp.getTime() : currentTime;
+    const referenceTimestamp = useInsertTime ? dbTimestamp : new Date(currentTime);
     
     console.log(`✅ Data ditemukan di database`);
     console.log(`   ID: ${targetId}`);
-    console.log(`   Created At: ${dbTimestamp.toISOString()}`);
+    console.log(`   Created At (DB): ${dbTimestamp.toISOString()}`);
+    if (!useInsertTime) {
+      console.log(`   ⚠️  Menggunakan waktu query sebagai referensi: ${referenceTimestamp.toISOString()}`);
+    }
     console.log(`   Mencari di API...\n`);
     
     // 2. Polling API
@@ -246,7 +283,8 @@ async function measureLatency() {
                     const latencyFromStart = foundTime - startTime;
                     
                     // Option 2: Latency dari waktu insert di database (lebih akurat)
-                    const realLatency = foundTime - dbTimestamp.getTime();
+                    // Gunakan referenceTime yang sudah divalidasi
+                    const realLatency = foundTime - referenceTime;
                     
                     console.log(`✅ Data ditemukan di API!`);
                     console.log(`   Attempt: ${attempts}`);
@@ -257,8 +295,15 @@ async function measureLatency() {
                     console.log(``);
                     console.log(`📅 Timeline Breakdown:`);
                     console.log(`     - Waktu Insert (DB): ${dbTimestamp.toISOString()}`);
+                    if (!useInsertTime) {
+                      console.log(`     - Waktu Referensi (Query): ${referenceTimestamp.toISOString()} ⚠️`);
+                    }
                     console.log(`     - Waktu Ditemukan (API): ${new Date(foundTime).toISOString()}`);
                     console.log(`     - Total Latency: ${realLatency}ms (${(realLatency / 1000).toFixed(2)} detik)`);
+                    if (!useInsertTime) {
+                      console.log(`     ⚠️  Catatan: Latency dihitung dari waktu query, bukan waktu insert`);
+                      console.log(`     💡 Pastikan kolom created_at di-set dengan DEFAULT CURRENT_TIMESTAMP`);
+                    }
                     
                     // Tampilkan interpretasi
                     if (realLatency < 100) {
