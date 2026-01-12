@@ -5,6 +5,7 @@
 const { Pool } = require('pg');
 const https = require('https');
 const config = require('./config');
+const fs = require('fs');
 
 const tableName = process.argv[2] || 'production_combined';
 const count = parseInt(process.argv[3] || '5', 10);
@@ -28,16 +29,91 @@ console.log(`Table: ${tableName}`);
 console.log(`API Endpoint: ${apiEndpoint}`);
 console.log(`Testing ${count} most recent records\n`);
 
-// Create database connection
-const dbConfig = {
-  host: process.env.DB_HOST || config.database.host || 'localhost',
-  port: parseInt(process.env.DB_PORT || config.database.port || '5432', 10),
-  database: process.env.DB_NAME || config.database.database || 'manufacturing_db',
-  user: process.env.DB_USER || config.database.user || 'admin',
-  password: process.env.DB_PASSWORD || config.database.password || 'Admin123'
-};
+// Function to create database connection with fallback
+function createDatabasePool() {
+  const dbConfig = {
+    host: process.env.DB_HOST || config.database.host || 'localhost',
+    port: parseInt(process.env.DB_PORT || config.database.port || '5432', 10),
+    database: process.env.DB_NAME || config.database.database || 'manufacturing_db',
+    user: process.env.DB_USER || config.database.user || 'admin',
+    password: process.env.DB_PASSWORD || config.database.password || 'Admin123'
+  };
+  
+  // Try multiple connection methods
+  const connectionMethods = [
+    // Method 1: Use config as-is
+    {
+      name: 'Konfigurasi default',
+      create: () => new Pool(dbConfig)
+    },
+    
+    // Method 2: Try port 5433 (common alternative)
+    {
+      name: 'Port 5433',
+      create: () => {
+        if (dbConfig.port === 5432) {
+          return new Pool({
+            ...dbConfig,
+            port: 5433
+          });
+        }
+        return null;
+      }
+    },
+    
+    // Method 3: Try Unix socket
+    {
+      name: 'Unix socket',
+      create: () => {
+        if (dbConfig.host === 'localhost' || dbConfig.host === '127.0.0.1' || !dbConfig.host) {
+          const socketPath = '/var/run/postgresql/.s.PGSQL.' + dbConfig.port;
+          if (fs.existsSync(socketPath)) {
+            return new Pool({
+              ...dbConfig,
+              host: '/var/run/postgresql'
+            });
+          }
+        }
+        return null;
+      }
+    },
+    
+    // Method 4: Try Unix socket with port 5433
+    {
+      name: 'Unix socket (port 5433)',
+      create: () => {
+        if (dbConfig.host === 'localhost' || dbConfig.host === '127.0.0.1' || !dbConfig.host) {
+          const socketPath = '/var/run/postgresql/.s.PGSQL.5433';
+          if (fs.existsSync(socketPath)) {
+            return new Pool({
+              ...dbConfig,
+              host: '/var/run/postgresql',
+              port: 5433
+            });
+          }
+        }
+        return null;
+      }
+    }
+  ];
+  
+  // Try each method
+  for (const method of connectionMethods) {
+    try {
+      const pool = method.create();
+      if (pool) {
+        return pool;
+      }
+    } catch (err) {
+      // Continue to next method
+    }
+  }
+  
+  // Fallback to default
+  return new Pool(dbConfig);
+}
 
-const pool = new Pool(dbConfig);
+const pool = createDatabasePool();
 
 // Function to check API for data
 async function checkAPIForData(id) {
@@ -77,7 +153,38 @@ async function checkAPIForData(id) {
 
 async function quickTest() {
   try {
-    const client = await pool.connect();
+    // Test connection first
+    let client;
+    try {
+      client = await pool.connect();
+      await client.query('SELECT 1');
+      client.release();
+    } catch (connError) {
+      console.error('❌ Database connection failed:', connError.message);
+      
+      // Try port 5433
+      await pool.end();
+      const dbConfig = {
+        host: process.env.DB_HOST || config.database.host || 'localhost',
+        port: 5433,
+        database: process.env.DB_NAME || config.database.database || 'manufacturing_db',
+        user: process.env.DB_USER || config.database.user || 'admin',
+        password: process.env.DB_PASSWORD || config.database.password || 'Admin123'
+      };
+      
+      try {
+        pool = new Pool(dbConfig);
+        client = await pool.connect();
+        await client.query('SELECT 1');
+        console.log('✅ Koneksi via port 5433 berhasil!\n');
+        client.release();
+      } catch (portError) {
+        console.error('❌ Koneksi gagal dengan port 5433 juga!');
+        throw connError;
+      }
+    }
+    
+    client = await pool.connect();
     
     // Get most recent records
     const result = await client.query(

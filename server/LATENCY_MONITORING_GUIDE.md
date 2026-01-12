@@ -186,10 +186,16 @@ Script akan menggunakan konfigurasi dari:
 
 #### Variabel yang Digunakan:
 - `DB_HOST` - Database host (default: localhost)
-- `DB_PORT` - Database port (default: 5432)
+- `DB_PORT` - Database port (default: 5432, script akan otomatis mencoba 5433 jika gagal)
 - `DB_NAME` - Database name (default: manufacturing_db)
 - `DB_USER` - Database user (default: admin)
 - `DB_PASSWORD` - Database password (default: Admin123)
+
+**Catatan:** Script akan otomatis mencoba beberapa metode koneksi:
+1. Konfigurasi default (dari env/config)
+2. Port 5433 (jika port default gagal)
+3. Unix socket (jika tersedia)
+4. Peer authentication (tanpa password)
 
 ### Domain Configuration
 
@@ -238,7 +244,7 @@ Jika latency tinggi (> 1000ms), cek:
 
 ## 🔧 Troubleshooting
 
-### Error: Database connection failed
+### Error: Database connection failed / password authentication failed
 
 **Solusi:**
 1. Pastikan PostgreSQL berjalan:
@@ -248,9 +254,25 @@ Jika latency tinggi (> 1000ms), cek:
 
 2. Check kredensial database di `.env` atau `config.js`
 
-3. Test koneksi manual:
+3. **Jika menggunakan port 5433** (bukan default 5432):
+   - Script akan otomatis mencoba port 5433 jika port default gagal
+   - Atau set manual: `export DB_PORT=5433`
+   - Atau edit `.env` file: `DB_PORT=5433`
+
+4. Test koneksi manual:
    ```bash
+   # Port default (5432)
    psql -h localhost -U admin -d manufacturing_db
+   
+   # Port 5433
+   psql -h localhost -p 5433 -U admin -d manufacturing_db
+   ```
+
+5. Check port PostgreSQL yang aktif:
+   ```bash
+   sudo netstat -tlnp | grep postgres
+   # atau
+   sudo ss -tlnp | grep postgres
    ```
 
 ### Error: Data tidak ditemukan di API

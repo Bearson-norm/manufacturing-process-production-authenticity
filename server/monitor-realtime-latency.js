@@ -31,7 +31,7 @@ console.log(`API Endpoint: ${apiEndpoint}`);
 console.log(`Monitor Duration: ${monitorDuration} detik (${(monitorDuration / 60).toFixed(1)} menit)`);
 console.log('');
 
-// Function to create database connection
+// Function to create database connection with fallback
 function createDatabasePool() {
   const dbConfig = {
     host: process.env.DB_HOST || config.database.host || 'localhost',
@@ -48,6 +48,92 @@ function createDatabasePool() {
   console.log(`   User: ${dbConfig.user}`);
   console.log('');
   
+  // Try multiple connection methods
+  const connectionMethods = [
+    // Method 1: Use config as-is
+    {
+      name: 'Konfigurasi default',
+      create: () => new Pool(dbConfig)
+    },
+    
+    // Method 2: Try port 5433 (common alternative)
+    {
+      name: 'Port 5433',
+      create: () => {
+        if (dbConfig.port === 5432) {
+          return new Pool({
+            ...dbConfig,
+            port: 5433
+          });
+        }
+        return null;
+      }
+    },
+    
+    // Method 3: Try Unix socket
+    {
+      name: 'Unix socket',
+      create: () => {
+        if (dbConfig.host === 'localhost' || dbConfig.host === '127.0.0.1' || !dbConfig.host) {
+          const socketPath = '/var/run/postgresql/.s.PGSQL.' + dbConfig.port;
+          if (fs.existsSync(socketPath)) {
+            return new Pool({
+              ...dbConfig,
+              host: '/var/run/postgresql'
+            });
+          }
+        }
+        return null;
+      }
+    },
+    
+    // Method 4: Try Unix socket with port 5433
+    {
+      name: 'Unix socket (port 5433)',
+      create: () => {
+        if (dbConfig.host === 'localhost' || dbConfig.host === '127.0.0.1' || !dbConfig.host) {
+          const socketPath = '/var/run/postgresql/.s.PGSQL.5433';
+          if (fs.existsSync(socketPath)) {
+            return new Pool({
+              ...dbConfig,
+              host: '/var/run/postgresql',
+              port: 5433
+            });
+          }
+        }
+        return null;
+      }
+    },
+    
+    // Method 5: Try without password (peer authentication)
+    {
+      name: 'Peer authentication (no password)',
+      create: () => {
+        const peerConfig = { ...dbConfig };
+        delete peerConfig.password;
+        return new Pool({
+          ...peerConfig,
+          host: '/var/run/postgresql'
+        });
+      }
+    }
+  ];
+  
+  // Try each method
+  for (const method of connectionMethods) {
+    try {
+      const pool = method.create();
+      if (pool) {
+        console.log(`🔌 Mencoba: ${method.name}...`);
+        return pool;
+      }
+    } catch (err) {
+      // Continue to next method
+    }
+  }
+  
+  // Fallback to default
+  console.log('🔌 Menggunakan konfigurasi default...');
   return new Pool(dbConfig);
 }
 
@@ -161,10 +247,71 @@ async function monitorNewData() {
   try {
     // Test connection first
     console.log('🔍 Testing database connection...');
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    console.log('✅ Database connection successful!\n');
-    client.release();
+    let client;
+    let connectionSuccess = false;
+    
+    try {
+      client = await pool.connect();
+      await client.query('SELECT 1');
+      console.log('✅ Database connection successful!\n');
+      connectionSuccess = true;
+      client.release();
+    } catch (connError) {
+      console.error('❌ Database connection failed:', connError.message);
+      
+      // Try alternative methods
+      console.log('\n🔄 Mencoba metode koneksi alternatif...');
+      await pool.end();
+      
+      const dbConfig = {
+        host: process.env.DB_HOST || config.database.host || 'localhost',
+        port: parseInt(process.env.DB_PORT || config.database.port || '5432', 10),
+        database: process.env.DB_NAME || config.database.database || 'manufacturing_db',
+        user: process.env.DB_USER || config.database.user || 'admin',
+        password: process.env.DB_PASSWORD || config.database.password || 'Admin123'
+      };
+      
+      // Try port 5433
+      try {
+        pool = new Pool({
+          ...dbConfig,
+          port: 5433
+        });
+        client = await pool.connect();
+        await client.query('SELECT 1');
+        console.log('✅ Koneksi via port 5433 berhasil!\n');
+        connectionSuccess = true;
+        client.release();
+      } catch (portError) {
+        // Try Unix socket
+        try {
+          pool = new Pool({
+            host: '/var/run/postgresql',
+            port: 5433,
+            database: dbConfig.database,
+            user: dbConfig.user
+          });
+          client = await pool.connect();
+          await client.query('SELECT 1');
+          console.log('✅ Koneksi via Unix socket (port 5433) berhasil!\n');
+          connectionSuccess = true;
+          client.release();
+        } catch (socketError) {
+          console.error('❌ Semua metode koneksi gagal!');
+          console.log('\n💡 Tips untuk memperbaiki:');
+          console.log('   1. Check .env file: cat .env | grep DB_');
+          console.log('   2. Set port 5433: export DB_PORT=5433');
+          console.log('   3. Try Unix socket: export DB_HOST=/var/run/postgresql');
+          console.log('   4. Check PostgreSQL port: sudo netstat -tlnp | grep postgres');
+          console.log('   5. Test manual: psql -h localhost -p 5433 -U admin -d manufacturing_db');
+          throw connError;
+        }
+      }
+    }
+    
+    if (!connectionSuccess) {
+      throw new Error('Tidak bisa connect ke database');
+    }
     
     // Get the latest ID before monitoring starts
     const initialClient = await pool.connect();
