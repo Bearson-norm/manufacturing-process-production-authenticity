@@ -241,15 +241,35 @@ async function measureLatency() {
                   if (item.id === targetId || (item.inputs && item.inputs.some(i => i.id === targetId))) {
                     found = true;
                     const foundTime = Date.now();
-                    const latency = foundTime - startTime;
+                    
+                    // Option 1: Latency dari start polling (waktu script mulai mencari)
+                    const latencyFromStart = foundTime - startTime;
+                    
+                    // Option 2: Latency dari waktu insert di database (lebih akurat)
+                    const realLatency = foundTime - dbTimestamp.getTime();
                     
                     console.log(`✅ Data ditemukan di API!`);
                     console.log(`   Attempt: ${attempts}`);
-                    console.log(`   Latency: ${latency}ms (${(latency / 1000).toFixed(2)} detik)`);
-                    console.log(`   Breakdown:`);
+                    console.log(``);
+                    console.log(`📊 Latency Measurement:`);
+                    console.log(`   ⏱️  Latency dari waktu insert (AKURAT): ${realLatency}ms (${(realLatency / 1000).toFixed(2)} detik)`);
+                    console.log(`   ⏱️  Latency dari start polling: ${latencyFromStart}ms (${(latencyFromStart / 1000).toFixed(2)} detik)`);
+                    console.log(``);
+                    console.log(`📅 Timeline Breakdown:`);
                     console.log(`     - Waktu Insert (DB): ${dbTimestamp.toISOString()}`);
                     console.log(`     - Waktu Ditemukan (API): ${new Date(foundTime).toISOString()}`);
-                    console.log(`     - Selisih: ${latency}ms`);
+                    console.log(`     - Total Latency: ${realLatency}ms (${(realLatency / 1000).toFixed(2)} detik)`);
+                    
+                    // Tampilkan interpretasi
+                    if (realLatency < 100) {
+                      console.log(`   ✅ Status: SANGAT BAIK (< 100ms)`);
+                    } else if (realLatency < 500) {
+                      console.log(`   ✅ Status: BAIK (100-500ms)`);
+                    } else if (realLatency < 1000) {
+                      console.log(`   ⚠️  Status: CUKUP (500-1000ms)`);
+                    } else {
+                      console.log(`   ❌ Status: PERLU OPTIMASI (> 1000ms)`);
+                    }
                     
                     resolve();
                     return;
