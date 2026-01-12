@@ -43,6 +43,25 @@ sudo systemctl reload postgresql
 PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user, current_database();"
 ```
 
+### Jika Error "EOFException" atau "Connection reset"
+
+Jika Anda mendapatkan error **EOFException** atau **Connection reset by peer**, jalankan script fix:
+
+```bash
+cd ~/deployments/manufacturing-app/server
+chmod +x fix-eof-exception.sh
+./fix-eof-exception.sh
+```
+
+**Atau perbaiki manual cepat:**
+```bash
+# 1. Restart PostgreSQL
+sudo systemctl restart postgresql
+
+# 2. Test koneksi
+PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+```
+
 ### Jika Error "connection was aborted by the software in your host machine"
 
 Jika Anda mendapatkan error **"connection was aborted by the software in your host machine"**, jalankan script fix berikut:
@@ -345,6 +364,155 @@ PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "S
 ```bash
 sudo -u postgres psql -d manufacturing_db -c "\dp" | head -20
 ```
+
+---
+
+## 🗄️ Konfigurasi untuk DBeaver dan Tools Database
+
+### Setup DBeaver untuk PostgreSQL
+
+Jika Anda menggunakan DBeaver untuk mengakses database, ikuti langkah berikut:
+
+#### 1. Buat Koneksi Baru
+
+1. Buka DBeaver
+2. Klik **Database** → **New Database Connection**
+3. Pilih **PostgreSQL**
+4. Klik **Next**
+
+#### 2. Konfigurasi Connection Settings
+
+**Main Tab:**
+```
+Host: localhost (atau 127.0.0.1)
+Port: 5433 ⚠️ PENTING: Jangan gunakan 5432!
+Database: manufacturing_db
+Username: it_foom
+Password: FOOMIT
+```
+
+**Driver Properties Tab:**
+- Klik **Driver Properties**
+- Tambahkan/Edit properties berikut:
+  ```
+  connectTimeout=30
+  socketTimeout=60
+  loginTimeout=30
+  ```
+
+**SSH Tab (jika connect dari remote):**
+- Jika Anda connect dari komputer lain (bukan di VPS), gunakan SSH tunnel:
+  ```
+  Use SSH Tunnel: ✓ (centang)
+  Host: ProductionDashboard (atau 103.31.39.189)
+  Port: 22
+  User Name: foom
+  Authentication: Password atau Key
+  ```
+
+#### 3. Advanced Settings
+
+Klik **Edit Driver Settings** → **Connection Settings**:
+
+**Connection Settings:**
+```
+Connection timeout: 30 (atau 60) detik
+Keep-alive query: SELECT 1
+Auto-commit: ✓ (centang)
+```
+
+**Network Settings:**
+```
+TCP keep-alive: ✓ (centang)
+TCP keep-alive interval: 60 detik
+```
+
+#### 4. Test Connection
+
+1. Klik **Test Connection**
+2. Jika driver belum ada, DBeaver akan download driver PostgreSQL
+3. Tunggu hingga selesai
+
+#### 5. Troubleshooting DBeaver
+
+**Jika masih error "connection was aborted":**
+
+**A. Cek Firewall di VPS:**
+```bash
+# Cek apakah port 5433 terbuka untuk remote access (jika connect dari luar)
+sudo ufw status
+sudo iptables -L -n | grep 5433
+
+# Jika perlu, buka port untuk IP tertentu (tidak disarankan buka untuk semua)
+# sudo ufw allow from YOUR_IP_ADDRESS to any port 5433
+```
+
+**B. Gunakan SSH Tunnel (Recommended):**
+Jika connect dari komputer lain, gunakan SSH tunnel:
+1. Di DBeaver, enable **SSH Tunnel**
+2. Isi SSH credentials
+3. Local port: biarkan kosong (auto)
+4. Remote host: localhost
+5. Remote port: 5433
+
+**C. Cek PostgreSQL Listen Address:**
+```bash
+# Cek apakah PostgreSQL listening di semua interface atau hanya localhost
+sudo -u postgres psql -c "SHOW listen_addresses;"
+
+# Jika hanya localhost, dan Anda connect dari remote, perlu ubah:
+# sudo -u postgres psql -c "ALTER SYSTEM SET listen_addresses = '*';"
+# sudo systemctl restart postgresql
+# ⚠️ HATI-HATI: Ini akan expose PostgreSQL ke network, pastikan firewall aktif!
+```
+
+**D. Test dengan psql dari komputer yang sama:**
+```bash
+# Test dari komputer yang sama dengan DBeaver
+PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+```
+
+**E. Gunakan Connection String Langsung:**
+Di DBeaver, coba gunakan connection string:
+```
+jdbc:postgresql://localhost:5433/manufacturing_db?user=it_foom&password=FOOMIT&connectTimeout=30&socketTimeout=60
+```
+
+**F. Cek DBeaver Logs:**
+1. Di DBeaver: **Help** → **View Log**
+2. Cari error terkait connection
+3. Copy error message untuk analisis lebih lanjut
+
+**G. Update PostgreSQL Driver:**
+1. Di DBeaver: **Database** → **Driver Manager**
+2. Pilih PostgreSQL driver
+3. Klik **Edit**
+4. Update ke versi terbaru
+
+**H. Cek Network dari DBeaver ke VPS:**
+```bash
+# Dari komputer yang menjalankan DBeaver, test koneksi
+telnet ProductionDashboard 5433
+# atau
+nc -zv ProductionDashboard 5433
+```
+
+#### 6. Alternatif: Gunakan pgAdmin
+
+Jika DBeaver masih bermasalah, coba pgAdmin:
+
+**Connection Settings:**
+```
+Host: localhost (atau ProductionDashboard jika remote)
+Port: 5433
+Maintenance database: postgres
+Username: it_foom
+Password: FOOMIT
+```
+
+**Advanced Settings:**
+- Connection timeout: 30
+- Keep-alive: Enabled
 
 ---
 
@@ -653,7 +821,164 @@ sudo -u postgres psql -c "\du it_foom"
 CREATE USER it_foom WITH PASSWORD 'FOOMIT';
 ```
 
-### Issue 7: "database does not exist"
+### Issue 7: "EOFException" atau "Connection reset by peer"
+
+**Masalah:** Error `EOFException` atau `Connection reset by peer` biasanya terjadi ketika koneksi database terputus secara tiba-tiba.
+
+**Penyebab Umum:**
+1. PostgreSQL connection timeout
+2. Network interruption
+3. PostgreSQL server restart
+4. Connection pool exhausted
+5. Firewall atau network issue
+6. PostgreSQL max_connections limit tercapai
+
+**Diagnosis:**
+```bash
+# 1. Cek apakah PostgreSQL masih running
+sudo systemctl status postgresql
+
+# 2. Cek jumlah koneksi aktif
+sudo -u postgres psql -c "SELECT count(*) FROM pg_stat_activity;"
+
+# 3. Cek max_connections setting
+sudo -u postgres psql -c "SHOW max_connections;"
+
+# 4. Cek koneksi dari user it_foom
+sudo -u postgres psql -c "SELECT usename, count(*) FROM pg_stat_activity WHERE usename = 'it_foom' GROUP BY usename;"
+
+# 5. Cek PostgreSQL logs untuk error detail
+sudo tail -50 /var/log/postgresql/postgresql-*-main.log | grep -iE "eof|connection|reset|fatal"
+```
+
+**Solusi:**
+
+1. **Cek dan restart PostgreSQL jika perlu:**
+```bash
+# Cek status
+sudo systemctl status postgresql
+
+# Restart jika perlu
+sudo systemctl restart postgresql
+
+# Tunggu beberapa detik, lalu test koneksi
+sleep 5
+PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+```
+
+2. **Cek max_connections dan tingkatkan jika perlu:**
+```bash
+# Cek current setting
+sudo -u postgres psql -c "SHOW max_connections;"
+
+# Cek current connections
+sudo -u postgres psql -c "SELECT count(*) as current_connections, max_connections, (max_connections - count(*)) as available FROM pg_stat_activity, (SELECT setting::int as max_connections FROM pg_settings WHERE name = 'max_connections') mc;"
+
+# Jika hampir penuh, tingkatkan max_connections
+sudo -u postgres psql -c "ALTER SYSTEM SET max_connections = 200;"
+sudo systemctl restart postgresql
+```
+
+3. **Cek connection timeout settings:**
+```bash
+# Cek timeout settings
+sudo -u postgres psql -c "SHOW statement_timeout;"
+sudo -u postgres psql -c "SHOW idle_in_transaction_session_timeout;"
+sudo -u postgres psql -c "SHOW tcp_keepalives_idle;"
+sudo -u postgres psql -c "SHOW tcp_keepalives_interval;"
+```
+
+4. **Tingkatkan timeout jika perlu:**
+```bash
+# Set timeout yang lebih panjang
+sudo -u postgres psql << 'EOF'
+ALTER SYSTEM SET statement_timeout = '300s';
+ALTER SYSTEM SET idle_in_transaction_session_timeout = '600s';
+ALTER SYSTEM SET tcp_keepalives_idle = 60;
+ALTER SYSTEM SET tcp_keepalives_interval = 10;
+EOF
+
+sudo systemctl restart postgresql
+```
+
+5. **Kill koneksi yang idle terlalu lama:**
+```bash
+# Lihat koneksi idle
+sudo -u postgres psql -c "SELECT pid, usename, datname, state, state_change, now() - state_change as idle_duration FROM pg_stat_activity WHERE state = 'idle' AND usename = 'it_foom';"
+
+# Kill koneksi idle lebih dari 1 jam (opsional)
+sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND state_change < now() - interval '1 hour' AND usename = 'it_foom';"
+```
+
+6. **Test dengan connection string yang lebih robust:**
+```bash
+# Test dengan timeout yang lebih panjang
+PGPASSWORD=FOOMIT psql "host=localhost port=5433 dbname=manufacturing_db user=it_foom password=FOOMIT connect_timeout=10" -c "SELECT current_user, current_database();"
+```
+
+7. **Gunakan connection pooling (untuk aplikasi):**
+Jika menggunakan aplikasi, pastikan menggunakan connection pool dengan setting yang tepat:
+```javascript
+// Contoh untuk Node.js dengan pg
+const pool = new Pool({
+  host: 'localhost',
+  port: 5433,
+  database: 'manufacturing_db',
+  user: 'it_foom',
+  password: 'FOOMIT',
+  max: 20, // Maximum pool size
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+  // Retry logic
+  retry: {
+    max: 3,
+    timeout: 5000
+  }
+});
+```
+
+8. **Cek firewall dan network:**
+```bash
+# Cek apakah port 5433 terbuka
+sudo ss -tlnp | grep 5433
+
+# Cek iptables rules
+sudo iptables -L -n | grep 5433
+
+# Test dengan telnet
+telnet localhost 5433
+```
+
+9. **Gunakan Unix socket sebagai alternatif:**
+Jika TCP bermasalah, gunakan Unix socket:
+```bash
+# Test dengan Unix socket
+sudo -u postgres psql -d manufacturing_db -c "SET ROLE it_foom; SELECT current_user, current_database();"
+```
+
+**Untuk Tools Database (DBeaver, pgAdmin):**
+
+1. **Tingkatkan connection timeout di tools:**
+   - DBeaver: Preferences → Connections → Connection timeout (set ke 30-60 detik)
+   - pgAdmin: Connection settings → Advanced → Connection timeout
+
+2. **Enable connection pooling di tools:**
+   - DBeaver: Preferences → Connections → Connection pooling
+
+3. **Gunakan connection string dengan parameter:**
+   ```
+   host=localhost port=5433 dbname=manufacturing_db user=it_foom password=FOOMIT connect_timeout=30
+   ```
+
+**Quick Fix:**
+```bash
+# Restart PostgreSQL dan test
+sudo systemctl restart postgresql
+sleep 5
+PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+```
+
+### Issue 8: "database does not exist"
 
 **Solusi:**
 ```bash
@@ -689,6 +1014,54 @@ sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'FOOMIT';"
 # Cek user privileges
 sudo -u postgres psql -d manufacturing_db -c "\du it_foom"
 ```
+
+---
+
+## 🔑 Informasi User PostgreSQL
+
+### User `postgres` (Superuser)
+
+User `postgres` adalah superuser default di PostgreSQL. Biasanya **tidak memiliki password** dan hanya bisa diakses via Unix socket dengan `sudo`.
+
+**Cara Akses:**
+```bash
+# Via Unix socket (tidak perlu password)
+sudo -u postgres psql
+
+# Atau langsung ke database
+sudo -u postgres psql -d manufacturing_db
+```
+
+**Cek apakah postgres memiliki password:**
+```bash
+# Cek di pg_shadow
+sudo -u postgres psql -c "SELECT usename, passwd IS NOT NULL as has_password FROM pg_shadow WHERE usename = 'postgres';"
+```
+
+**Set password untuk postgres (jika diperlukan):**
+```bash
+# Set password untuk user postgres
+sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'YOUR_PASSWORD_HERE';"
+```
+
+**Catatan:** 
+- User `postgres` biasanya tidak perlu password karena diakses via Unix socket
+- Jika Anda perlu akses remote ke user `postgres`, baru perlu set password
+- Untuk keamanan, hindari expose user `postgres` ke network
+
+### User `admin` (Application User)
+
+- **Username:** `admin`
+- **Password:** `Admin123`
+- **Database:** `manufacturing_db`
+- **Port:** `5433`
+
+### User `it_foom` (IT FOOM User)
+
+- **Username:** `it_foom`
+- **Password:** `FOOMIT`
+- **Database:** `manufacturing_db`
+- **Port:** `5433`
 
 ---
 
