@@ -140,14 +140,12 @@ jobs:
           # Create staging .env if it doesn't exist
           if [ ! -f .env ]; then
             echo "📝 Creating staging .env file..."
-            cat > .env << EOF
-NODE_ENV=staging
-PORT=5678
-DB_HOST=localhost
-DB_PORT=5433
-DB_NAME=manufacturing_db_staging
-DB_USER=manufacturing_user
-EOF
+            echo "NODE_ENV=staging" > .env
+            echo "PORT=5678" >> .env
+            echo "DB_HOST=localhost" >> .env
+            echo "DB_PORT=5433" >> .env
+            echo "DB_NAME=manufacturing_db_staging" >> .env
+            echo "DB_USER=manufacturing_user" >> .env
           else
             # Ensure PORT is set to staging port
             if grep -q "^PORT=" .env; then
