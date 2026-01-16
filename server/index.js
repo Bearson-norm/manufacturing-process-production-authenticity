@@ -4796,7 +4796,25 @@ if (fs.existsSync(clientBuildPath) && fs.existsSync(path.join(clientBuildPath, '
   staticPath = clientBuildPath; // Default to production path
 }
 
-const staticMiddleware = express.static(staticPath);
+const staticMiddleware = express.static(staticPath, {
+  // Disable caching for staging/production to ensure latest files are served
+  setHeaders: (res, path) => {
+    // Disable cache for HTML files
+    if (path.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+    // Disable cache for JS and CSS files in staging
+    if (process.env.NODE_ENV === 'staging' || process.env.NODE_ENV === 'development') {
+      if (path.endsWith('.js') || path.endsWith('.css')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+    }
+  }
+});
 app.use((req, res, next) => {
   // Skip static file serving for API routes
   if (req.path.startsWith('/api/')) {

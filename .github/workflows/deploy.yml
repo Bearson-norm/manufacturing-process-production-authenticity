@@ -70,6 +70,11 @@ jobs:
         if [ -f server/ecosystem.config.js ]; then
           cp server/ecosystem.config.js deploy/server/
         fi
+        # Copy nginx config for production
+        mkdir -p deploy/nginx
+        if [ -f nginx/manufacturing-app.conf ]; then
+          cp nginx/manufacturing-app.conf deploy/nginx/
+        fi
         tar -czf deploy.tar.gz deploy/
         
     - name: Deploy to VPS

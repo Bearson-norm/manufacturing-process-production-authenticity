@@ -69,6 +69,11 @@ jobs:
         if [ -f server/ecosystem.config.js ]; then
           cp server/ecosystem.config.js deploy/server/
         fi
+        # Copy nginx config for staging
+        mkdir -p deploy/nginx
+        if [ -f nginx/manufacturing-app-staging.conf ]; then
+          cp nginx/manufacturing-app-staging.conf deploy/nginx/
+        fi
         # Create staging-specific env file if needed
         tar -czf deploy.tar.gz deploy/
         
@@ -260,27 +265,30 @@ jobs:
           
           # Setup nginx config for staging
           echo "📝 Setting up nginx config for staging..."
-          NGINX_CONF_SOURCE="$STAGING_DIR/../nginx/manufacturing-app-staging.conf"
+          NGINX_CONF_SOURCE=""
           NGINX_CONF_AVAILABLE="/etc/nginx/sites-available/manufacturing-app-staging.conf"
           NGINX_CONF_ENABLED="/etc/nginx/sites-enabled/manufacturing-app-staging.conf"
           
-          # Try to find nginx config in deployment or repo
-          if [ -f "$NGINX_CONF_SOURCE" ]; then
-            echo "   Found nginx config in deployment package"
-          elif [ -f "/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf" ]; then
-            NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf"
+          # Try to find nginx config - check deployment package first
+          if [ -f "$STAGING_DIR/nginx/manufacturing-app-staging.conf" ]; then
+            NGINX_CONF_SOURCE="$STAGING_DIR/nginx/manufacturing-app-staging.conf"
+            echo "   ✅ Found nginx config in deployment package"
           elif [ -f "/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-staging.conf" ]; then
             NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-staging.conf"
+            echo "   ✅ Found nginx config in deployments/nginx"
+          elif [ -f "/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf" ]; then
+            NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf"
+            echo "   ✅ Found nginx config in user nginx directory"
           else
             echo "   ⚠️  Nginx config not found, skipping nginx setup"
             echo "   💡 Please setup manually: cp nginx/manufacturing-app-staging.conf /etc/nginx/sites-available/"
-            NGINX_CONF_SOURCE=""
           fi
           
           if [ -n "$NGINX_CONF_SOURCE" ] && [ -f "$NGINX_CONF_SOURCE" ]; then
             # Copy nginx config
+            echo "   📋 Copying nginx config from: $NGINX_CONF_SOURCE"
             sudo cp "$NGINX_CONF_SOURCE" "$NGINX_CONF_AVAILABLE"
-            echo "   ✅ Nginx config copied"
+            echo "   ✅ Nginx config copied to $NGINX_CONF_AVAILABLE"
             
             # Enable config
             if [ ! -L "$NGINX_CONF_ENABLED" ] && [ ! -f "$NGINX_CONF_ENABLED" ]; then
@@ -289,12 +297,17 @@ jobs:
             fi
             
             # Test and reload nginx
+            echo "   🧪 Testing nginx configuration..."
             if sudo nginx -t 2>&1 | grep -q "successful"; then
+              echo "   ✅ Nginx config test passed"
               sudo systemctl reload nginx
-              echo "   ✅ Nginx reloaded"
+              echo "   ✅ Nginx reloaded successfully"
+              # Verify nginx is running
+              sudo systemctl status nginx --no-pager -l | head -5
             else
-              echo "   ⚠️  Nginx config test failed, check manually"
+              echo "   ❌ Nginx config test failed!"
               sudo nginx -t
+              echo "   ⚠️  Nginx not reloaded - please fix config manually"
             fi
           fi
           
