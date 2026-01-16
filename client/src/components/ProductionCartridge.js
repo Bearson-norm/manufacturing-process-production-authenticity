@@ -1354,66 +1354,54 @@ function ProductionCartridge() {
                                       <div className="authenticity-section">
                                         <label>Authenticity Data</label>
                                         {editFormData.authenticityRows.map((row, rowIdx) => {
-                                          const isRowEmpty = (!row.firstAuthenticity || row.firstAuthenticity.trim() === '') && 
-                                                            (!row.lastAuthenticity || row.lastAuthenticity.trim() === '');
+                                          const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
+                                          const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
+                                          const isRowEmpty = !hasFirst && !hasLast;
                                           const isValidated = editAuthenticityValidationStatus[rowIdx] === true;
-                                          const isDisabled = !isRowEmpty && !isValidated;
                                           
                                           return (
-                                            <div key={rowIdx} className="authenticity-row-input" style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                                            <div key={rowIdx} className="authenticity-row-input">
                                               <input
                                                 type="text"
                                                 placeholder="First Authenticity"
                                                 value={row.firstAuthenticity}
                                                 onChange={(e) => handleEditRowChange(rowIdx, 'firstAuthenticity', e.target.value)}
-                                                style={{ flex: 1, padding: '6px', opacity: isDisabled ? 0.6 : 1 }}
-                                                disabled={isDisabled}
+                                                style={{ padding: '6px' }}
                                               />
                                               <input
                                                 type="text"
                                                 placeholder="Last Authenticity"
                                                 value={row.lastAuthenticity}
                                                 onChange={(e) => handleEditRowChange(rowIdx, 'lastAuthenticity', e.target.value)}
-                                                style={{ flex: 1, padding: '6px', opacity: isDisabled ? 0.6 : 1 }}
-                                                disabled={isDisabled}
+                                                style={{ padding: '6px' }}
                                               />
                                               <input
                                                 type="text"
                                                 placeholder="Roll Number"
                                                 value={row.rollNumber}
                                                 onChange={(e) => handleEditRowChange(rowIdx, 'rollNumber', e.target.value)}
-                                                style={{ flex: 1, padding: '6px', opacity: isDisabled ? 0.6 : 1 }}
-                                                disabled={isDisabled}
+                                                style={{ padding: '6px' }}
                                               />
-                                              {!isRowEmpty && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleValidateRow(rowIdx, true)}
-                                                  style={{
-                                                    padding: '6px 12px',
-                                                    background: isValidated ? '#10b981' : '#3b82f6',
-                                                    color: 'white',
-                                                    border: 'none',
-                                                    borderRadius: '4px',
-                                                    cursor: 'pointer',
-                                                    fontSize: '12px',
-                                                    whiteSpace: 'nowrap'
-                                                  }}
-                                                  title={isValidated ? 'Validated' : 'Validate row'}
-                                                >
-                                                  {isValidated ? '✓ Valid' : 'Validate'}
-                                                </button>
-                                              )}
-                                              {editFormData.authenticityRows.length > 1 && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleDeleteEditRow(rowIdx)}
-                                                  className="delete-row-button"
-                                                  style={{ padding: '6px 12px' }}
-                                                >
-                                                  ×
-                                                </button>
-                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={() => !isRowEmpty && handleValidateRow(rowIdx, true)}
+                                                className={`validate-button ${isRowEmpty ? 'hidden' : ''}`}
+                                                style={{
+                                                  background: isValidated ? '#10b981' : '#3b82f6',
+                                                  color: 'white'
+                                                }}
+                                                title={isValidated ? 'Validated' : 'Validate row'}
+                                                disabled={isRowEmpty}
+                                              >
+                                                {isValidated ? '✓ Valid' : 'Validate'}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDeleteEditRow(rowIdx)}
+                                                className={`delete-row-button ${editFormData.authenticityRows.length > 1 ? '' : 'hidden'}`}
+                                              >
+                                                ×
+                                              </button>
                                             </div>
                                           );
                                         })}
@@ -1678,21 +1666,19 @@ function ProductionCartridge() {
             <div className="authenticity-section">
               <label>Authenticity Data</label>
               {formData.authenticityRows.map((row, index) => {
-                const isRowEmpty = (!row.firstAuthenticity || row.firstAuthenticity.trim() === '') && 
-                                  (!row.lastAuthenticity || row.lastAuthenticity.trim() === '');
+                const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
+                const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
+                const isRowEmpty = !hasFirst && !hasLast;
                 const isValidated = authenticityValidationStatus[index] === true;
-                const isDisabled = !isRowEmpty && !isValidated;
                 
                 return (
-                  <div key={index} className="authenticity-row-input" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+                  <div key={index} className="authenticity-row-input">
                     <input
                       type="text"
                       placeholder="First Authenticity at"
                       value={row.firstAuthenticity}
                       onChange={(e) => handleRowChange(index, 'firstAuthenticity', e.target.value)}
                       onKeyDown={(e) => handleScannerKeyDown(e, index, 'firstAuthenticity')}
-                      disabled={isDisabled}
-                      style={{ flex: 1, opacity: isDisabled ? 0.6 : 1 }}
                     />
                     <input
                       type="text"
@@ -1700,8 +1686,6 @@ function ProductionCartridge() {
                       value={row.lastAuthenticity}
                       onChange={(e) => handleRowChange(index, 'lastAuthenticity', e.target.value)}
                       onKeyDown={(e) => handleScannerKeyDown(e, index, 'lastAuthenticity')}
-                      disabled={isDisabled}
-                      style={{ flex: 1, opacity: isDisabled ? 0.6 : 1 }}
                     />
                     <input
                       type="text"
@@ -1709,38 +1693,28 @@ function ProductionCartridge() {
                       value={row.rollNumber}
                       onChange={(e) => handleRowChange(index, 'rollNumber', e.target.value)}
                       onKeyDown={(e) => handleScannerKeyDown(e, index, 'rollNumber')}
-                      disabled={isDisabled}
-                      style={{ flex: 1, opacity: isDisabled ? 0.6 : 1 }}
                     />
-                    {!isRowEmpty && (
-                      <button
-                        type="button"
-                        onClick={() => handleValidateRow(index, false)}
-                        style={{
-                          padding: '6px 12px',
-                          background: isValidated ? '#10b981' : '#3b82f6',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          whiteSpace: 'nowrap'
-                        }}
-                        title={isValidated ? 'Validated' : 'Validate row'}
-                      >
-                        {isValidated ? '✓ Valid' : 'Validate'}
-                      </button>
-                    )}
-                    {formData.authenticityRows.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteRow(index)}
-                        className="delete-row-button"
-                        title="Delete row"
-                      >
-                        ×
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => !isRowEmpty && handleValidateRow(index, false)}
+                      className={`validate-button ${isRowEmpty ? 'hidden' : ''}`}
+                      style={{
+                        background: isValidated ? '#10b981' : '#3b82f6',
+                        color: 'white'
+                      }}
+                      title={isValidated ? 'Validated' : 'Validate row'}
+                      disabled={isRowEmpty}
+                    >
+                      {isValidated ? '✓ Valid' : 'Validate'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRow(index)}
+                      className={`delete-row-button ${formData.authenticityRows.length > 1 ? '' : 'hidden'}`}
+                      title="Delete row"
+                    >
+                      ×
+                    </button>
                   </div>
                 );
               })}

@@ -553,7 +553,9 @@
   align-items: center;
   z-index: 1000;
   padding: 20px;
+  overflow-y: auto;
 }
+
 
 .modal-content {
   background: #0b1220;
@@ -567,7 +569,12 @@
 }
 
 .large-modal {
-  max-width: 700px;
+  max-width: 1000px;
+  max-height: calc(100vh - 40px);
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
 }
 
 .modal-content h2 {
@@ -577,8 +584,17 @@
   text-align: left;
 }
 
+.large-modal h2 {
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
 .modal-content .form-group {
   margin-bottom: 16px;
+}
+
+.large-modal .form-group {
+  margin-bottom: 12px;
 }
 
 .modal-content .form-group label {
@@ -613,6 +629,13 @@
   border-top: 1px solid #1f2937;
 }
 
+.large-modal .authenticity-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  max-height: calc(100vh - 400px);
+  overflow-y: auto;
+}
+
 .authenticity-section label {
   display: block;
   margin-bottom: 12px;
@@ -623,10 +646,52 @@
 
 .authenticity-row-input {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
-  gap: 10px;
+  grid-template-columns: 1fr 1fr 1fr 120px 40px;
+  gap: 8px;
   margin-bottom: 10px;
   align-items: center;
+}
+
+.large-modal .authenticity-row-input {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* Validate button - always reserve space */
+.authenticity-row-input .validate-button {
+  min-width: 120px;
+  max-width: 120px;
+  width: 120px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.authenticity-row-input .validate-button.hidden {
+  visibility: hidden;
+}
+
+.authenticity-row-input .validate-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Delete button - always reserve space */
+.authenticity-row-input .delete-row-button {
+  min-width: 40px;
+  max-width: 40px;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.authenticity-row-input .delete-row-button.hidden {
+  visibility: hidden;
 }
 
 .authenticity-row-input input {
@@ -656,6 +721,12 @@
   cursor: pointer;
   transition: background 0.3s;
   margin-top: 8px;
+}
+
+.large-modal .add-row-button {
+  padding: 8px;
+  margin-top: 6px;
+  font-size: 13px;
 }
 
 .add-row-button:hover {
@@ -694,6 +765,11 @@
   gap: 8px;
   margin-top: 16px;
   justify-content: flex-end;
+}
+
+.large-modal .modal-buttons {
+  margin-top: 12px;
+  flex-shrink: 0;
 }
 
 .cancel-button,

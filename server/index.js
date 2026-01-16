@@ -4777,7 +4777,26 @@ console.log('   - Sync production data: Every 12 hours');
 console.log('   - Send MO list to external API: Every 6 hours (10 minutes after MO update)');
 
 // Serve static files AFTER all API routes (only for non-API routes)
-const staticMiddleware = express.static(path.join(__dirname, '../client/public'));
+// In production, client build is in ../client-build, in development it's in ../client/public
+const clientBuildPath = path.join(__dirname, '../client-build');
+const clientPublicPath = path.join(__dirname, '../client/public');
+
+// Check which path exists (production build or development)
+let staticPath;
+if (fs.existsSync(clientBuildPath) && fs.existsSync(path.join(clientBuildPath, 'index.html'))) {
+  // Production: use client-build directory
+  staticPath = clientBuildPath;
+  console.log('📦 Serving static files from client-build (production)');
+} else if (fs.existsSync(clientPublicPath)) {
+  // Development: use client/public directory
+  staticPath = clientPublicPath;
+  console.log('🔧 Serving static files from client/public (development)');
+} else {
+  console.warn('⚠️  Warning: Neither client-build nor client/public directory found!');
+  staticPath = clientBuildPath; // Default to production path
+}
+
+const staticMiddleware = express.static(staticPath);
 app.use((req, res, next) => {
   // Skip static file serving for API routes
   if (req.path.startsWith('/api/')) {
@@ -4785,6 +4804,27 @@ app.use((req, res, next) => {
   }
   // Serve static files for non-API routes
   staticMiddleware(req, res, next);
+});
+
+// Serve index.html for all non-API routes (SPA routing)
+// This must be after static middleware but before error handlers
+app.get('*', (req, res, next) => {
+  // Skip for API routes
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
+  
+  // Serve index.html for SPA routing
+  const indexPath = path.join(staticPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    // If index.html doesn't exist, return 404
+    res.status(404).json({
+      success: false,
+      error: 'Route not found'
+    });
+  }
 });
 
 // Error handling middleware (must be last, after all routes)
@@ -4796,14 +4836,6 @@ app.use((err, req, res, next) => {
       error: err.message || 'Internal server error'
     });
   }
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found'
-  });
 });
 
 // Start server
