@@ -4826,9 +4826,17 @@ app.use((req, res, next) => {
 
 // Serve index.html for all non-API routes (SPA routing)
 // This must be after static middleware but before error handlers
+// NOTE: In production with nginx, nginx will serve static files directly
+// This is only a fallback if nginx is not configured or for development
 app.get('*', (req, res, next) => {
   // Skip for API routes
   if (req.path.startsWith('/api/')) {
+    return next();
+  }
+  
+  // Skip for static files - let nginx handle them in production
+  // Or let express.static handle them in development
+  if (req.path.startsWith('/static/')) {
     return next();
   }
   
