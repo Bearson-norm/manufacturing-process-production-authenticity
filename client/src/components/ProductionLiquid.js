@@ -76,6 +76,7 @@ function ProductionLiquid() {
     skuName: '',
     authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }]
   });
+  const [authenticityValidationStatus, setAuthenticityValidationStatus] = useState({});
   const [bufferData, setBufferData] = useState({
     pic: '',
     moNumber: '',
@@ -96,6 +97,7 @@ function ProductionLiquid() {
   // eslint-disable-next-line no-unused-vars
   const [editingInput, setEditingInput] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
+  const [editAuthenticityValidationStatus, setEditAuthenticityValidationStatus] = useState({});
   const [moSearchTerm, setMoSearchTerm] = useState('');
   const [bufferMoSearchTerm, setBufferMoSearchTerm] = useState('');
   const [rejectMoSearchTerm, setRejectMoSearchTerm] = useState('');
@@ -576,6 +578,72 @@ function ProductionLiquid() {
     });
   };
 
+  const validateAuthenticityRow = (index, firstAuth, lastAuth, isEdit = false) => {
+    // Skip validation if fields are empty
+    if (!firstAuth || !lastAuth || firstAuth.trim() === '' || lastAuth.trim() === '') {
+      return { valid: true, message: '' }; // Allow empty fields
+    }
+
+    const first = parseInt(firstAuth);
+    const last = parseInt(lastAuth);
+
+    // Check if values are valid numbers
+    if (isNaN(first) || isNaN(last)) {
+      return { valid: false, message: 'First dan Last Authenticity harus berupa angka' };
+    }
+
+    const difference = last - first;
+
+    // Check if difference is negative
+    if (difference < 0) {
+      return { valid: false, message: 'Selisih tidak boleh negatif' };
+    }
+
+    // Check if difference is more than 7000
+    if (difference > 7000) {
+      return { valid: false, message: 'Selisih tidak boleh lebih dari 7000' };
+    }
+
+    // Valid
+    if (isEdit) {
+      setEditAuthenticityValidationStatus(prev => ({
+        ...prev,
+        [index]: true
+      }));
+    } else {
+      setAuthenticityValidationStatus(prev => ({
+        ...prev,
+        [index]: true
+      }));
+    }
+
+    return { valid: true, message: 'Valid' };
+  };
+
+  const handleValidateRow = (index, isEdit = false) => {
+    const rows = isEdit ? editFormData.authenticityRows : formData.authenticityRows;
+    const row = rows[index];
+    
+    if (!row) return;
+
+    const result = validateAuthenticityRow(index, row.firstAuthenticity, row.lastAuthenticity, isEdit);
+    
+    if (!result.valid) {
+      alert(result.message);
+      if (isEdit) {
+        setEditAuthenticityValidationStatus(prev => ({
+          ...prev,
+          [index]: false
+        }));
+      } else {
+        setAuthenticityValidationStatus(prev => ({
+          ...prev,
+          [index]: false
+        }));
+      }
+    }
+  };
+
   const handleDeleteRow = (index) => {
     if (formData.authenticityRows.length > 1) {
       const newRows = formData.authenticityRows.filter((_, i) => i !== index);
@@ -583,6 +651,20 @@ function ProductionLiquid() {
         ...formData,
         authenticityRows: newRows
       });
+      // Remove validation status for deleted row
+      const newValidationStatus = { ...authenticityValidationStatus };
+      delete newValidationStatus[index];
+      // Reindex remaining validations
+      const reindexed = {};
+      Object.keys(newValidationStatus).forEach(key => {
+        const keyNum = parseInt(key);
+        if (keyNum > index) {
+          reindexed[keyNum - 1] = newValidationStatus[key];
+        } else if (keyNum < index) {
+          reindexed[keyNum] = newValidationStatus[key];
+        }
+      });
+      setAuthenticityValidationStatus(reindexed);
     }
   };
 
@@ -593,6 +675,14 @@ function ProductionLiquid() {
       ...formData,
       authenticityRows: newRows
     });
+    
+    // Reset validation status when field changes
+    if (field === 'firstAuthenticity' || field === 'lastAuthenticity') {
+      setAuthenticityValidationStatus(prev => ({
+        ...prev,
+        [index]: false
+      }));
+    }
   };
 
   // Handle Enter key press for scanner input (auto-advance to next field)
@@ -747,6 +837,25 @@ function ProductionLiquid() {
       return;
     }
 
+    // Check if all non-empty rows are validated
+    const rowsToValidate = formData.authenticityRows.filter((row, idx) => {
+      const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
+      const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
+      return hasFirst || hasLast;
+    });
+
+    if (rowsToValidate.length > 0) {
+      const allValidated = rowsToValidate.every((row, idx) => {
+        const originalIndex = formData.authenticityRows.findIndex(r => r === row);
+        return authenticityValidationStatus[originalIndex] === true;
+      });
+
+      if (!allValidated) {
+        alert('Silakan validate semua row authenticity yang sudah diisi sebelum confirm');
+        return;
+      }
+    }
+
     // Check if there's an active MO number in the current session
     const currentSession = savedData.find(s => s.session_id === sessionId);
     if (currentSession) {
@@ -793,6 +902,7 @@ function ProductionLiquid() {
         skuName: '',
         authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }]
       });
+      setAuthenticityValidationStatus({});
       setSelectedMo(null);
       setMoSearchTerm('');
       setShowInputModal(false);
@@ -927,6 +1037,7 @@ function ProductionLiquid() {
       authenticityRows: allAuthenticityRows.length > 0 ? allAuthenticityRows : [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }],
       inputIds: inputsWithSameMo.map(input => input.id)
     });
+    setEditAuthenticityValidationStatus({});
   };
 
   const handleCancelEdit = () => {
@@ -934,6 +1045,7 @@ function ProductionLiquid() {
     setEditFormData(null);
     setEditingMoNumber(null);
     setEditingSessionId(null);
+    setEditAuthenticityValidationStatus({});
   };
 
   const handleSaveEdit = async () => {
@@ -945,6 +1057,25 @@ function ProductionLiquid() {
     if (!editFormData.inputIds || editFormData.inputIds.length === 0) {
       alert('Tidak ada input untuk diperbarui');
       return;
+    }
+
+    // Check if all non-empty rows are validated
+    const rowsToValidate = editFormData.authenticityRows.filter((row, idx) => {
+      const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
+      const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
+      return hasFirst || hasLast;
+    });
+
+    if (rowsToValidate.length > 0) {
+      const allValidated = rowsToValidate.every((row, idx) => {
+        const originalIndex = editFormData.authenticityRows.findIndex(r => r === row);
+        return editAuthenticityValidationStatus[originalIndex] === true;
+      });
+
+      if (!allValidated) {
+        alert('Silakan validate semua row authenticity yang sudah diisi sebelum save');
+        return;
+      }
     }
 
     try {
@@ -964,6 +1095,7 @@ function ProductionLiquid() {
       setEditFormData(null);
       setEditingMoNumber(null);
       setEditingSessionId(null);
+      setEditAuthenticityValidationStatus({});
       fetchData();
     } catch (error) {
       console.error('Error updating data:', error);
@@ -978,6 +1110,14 @@ function ProductionLiquid() {
       ...editFormData,
       authenticityRows: newRows
     });
+    
+    // Reset validation status when field changes
+    if (field === 'firstAuthenticity' || field === 'lastAuthenticity') {
+      setEditAuthenticityValidationStatus(prev => ({
+        ...prev,
+        [index]: false
+      }));
+    }
   };
 
   const handleAddEditRow = () => {
@@ -997,6 +1137,20 @@ function ProductionLiquid() {
         ...editFormData,
         authenticityRows: newRows
       });
+      // Remove validation status for deleted row
+      const newValidationStatus = { ...editAuthenticityValidationStatus };
+      delete newValidationStatus[index];
+      // Reindex remaining validations
+      const reindexed = {};
+      Object.keys(newValidationStatus).forEach(key => {
+        const keyNum = parseInt(key);
+        if (keyNum > index) {
+          reindexed[keyNum - 1] = newValidationStatus[key];
+        } else if (keyNum < index) {
+          reindexed[keyNum] = newValidationStatus[key];
+        }
+      });
+      setEditAuthenticityValidationStatus(reindexed);
     }
   };
 
@@ -1206,41 +1360,70 @@ function ProductionLiquid() {
                                       </div>
                                       <div className="authenticity-section">
                                         <label>Authenticity Data</label>
-                                        {editFormData.authenticityRows.map((row, rowIdx) => (
-                                          <div key={rowIdx} className="authenticity-row-input" style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                                            <input
-                                              type="text"
-                                              placeholder="First Authenticity"
-                                              value={row.firstAuthenticity}
-                                              onChange={(e) => handleEditRowChange(rowIdx, 'firstAuthenticity', e.target.value)}
-                                              style={{ flex: 1, padding: '6px' }}
-                                            />
-                                            <input
-                                              type="text"
-                                              placeholder="Last Authenticity"
-                                              value={row.lastAuthenticity}
-                                              onChange={(e) => handleEditRowChange(rowIdx, 'lastAuthenticity', e.target.value)}
-                                              style={{ flex: 1, padding: '6px' }}
-                                            />
-                                            <input
-                                              type="text"
-                                              placeholder="Roll Number"
-                                              value={row.rollNumber}
-                                              onChange={(e) => handleEditRowChange(rowIdx, 'rollNumber', e.target.value)}
-                                              style={{ flex: 1, padding: '6px' }}
-                                            />
-                                            {editFormData.authenticityRows.length > 1 && (
-                                              <button
-                                                type="button"
-                                                onClick={() => handleDeleteEditRow(rowIdx)}
-                                                className="delete-row-button"
-                                                style={{ padding: '6px 12px' }}
-                                              >
-                                                ×
-                                              </button>
-                                            )}
-                                          </div>
-                                        ))}
+                                        {editFormData.authenticityRows.map((row, rowIdx) => {
+                                          const isRowEmpty = (!row.firstAuthenticity || row.firstAuthenticity.trim() === '') && 
+                                                            (!row.lastAuthenticity || row.lastAuthenticity.trim() === '');
+                                          const isValidated = editAuthenticityValidationStatus[rowIdx] === true;
+                                          const isDisabled = !isRowEmpty && !isValidated;
+                                          
+                                          return (
+                                            <div key={rowIdx} className="authenticity-row-input" style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                                              <input
+                                                type="text"
+                                                placeholder="First Authenticity"
+                                                value={row.firstAuthenticity}
+                                                onChange={(e) => handleEditRowChange(rowIdx, 'firstAuthenticity', e.target.value)}
+                                                style={{ flex: 1, padding: '6px', opacity: isDisabled ? 0.6 : 1 }}
+                                                disabled={isDisabled}
+                                              />
+                                              <input
+                                                type="text"
+                                                placeholder="Last Authenticity"
+                                                value={row.lastAuthenticity}
+                                                onChange={(e) => handleEditRowChange(rowIdx, 'lastAuthenticity', e.target.value)}
+                                                style={{ flex: 1, padding: '6px', opacity: isDisabled ? 0.6 : 1 }}
+                                                disabled={isDisabled}
+                                              />
+                                              <input
+                                                type="text"
+                                                placeholder="Roll Number"
+                                                value={row.rollNumber}
+                                                onChange={(e) => handleEditRowChange(rowIdx, 'rollNumber', e.target.value)}
+                                                style={{ flex: 1, padding: '6px', opacity: isDisabled ? 0.6 : 1 }}
+                                                disabled={isDisabled}
+                                              />
+                                              {!isRowEmpty && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleValidateRow(rowIdx, true)}
+                                                  style={{
+                                                    padding: '6px 12px',
+                                                    background: isValidated ? '#10b981' : '#3b82f6',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '4px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '12px',
+                                                    whiteSpace: 'nowrap'
+                                                  }}
+                                                  title={isValidated ? 'Validated' : 'Validate row'}
+                                                >
+                                                  {isValidated ? '✓ Valid' : 'Validate'}
+                                                </button>
+                                              )}
+                                              {editFormData.authenticityRows.length > 1 && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleDeleteEditRow(rowIdx)}
+                                                  className="delete-row-button"
+                                                  style={{ padding: '6px 12px' }}
+                                                >
+                                                  ×
+                                                </button>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
                                         <button onClick={handleAddEditRow} className="add-row-button" style={{ marginTop: '8px' }}>
                                           + Add Row
                                         </button>
@@ -1503,41 +1686,73 @@ function ProductionLiquid() {
             </div>
             <div className="authenticity-section">
               <label>Authenticity Data</label>
-              {formData.authenticityRows.map((row, index) => (
-                <div key={index} className="authenticity-row-input">
-                  <input
-                    type="text"
-                    placeholder="First Authenticity at"
-                    value={row.firstAuthenticity}
-                    onChange={(e) => handleRowChange(index, 'firstAuthenticity', e.target.value)}
-                    onKeyDown={(e) => handleScannerKeyDown(e, index, 'firstAuthenticity')}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Last Authenticity at"
-                    value={row.lastAuthenticity}
-                    onChange={(e) => handleRowChange(index, 'lastAuthenticity', e.target.value)}
-                    onKeyDown={(e) => handleScannerKeyDown(e, index, 'lastAuthenticity')}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Roll Number"
-                    value={row.rollNumber}
-                    onChange={(e) => handleRowChange(index, 'rollNumber', e.target.value)}
-                    onKeyDown={(e) => handleScannerKeyDown(e, index, 'rollNumber')}
-                  />
-                  {formData.authenticityRows.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRow(index)}
-                      className="delete-row-button"
-                      title="Delete row"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
+              {formData.authenticityRows.map((row, index) => {
+                const isRowEmpty = (!row.firstAuthenticity || row.firstAuthenticity.trim() === '') && 
+                                  (!row.lastAuthenticity || row.lastAuthenticity.trim() === '');
+                const isValidated = authenticityValidationStatus[index] === true;
+                const isDisabled = !isRowEmpty && !isValidated;
+                
+                return (
+                  <div key={index} className="authenticity-row-input" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+                    <input
+                      type="text"
+                      placeholder="First Authenticity at"
+                      value={row.firstAuthenticity}
+                      onChange={(e) => handleRowChange(index, 'firstAuthenticity', e.target.value)}
+                      onKeyDown={(e) => handleScannerKeyDown(e, index, 'firstAuthenticity')}
+                      disabled={isDisabled}
+                      style={{ flex: 1, opacity: isDisabled ? 0.6 : 1 }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Last Authenticity at"
+                      value={row.lastAuthenticity}
+                      onChange={(e) => handleRowChange(index, 'lastAuthenticity', e.target.value)}
+                      onKeyDown={(e) => handleScannerKeyDown(e, index, 'lastAuthenticity')}
+                      disabled={isDisabled}
+                      style={{ flex: 1, opacity: isDisabled ? 0.6 : 1 }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Roll Number"
+                      value={row.rollNumber}
+                      onChange={(e) => handleRowChange(index, 'rollNumber', e.target.value)}
+                      onKeyDown={(e) => handleScannerKeyDown(e, index, 'rollNumber')}
+                      disabled={isDisabled}
+                      style={{ flex: 1, opacity: isDisabled ? 0.6 : 1 }}
+                    />
+                    {!isRowEmpty && (
+                      <button
+                        type="button"
+                        onClick={() => handleValidateRow(index, false)}
+                        style={{
+                          padding: '6px 12px',
+                          background: isValidated ? '#10b981' : '#3b82f6',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          whiteSpace: 'nowrap'
+                        }}
+                        title={isValidated ? 'Validated' : 'Validate row'}
+                      >
+                        {isValidated ? '✓ Valid' : 'Validate'}
+                      </button>
+                    )}
+                    {formData.authenticityRows.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRow(index)}
+                        className="delete-row-button"
+                        title="Delete row"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
               <button onClick={handleAddRow} className="add-row-button">
                 + Add Row
               </button>

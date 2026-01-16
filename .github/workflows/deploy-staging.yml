@@ -132,6 +132,21 @@ jobs:
             exit 1
           fi
           
+          # Verify client-build exists
+          if [ ! -d "$STAGING_DIR/client-build" ]; then
+            echo "❌ ERROR: client-build directory not found in $STAGING_DIR"
+            ls -la "$STAGING_DIR/"
+            exit 1
+          fi
+          
+          if [ ! -f "$STAGING_DIR/client-build/index.html" ]; then
+            echo "❌ ERROR: index.html not found in $STAGING_DIR/client-build"
+            ls -la "$STAGING_DIR/client-build/" | head -10
+            exit 1
+          fi
+          
+          echo "✅ Client build verified: $(ls -1 $STAGING_DIR/client-build | wc -l) files"
+          
           # Install/update dependencies
           echo "📦 Installing staging dependencies..."
           cd "$STAGING_DIR/server"
@@ -145,7 +160,8 @@ jobs:
             echo "DB_HOST=localhost" >> .env
             echo "DB_PORT=5433" >> .env
             echo "DB_NAME=manufacturing_db" >> .env
-            echo "DB_USER=manufacturing_user" >> .env
+            echo "DB_USER=admin" >> .env
+            echo "DB_PASSWORD=Admin123" >> .env
           else
             # Ensure PORT is set to staging port
             if grep -q "^PORT=" .env; then
@@ -158,6 +174,22 @@ jobs:
               sed -i "s/^NODE_ENV=.*/NODE_ENV=staging/" .env
             else
               echo "NODE_ENV=staging" >> .env
+            fi
+            # Ensure DB_USER is admin (not manufacturing_user)
+            if grep -q "^DB_USER=" .env; then
+              sed -i "s/^DB_USER=.*/DB_USER=admin/" .env
+            else
+              echo "DB_USER=admin" >> .env
+            fi
+            # Ensure DB_PASSWORD is set
+            if ! grep -q "^DB_PASSWORD=" .env; then
+              echo "DB_PASSWORD=Admin123" >> .env
+            fi
+            # Ensure DB_PORT is 5433
+            if grep -q "^DB_PORT=" .env; then
+              sed -i "s/^DB_PORT=.*/DB_PORT=5433/" .env
+            else
+              echo "DB_PORT=5433" >> .env
             fi
           fi
           
@@ -226,10 +258,44 @@ jobs:
             echo "Response: $HEALTH_CHECK"
           fi
           
-          # Setup nginx config for staging (if not exists)
-          if [ ! -f /etc/nginx/sites-available/manufacturing-app-staging.conf ]; then
-            echo "📝 Please setup nginx config for staging manually"
-            echo "   See: nginx/manufacturing-app-staging.conf"
+          # Setup nginx config for staging
+          echo "📝 Setting up nginx config for staging..."
+          NGINX_CONF_SOURCE="$STAGING_DIR/../nginx/manufacturing-app-staging.conf"
+          NGINX_CONF_AVAILABLE="/etc/nginx/sites-available/manufacturing-app-staging.conf"
+          NGINX_CONF_ENABLED="/etc/nginx/sites-enabled/manufacturing-app-staging.conf"
+          
+          # Try to find nginx config in deployment or repo
+          if [ -f "$NGINX_CONF_SOURCE" ]; then
+            echo "   Found nginx config in deployment package"
+          elif [ -f "/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf" ]; then
+            NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf"
+          elif [ -f "/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-staging.conf" ]; then
+            NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-staging.conf"
+          else
+            echo "   ⚠️  Nginx config not found, skipping nginx setup"
+            echo "   💡 Please setup manually: cp nginx/manufacturing-app-staging.conf /etc/nginx/sites-available/"
+            NGINX_CONF_SOURCE=""
+          fi
+          
+          if [ -n "$NGINX_CONF_SOURCE" ] && [ -f "$NGINX_CONF_SOURCE" ]; then
+            # Copy nginx config
+            sudo cp "$NGINX_CONF_SOURCE" "$NGINX_CONF_AVAILABLE"
+            echo "   ✅ Nginx config copied"
+            
+            # Enable config
+            if [ ! -L "$NGINX_CONF_ENABLED" ] && [ ! -f "$NGINX_CONF_ENABLED" ]; then
+              sudo ln -s "$NGINX_CONF_AVAILABLE" "$NGINX_CONF_ENABLED"
+              echo "   ✅ Nginx config enabled"
+            fi
+            
+            # Test and reload nginx
+            if sudo nginx -t 2>&1 | grep -q "successful"; then
+              sudo systemctl reload nginx
+              echo "   ✅ Nginx reloaded"
+            else
+              echo "   ⚠️  Nginx config test failed, check manually"
+              sudo nginx -t
+            fi
           fi
           
           # Cleanup old staging backups (keep last 3)
