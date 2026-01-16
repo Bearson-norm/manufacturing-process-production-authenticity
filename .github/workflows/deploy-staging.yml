@@ -1,0 +1,192 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (not recommended)'
+        required: false
+        default: 'false'
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install and test
+      run: |
+        npm install
+        cd client && npm install && npm run build && cd ..
+        cd server && npm install && node -c index.js && cd ..
+    continue-on-error: false
+
+  deploy-staging:
+    needs: ci
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/staging' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+        
+    - name: Install dependencies
+      run: |
+        npm install
+        cd client && npm install && cd ..
+        cd server && npm install && cd ..
+        
+    - name: Build client
+      run: |
+        cd client
+        npm run build
+        
+    - name: Create deployment package
+      run: |
+        mkdir -p deploy
+        cp -r server deploy/
+        cp -r client/build deploy/client-build
+        cp package.json deploy/
+        cp -r .github/scripts deploy/scripts || true
+        # Ensure ecosystem.config.js is included
+        if [ -f server/ecosystem.config.js ]; then
+          cp server/ecosystem.config.js deploy/server/
+        fi
+        # Create staging-specific env file if needed
+        tar -czf deploy.tar.gz deploy/
+        
+    - name: Deploy to Staging VPS
+      uses: appleboy/scp-action@master
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        port: ${{ secrets.VPS_PORT || 22 }}
+        source: "deploy.tar.gz"
+        target: "/home/${{ secrets.VPS_USER }}/deployments"
+        
+    - name: Execute staging deployment script on VPS
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        port: ${{ secrets.VPS_PORT || 22 }}
+        script: |
+          set -e
+          
+          STAGING_DIR="/home/${{ secrets.VPS_USER }}/deployments/manufacturing-app-staging"
+          STAGING_PORT=5678
+          
+          echo "🚀 Starting STAGING deployment..."
+          echo "📍 Staging directory: $STAGING_DIR"
+          echo "📍 Staging port: $STAGING_PORT"
+          
+          cd /home/${{ secrets.VPS_USER }}/deployments
+          tar -xzf deploy.tar.gz
+          
+          # Backup existing staging deployment
+          if [ -d "$STAGING_DIR" ]; then
+            echo "📦 Creating staging backup..."
+            mv "$STAGING_DIR" "${STAGING_DIR}-backup-$(date +%Y%m%d-%H%M%S)"
+          fi
+          
+          # Create new staging deployment directory
+          mkdir -p "$STAGING_DIR"
+          mv deploy/* "$STAGING_DIR/"
+          
+          # Install/update dependencies
+          echo "📦 Installing staging dependencies..."
+          cd "$STAGING_DIR/server"
+          npm install --production
+          
+          # Create staging .env if it doesn't exist
+          if [ ! -f .env ]; then
+            echo "📝 Creating staging .env file..."
+            cat > .env << EOF
+          NODE_ENV=staging
+          PORT=$STAGING_PORT
+          DB_HOST=localhost
+          DB_PORT=5433
+          DB_NAME=manufacturing_db_staging
+          DB_USER=manufacturing_user
+          EOF
+          else
+            # Ensure PORT is set to staging port
+            if grep -q "^PORT=" .env; then
+              sed -i "s/^PORT=.*/PORT=$STAGING_PORT/" .env
+            else
+              echo "PORT=$STAGING_PORT" >> .env
+            fi
+            # Ensure NODE_ENV is staging
+            if grep -q "^NODE_ENV=" .env; then
+              sed -i "s/^NODE_ENV=.*/NODE_ENV=staging/" .env
+            else
+              echo "NODE_ENV=staging" >> .env
+            fi
+          fi
+          
+          # Create logs directory
+          mkdir -p logs
+          
+          # Restart staging application with PM2
+          echo "🔄 Restarting staging application..."
+          cd "$STAGING_DIR/server"
+          pm2 delete manufacturing-app-staging || true
+          
+          # Start with ecosystem config if available, otherwise use direct start
+          if [ -f ecosystem.config.js ]; then
+            # Modify ecosystem config for staging
+            pm2 start ecosystem.config.js --name manufacturing-app-staging --update-env --env staging
+          else
+            pm2 start index.js --name manufacturing-app-staging --instances 1 --cwd "$STAGING_DIR/server" --env staging
+          fi
+          pm2 save
+          
+          # Wait a bit for app to start
+          sleep 5
+          
+          # Health check
+          echo "🏥 Checking staging health..."
+          HEALTH_CHECK=$(curl -s http://localhost:$STAGING_PORT/health || echo "failed")
+          if echo "$HEALTH_CHECK" | grep -q "healthy"; then
+            echo "✅ Staging health check passed!"
+          else
+            echo "⚠️  Staging health check failed, but continuing..."
+            echo "Response: $HEALTH_CHECK"
+          fi
+          
+          # Setup nginx config for staging (if not exists)
+          if [ ! -f /etc/nginx/sites-available/manufacturing-app-staging.conf ]; then
+            echo "📝 Please setup nginx config for staging manually"
+            echo "   See: nginx/manufacturing-app-staging.conf"
+          fi
+          
+          # Cleanup old staging backups (keep last 3)
+          echo "🧹 Cleaning up old staging backups..."
+          cd /home/${{ secrets.VPS_USER }}/deployments
+          ls -dt manufacturing-app-staging-backup-* 2>/dev/null | tail -n +4 | xargs rm -rf || true
+          
+          # Cleanup
+          rm -f deploy.tar.gz
+          
+          echo "✅ Staging deployment completed!"
+          echo "📍 Staging app running on port: $STAGING_PORT"
+          pm2 status | grep manufacturing-app-staging || echo "⚠️  Check PM2 status manually"

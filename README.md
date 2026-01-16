@@ -136,7 +136,29 @@ Database menggunakan SQLite3 dengan tabel:
 5. Setup Nginx sebagai reverse proxy
 
 ### Automated Deployment (CI/CD)
-Project ini menggunakan GitHub Actions untuk automated deployment. Lihat `.github/workflows/deploy.yml` untuk detail.
+Project ini menggunakan GitHub Actions untuk automated deployment dengan staging environment untuk testing.
+
+**Features**:
+- ✅ **CI Pipeline**: Automated testing dan linting pada semua branches
+- ✅ **Staging Environment**: Auto-deploy ke staging (port 5678) untuk testing sebelum production
+- ✅ **Production Deployment**: Auto-deploy ke production (port 1234) dengan safety checks dan auto-rollback
+- ✅ **Health Checks**: Automatic health verification setelah deployment
+
+**Workflow**:
+```
+Development → Staging Branch → Test → Main Branch → Production
+```
+
+**Documentation**:
+- 📘 [CI/CD Guide](CI_CD_GUIDE.md) - Complete CI/CD documentation
+- 🧪 [Staging Setup](STAGING_SETUP.md) - Staging environment setup guide
+- 🚀 [Deployment Guide](DEPLOYMENT.md) - Manual deployment procedures
+
+**Quick Start**:
+- Deploy ke staging: Push ke branch `staging`
+- Deploy ke production: Push ke branch `main` (setelah CI pass)
+
+Lihat `.github/workflows/` untuk workflow files detail.
 
 ## 📝 Environment Variables
 

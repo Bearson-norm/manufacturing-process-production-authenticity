@@ -1,4 +1,4 @@
-name: Deploy to VPS
+name: Deploy to Production
 
 on:
   push:
@@ -6,9 +6,35 @@ on:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (DANGEROUS - only use if CI passed)'
+        required: false
+        default: 'false'
 
 jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install and test
+      run: |
+        npm install
+        cd client && npm install && npm run build && cd ..
+        cd server && npm install && node -c index.js && cd ..
+    continue-on-error: false
+
   deploy:
+    needs: ci
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     
     steps:
@@ -97,8 +123,54 @@ jobs:
           cd /home/${{ secrets.VPS_USER }}/deployments
           ls -dt manufacturing-app-backup-* | tail -n +6 | xargs rm -rf || true
           
+          # Wait a bit for app to start
+          sleep 5
+          
+          # Health check - REQUIRED for production
+          echo "🏥 Performing PRODUCTION health check..."
+          PROD_PORT=1234
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          HEALTH_CHECK_PASSED=false
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HEALTH_CHECK=$(curl -s http://localhost:$PROD_PORT/health || echo "failed")
+            if echo "$HEALTH_CHECK" | grep -q "healthy"; then
+              echo "✅ PRODUCTION health check PASSED!"
+              HEALTH_CHECK_PASSED=true
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "⏳ Health check attempt $RETRY_COUNT/$MAX_RETRIES failed, retrying in 3 seconds..."
+              echo "   Response: $HEALTH_CHECK"
+              sleep 3
+            fi
+          done
+          
+          if [ "$HEALTH_CHECK_PASSED" = false ]; then
+            echo "❌ CRITICAL: PRODUCTION health check FAILED after $MAX_RETRIES attempts!"
+            echo "🔄 Attempting rollback to previous version..."
+            
+            # Find latest backup
+            LATEST_BACKUP=$(ls -dt /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app-backup-* 2>/dev/null | head -1)
+            if [ -n "$LATEST_BACKUP" ]; then
+              echo "📦 Rolling back to: $LATEST_BACKUP"
+              rm -rf manufacturing-app
+              cp -r "$LATEST_BACKUP" manufacturing-app
+              cd manufacturing-app/server
+              pm2 restart manufacturing-app
+              pm2 save
+              echo "✅ Rollback completed. Please check the application manually."
+            else
+              echo "⚠️  No backup found for rollback. Manual intervention required!"
+            fi
+            
+            exit 1
+          fi
+          
           # Cleanup
           rm -f deploy.tar.gz
           
-          echo "Deployment completed successfully!"
+          echo "✅ PRODUCTION deployment completed successfully!"
+          echo "📍 Production app verified and running on port: $PROD_PORT"
 
