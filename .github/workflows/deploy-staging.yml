@@ -102,6 +102,11 @@ jobs:
           cd /home/${{ secrets.VPS_USER }}/deployments
           tar -xzf deploy.tar.gz
           
+          # Verify extracted files
+          echo "📋 Checking extracted files..."
+          ls -la deploy/ || echo "⚠️  Deploy directory check"
+          ls -la deploy/server/ || echo "⚠️  Server directory check"
+          
           # Backup existing staging deployment
           if [ -d "$STAGING_DIR" ]; then
             echo "📦 Creating staging backup..."
@@ -109,8 +114,23 @@ jobs:
           fi
           
           # Create new staging deployment directory
+          echo "📁 Creating staging directory..."
           mkdir -p "$STAGING_DIR"
           mv deploy/* "$STAGING_DIR/"
+          
+          # Verify files moved correctly
+          echo "📋 Verifying deployment files..."
+          if [ ! -d "$STAGING_DIR/server" ]; then
+            echo "❌ ERROR: Server directory not found in $STAGING_DIR"
+            ls -la "$STAGING_DIR/"
+            exit 1
+          fi
+          
+          if [ ! -f "$STAGING_DIR/server/index.js" ]; then
+            echo "❌ ERROR: index.js not found in $STAGING_DIR/server"
+            ls -la "$STAGING_DIR/server/"
+            exit 1
+          fi
           
           # Install/update dependencies
           echo "📦 Installing staging dependencies..."
@@ -121,13 +141,13 @@ jobs:
           if [ ! -f .env ]; then
             echo "📝 Creating staging .env file..."
             cat > .env << EOF
-          NODE_ENV=staging
-          PORT=$STAGING_PORT
-          DB_HOST=localhost
-          DB_PORT=5433
-          DB_NAME=manufacturing_db_staging
-          DB_USER=manufacturing_user
-          EOF
+NODE_ENV=staging
+PORT=5678
+DB_HOST=localhost
+DB_PORT=5433
+DB_NAME=manufacturing_db_staging
+DB_USER=manufacturing_user
+EOF
           else
             # Ensure PORT is set to staging port
             if grep -q "^PORT=" .env; then
@@ -143,22 +163,56 @@ jobs:
             fi
           fi
           
+          # Verify .env file
+          echo "📝 Verifying .env file..."
+          cat .env
+          
           # Create logs directory
           mkdir -p logs
           
           # Restart staging application with PM2
-          echo "🔄 Restarting staging application..."
+          echo "🔄 Restarting staging application with PM2..."
           cd "$STAGING_DIR/server"
-          pm2 delete manufacturing-app-staging || true
           
-          # Start with ecosystem config if available, otherwise use direct start
+          # Delete existing process if exists
+          pm2 delete manufacturing-app-staging 2>/dev/null || echo "No existing staging process to delete"
+          
+          # Verify current directory and files
+          echo "📋 Current directory: $(pwd)"
+          echo "📋 Files in server directory:"
+          ls -la
+          
+          # Start application with PM2
+          echo "🚀 Starting application..."
           if [ -f ecosystem.config.js ]; then
-            # Modify ecosystem config for staging
-            pm2 start ecosystem.config.js --name manufacturing-app-staging --update-env --env staging
+            echo "📋 Using ecosystem.config.js"
+            pm2 start ecosystem.config.js --name manufacturing-app-staging --update-env
           else
-            pm2 start index.js --name manufacturing-app-staging --instances 1 --cwd "$STAGING_DIR/server" --env staging
+            echo "📋 Using direct start with index.js"
+            pm2 start index.js --name manufacturing-app-staging --instances 1 --cwd "$STAGING_DIR/server"
           fi
+          
+          # Verify PM2 process started
+          echo "⏳ Waiting 2 seconds for PM2 to register process..."
+          sleep 2
+          
+          echo "📊 PM2 Status:"
+          pm2 status
+          
+          # Check if process is running
+          if pm2 list | grep -q "manufacturing-app-staging"; then
+            echo "✅ PM2 process 'manufacturing-app-staging' is registered"
+          else
+            echo "❌ ERROR: PM2 process 'manufacturing-app-staging' NOT found!"
+            echo "📋 PM2 list output:"
+            pm2 list
+            echo "📋 PM2 logs:"
+            pm2 logs manufacturing-app-staging --lines 20 --nostream || true
+            exit 1
+          fi
+          
           pm2 save
+          echo "✅ PM2 process saved"
           
           # Wait a bit for app to start
           sleep 5
