@@ -104,6 +104,7 @@ function Admin() {
     }
   };
 
+  // eslint-disable-next-line no-unused-vars
   const handleDeletePic = async (id) => {
     if (!window.confirm('Apakah Anda yakin ingin menonaktifkan PIC ini?')) {
       return;

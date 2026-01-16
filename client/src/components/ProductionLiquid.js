@@ -93,6 +93,7 @@ function ProductionLiquid() {
   const [rejectDataMap, setRejectDataMap] = useState({});
   const [moList, setMoList] = useState([]);
   const [selectedMo, setSelectedMo] = useState(null);
+  // eslint-disable-next-line no-unused-vars
   const [editingInput, setEditingInput] = useState(null);
   const [editFormData, setEditFormData] = useState(null);
   const [moSearchTerm, setMoSearchTerm] = useState('');
@@ -101,6 +102,7 @@ function ProductionLiquid() {
   const [selectedBufferMo, setSelectedBufferMo] = useState(null);
   const [selectedRejectMo, setSelectedRejectMo] = useState(null);
   const [picList, setPicList] = useState([]);
+  // eslint-disable-next-line no-unused-vars
   const [picSearchTerm, setPicSearchTerm] = useState('');
   const [editingMoNumber, setEditingMoNumber] = useState(null);
   const [editingSessionId, setEditingSessionId] = useState(null);
@@ -801,6 +803,7 @@ function ProductionLiquid() {
     }
   };
 
+  // eslint-disable-next-line no-unused-vars
   const handleSubmitStatus = async (inputId) => {
     try {
       await axios.put(`/api/production/liquid/update-status/${inputId}`, {

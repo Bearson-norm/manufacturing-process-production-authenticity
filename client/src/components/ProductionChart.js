@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -38,12 +38,7 @@ function ProductionChart() {
   const [statisticsData, setStatisticsData] = useState([]);
   const [leadersList, setLeadersList] = useState([]);
 
-  useEffect(() => {
-    fetchLeaders();
-    fetchStatistics();
-  }, [period, productionType]);
-
-  const fetchLeaders = async () => {
+  const fetchLeaders = useCallback(async () => {
     try {
       const response = await axios.get('/api/statistics/leaders');
       if (response.data.success) {
@@ -52,9 +47,9 @@ function ProductionChart() {
     } catch (error) {
       console.error('Error fetching leaders:', error);
     }
-  };
+  }, []);
 
-  const fetchStatistics = async () => {
+  const fetchStatistics = useCallback(async () => {
     setLoading(true);
     try {
       const params = {
@@ -72,7 +67,12 @@ function ProductionChart() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [period, productionType]);
+
+  useEffect(() => {
+    fetchLeaders();
+    fetchStatistics();
+  }, [fetchLeaders, fetchStatistics]);
 
   const handleRefresh = () => {
     fetchStatistics();
