@@ -97,7 +97,7 @@ NODE_ENV=staging
 PORT=5678
 DB_HOST=localhost
 DB_PORT=5433
-DB_NAME=manufacturing_db_staging
+DB_NAME=manufacturing_db
 DB_USER=manufacturing_user
 EOF
 
@@ -116,11 +116,11 @@ ssh foom@103.31.39.189
 # Login ke PostgreSQL
 sudo -u postgres psql
 
-# Create staging database
-CREATE DATABASE manufacturing_db_staging;
-
-# Grant permissions
-GRANT ALL PRIVILEGES ON DATABASE manufacturing_db_staging TO manufacturing_user;
+# Note: Staging menggunakan database yang sama dengan production (manufacturing_db)
+# Tidak perlu create database terpisah untuk staging
+# Jika ingin database terpisah, uncomment dan ganti DB_NAME di .env:
+# CREATE DATABASE manufacturing_db_staging;
+# GRANT ALL PRIVILEGES ON DATABASE manufacturing_db_staging TO manufacturing_user;
 
 # Exit PostgreSQL
 \q
@@ -194,7 +194,7 @@ Setelah branch staging dibuat, test deploy:
 # Di local machine, pastikan Anda di branch staging
 git checkout staging
 
-# Buat perubahan kecil untuk test (atau tidak usah, langsung push)
+# Buat perubahan kecil untuk test (atau tidak usah, langsung push) ya
 git add .
 git commit -m "Initial staging setup"
 git push origin staging
@@ -306,7 +306,7 @@ sudo -u postgres psql -c "\l" | grep staging
 sudo -u postgres psql -c "\du" | grep manufacturing_user
 
 # Test connection
-psql -h localhost -p 5433 -U manufacturing_user -d manufacturing_db_staging
+psql -h localhost -p 5433 -U manufacturing_user -d manufacturing_db
 ```
 
 ## ✅ Checklist Setup
@@ -350,7 +350,7 @@ NODE_ENV=staging
 PORT=5678
 DB_HOST=localhost
 DB_PORT=5433
-DB_NAME=manufacturing_db_staging
+DB_NAME=manufacturing_db
 DB_USER=manufacturing_user
 EOF
 

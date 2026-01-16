@@ -43,7 +43,8 @@ pm2 delete manufacturing-app || true
 
 # Start with ecosystem config for cluster mode
 if [ -f ecosystem.config.js ]; then
-    pm2 start ecosystem.config.js
+    # Use --only to start only production app (not staging)
+    pm2 start ecosystem.config.js --only manufacturing-app
 else
     # Fallback to direct start with cluster mode
     pm2 start index.js --name manufacturing-app --instances max --exec-mode cluster --cwd "$APP_DIR/server" --env production

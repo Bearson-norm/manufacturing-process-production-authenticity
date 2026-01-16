@@ -80,11 +80,11 @@ ssh foom@103.31.39.189
 # Login ke PostgreSQL
 sudo -u postgres psql
 
-# Create staging database
-CREATE DATABASE manufacturing_db_staging;
-
-# Grant permissions (jika menggunakan user yang sama)
-GRANT ALL PRIVILEGES ON DATABASE manufacturing_db_staging TO manufacturing_user;
+# Note: Staging menggunakan database yang sama dengan production (manufacturing_db)
+# Tidak perlu create database terpisah untuk staging
+# Jika ingin database terpisah untuk testing, uncomment dan ganti DB_NAME di .env:
+# CREATE DATABASE manufacturing_db_staging;
+# GRANT ALL PRIVILEGES ON DATABASE manufacturing_db_staging TO manufacturing_user;
 
 # Exit PostgreSQL
 \q
@@ -203,13 +203,14 @@ pm2 restart manufacturing-app-staging
 # SSH ke VPS
 ssh foom@103.31.39.189
 
-# Backup database dulu
-pg_dump -U manufacturing_user -d manufacturing_db_staging > ~/staging_db_backup_$(date +%Y%m%d).sql
+# ⚠️ WARNING: Staging menggunakan database yang sama dengan production (manufacturing_db)
+# Backup database production dulu sebelum reset:
+pg_dump -U manufacturing_user -d manufacturing_db > ~/db_backup_$(date +%Y%m%d).sql
 
-# Drop dan recreate database
-sudo -u postgres psql -c "DROP DATABASE IF EXISTS manufacturing_db_staging;"
-sudo -u postgres psql -c "CREATE DATABASE manufacturing_db_staging;"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE manufacturing_db_staging TO manufacturing_user;"
+# Jika ingin reset database (HATI-HATI: ini akan menghapus data production juga!)
+# sudo -u postgres psql -c "DROP DATABASE IF EXISTS manufacturing_db;"
+# sudo -u postgres psql -c "CREATE DATABASE manufacturing_db;"
+# sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO manufacturing_user;"
 
 # Aplikasi akan otomatis create tables saat restart
 pm2 restart manufacturing-app-staging
@@ -225,7 +226,7 @@ pm2 restart manufacturing-app-staging
 | Deploy Directory | `/home/foom/deployments/manufacturing-app-staging` | `/home/foom/deployments/manufacturing-app` |
 | PM2 Name | `manufacturing-app-staging` | `manufacturing-app` |
 | NODE_ENV | `staging` | `production` |
-| Database | `manufacturing_db_staging` (optional) | `manufacturing_db` |
+| Database | `manufacturing_db` (shared dengan production) | `manufacturing_db` |
 | Auto Deploy | ✅ Yes (on push to staging) | ✅ Yes (on push to main, after CI pass) |
 | Health Check | ⚠️ Warning jika gagal | ❌ CRITICAL - auto rollback jika gagal |
 | Backup Retention | 3 backups | 5 backups |
@@ -257,7 +258,7 @@ NODE_ENV=staging
 PORT=5678
 DB_HOST=localhost
 DB_PORT=5433
-DB_NAME=manufacturing_db_staging  # atau manufacturing_db jika shared
+DB_NAME=manufacturing_db  # shared dengan production
 DB_USER=manufacturing_user
 # DB_PASSWORD akan di-set via secret atau env
 ```

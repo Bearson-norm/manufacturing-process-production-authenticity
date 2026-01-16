@@ -144,7 +144,7 @@ jobs:
             echo "PORT=5678" >> .env
             echo "DB_HOST=localhost" >> .env
             echo "DB_PORT=5433" >> .env
-            echo "DB_NAME=manufacturing_db_staging" >> .env
+            echo "DB_NAME=manufacturing_db" >> .env
             echo "DB_USER=manufacturing_user" >> .env
           else
             # Ensure PORT is set to staging port
@@ -183,11 +183,12 @@ jobs:
           # Start application with PM2
           echo "🚀 Starting application..."
           if [ -f ecosystem.config.js ]; then
-            echo "📋 Using ecosystem.config.js"
-            pm2 start ecosystem.config.js --name manufacturing-app-staging --update-env
+            echo "📋 Using ecosystem.config.js (staging config)"
+            # Use --only to start only the staging app from ecosystem file
+            pm2 start ecosystem.config.js --only manufacturing-app-staging --update-env
           else
             echo "📋 Using direct start with index.js"
-            pm2 start index.js --name manufacturing-app-staging --instances 1 --cwd "$STAGING_DIR/server"
+            pm2 start index.js --name manufacturing-app-staging --instances 1 --cwd "$STAGING_DIR/server" --env NODE_ENV=staging --env PORT=5678
           fi
           
           # Verify PM2 process started

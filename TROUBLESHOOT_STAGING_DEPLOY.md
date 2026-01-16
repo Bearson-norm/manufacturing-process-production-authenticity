@@ -178,9 +178,13 @@ cat .env
 # Verify database exists
 sudo -u postgres psql -c "\l" | grep staging
 
-# If database doesn't exist, create it
-sudo -u postgres psql -c "CREATE DATABASE manufacturing_db_staging;"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE manufacturing_db_staging TO manufacturing_user;"
+# Note: Staging menggunakan database yang sama dengan production (manufacturing_db)
+# Verify database exists (should already exist for production)
+sudo -u postgres psql -c "\l" | grep manufacturing_db
+
+# If database doesn't exist (shouldn't happen), create it:
+# sudo -u postgres psql -c "CREATE DATABASE manufacturing_db;"
+# sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO manufacturing_user;"
 
 # Restart PM2
 pm2 restart manufacturing-app-staging
@@ -330,7 +334,7 @@ NODE_ENV=staging
 PORT=$STAGING_PORT
 DB_HOST=localhost
 DB_PORT=5433
-DB_NAME=manufacturing_db_staging
+DB_NAME=manufacturing_db
 DB_USER=manufacturing_user
 EOF
 fi
