@@ -34,7 +34,7 @@ function Dashboard({ setIsAuthenticated }) {
           </div>
           <div className="production-card" onClick={() => navigate('/production-chart')}>
             <div className="card-icon">📈</div>
-            <h3>Grafik Statistik Produksi</h3>
+            <h3>Grafik Statistik Produksi Pabrik</h3>
             <p>Analisis performa produksi per leader dengan grafik interaktif</p>
           </div>
           <div className="production-card" onClick={() => navigate('/production/liquid')}>
