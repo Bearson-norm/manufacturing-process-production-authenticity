@@ -18,6 +18,7 @@ function Login({ setIsAuthenticated }) {
       const response = await axios.post('/api/login', { username, password });
       if (response.data.success) {
         localStorage.setItem('isAuthenticated', 'true');
+        localStorage.setItem('userRole', response.data.role || 'production');
         setIsAuthenticated(true);
         navigate('/dashboard');
       }

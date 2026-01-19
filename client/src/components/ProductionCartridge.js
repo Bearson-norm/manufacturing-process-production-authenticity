@@ -209,6 +209,12 @@ function ProductionCartridge() {
 
   const handleConfirmStart = () => {
     if (leaderName && shiftNumber) {
+      // Validate shift number is numeric only
+      if (shiftNumber.trim() !== '' && !/^\d+$/.test(shiftNumber.trim())) {
+        alert('Shift Number hanya boleh berisi angka. Silakan periksa kembali input Anda.');
+        return;
+      }
+
       // Check if there's an active session (either in state or in savedData)
       if (manufacturingStarted && sessionId) {
         alert(`Ada session yang sedang aktif. Silakan akhiri session saat ini sebelum memulai session baru.`);
@@ -601,6 +607,11 @@ function ProductionCartridge() {
       return { valid: false, message: 'Selisih tidak boleh negatif' };
     }
 
+    // Check if First and Last Authenticity are the same
+    if (difference === 0) {
+      return { valid: false, message: 'First dan Last Authenticity tidak boleh sama' };
+    }
+
     // Check if difference is more than 7000
     if (difference > 7000) {
       return { valid: false, message: 'Selisih tidak boleh lebih dari 7000' };
@@ -646,6 +657,22 @@ function ProductionCartridge() {
     }
   };
 
+  // Auto-validate on blur
+  const handleAuthenticityBlur = (index, isEdit = false) => {
+    const rows = isEdit ? editFormData.authenticityRows : formData.authenticityRows;
+    const row = rows[index];
+    
+    if (!row) return;
+    
+    // Only validate if both fields have values
+    const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
+    const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
+    
+    if (hasFirst || hasLast) {
+      handleValidateRow(index, isEdit);
+    }
+  };
+
   const handleDeleteRow = (index) => {
     if (formData.authenticityRows.length > 1) {
       const newRows = formData.authenticityRows.filter((_, i) => i !== index);
@@ -673,6 +700,35 @@ function ProductionCartridge() {
   const handleRowChange = (index, field, value) => {
     const newRows = [...formData.authenticityRows];
     newRows[index][field] = value;
+    
+    // Auto-calculate Last Authenticity when First Authenticity is entered
+    if (field === 'firstAuthenticity' && value.trim() !== '') {
+      const firstNum = parseInt(value);
+      if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+        // Calculate Last = First + rollNumber (if rollNumber exists and is valid), otherwise First + 1
+        const rollNum = parseInt(newRows[index].rollNumber);
+        const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
+          ? firstNum + rollNum 
+          : firstNum + 1;
+        newRows[index].lastAuthenticity = calculatedLast.toString();
+      }
+    }
+    
+    // Recalculate Last Authenticity when rollNumber changes (if First is set and Last is empty)
+    if (field === 'rollNumber') {
+      const firstValue = newRows[index].firstAuthenticity;
+      if (firstValue && firstValue.trim() !== '') {
+        const firstNum = parseInt(firstValue);
+        if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+          const rollNum = parseInt(value);
+          const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
+            ? firstNum + rollNum 
+            : firstNum + 1;
+          newRows[index].lastAuthenticity = calculatedLast.toString();
+        }
+      }
+    }
+    
     setFormData({
       ...formData,
       authenticityRows: newRows
@@ -921,6 +977,33 @@ function ProductionCartridge() {
     }
   };
 
+  // Helper function to validate authenticity data
+  const validateAuthenticityData = (inputs) => {
+    for (const input of inputs) {
+      if (input.authenticity_data && Array.isArray(input.authenticity_data)) {
+        for (const auth of input.authenticity_data) {
+          const firstAuth = auth.firstAuthenticity || '';
+          const lastAuth = auth.lastAuthenticity || '';
+          
+          // Check if either first or last authenticity is empty
+          if (!firstAuth.trim() || !lastAuth.trim()) {
+            return {
+              valid: false,
+              message: `MO ${input.mo_number}: Ada authenticity data yang kosong. Pastikan semua First dan Last Authenticity sudah diisi.`
+            };
+          }
+        }
+      } else {
+        // If no authenticity_data or empty array
+        return {
+          valid: false,
+          message: `MO ${input.mo_number}: Tidak ada authenticity data. Pastikan authenticity data sudah diisi.`
+        };
+      }
+    }
+    return { valid: true };
+  };
+
   const handleSubmitMoGroup = async (moNumber, sessionId) => {
     const session = savedData.find(s => s.session_id === sessionId);
     if (!session) return;
@@ -928,6 +1011,13 @@ function ProductionCartridge() {
     const inputsWithSameMo = session.inputs.filter(input => input.mo_number === moNumber && input.status === 'active');
     if (inputsWithSameMo.length === 0) {
       alert('Tidak ada input aktif untuk disubmit pada MO ini');
+      return;
+    }
+
+    // Validate authenticity data before submit
+    const validation = validateAuthenticityData(inputsWithSameMo);
+    if (!validation.valid) {
+      alert(validation.message);
       return;
     }
 
@@ -969,6 +1059,13 @@ function ProductionCartridge() {
     
     if (allActiveInputs.length === 0) {
       alert('Tidak ada MO yang tertunda untuk disubmit');
+      return;
+    }
+
+    // Validate authenticity data before submit
+    const validation = validateAuthenticityData(allActiveInputs);
+    if (!validation.valid) {
+      alert(validation.message);
       return;
     }
 
@@ -1101,6 +1198,35 @@ function ProductionCartridge() {
   const handleEditRowChange = (index, field, value) => {
     const newRows = [...editFormData.authenticityRows];
     newRows[index][field] = value;
+    
+    // Auto-calculate Last Authenticity when First Authenticity is entered
+    if (field === 'firstAuthenticity' && value.trim() !== '') {
+      const firstNum = parseInt(value);
+      if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+        // Calculate Last = First + rollNumber (if rollNumber exists and is valid), otherwise First + 1
+        const rollNum = parseInt(newRows[index].rollNumber);
+        const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
+          ? firstNum + rollNum 
+          : firstNum + 1;
+        newRows[index].lastAuthenticity = calculatedLast.toString();
+      }
+    }
+    
+    // Recalculate Last Authenticity when rollNumber changes (if First is set and Last is empty)
+    if (field === 'rollNumber') {
+      const firstValue = newRows[index].firstAuthenticity;
+      if (firstValue && firstValue.trim() !== '') {
+        const firstNum = parseInt(firstValue);
+        if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+          const rollNum = parseInt(value);
+          const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
+            ? firstNum + rollNum 
+            : firstNum + 1;
+          newRows[index].lastAuthenticity = calculatedLast.toString();
+        }
+      }
+    }
+    
     setEditFormData({
       ...editFormData,
       authenticityRows: newRows
@@ -1393,6 +1519,7 @@ function ProductionCartridge() {
                                                 placeholder="First Authenticity"
                                                 value={row.firstAuthenticity}
                                                 onChange={(e) => handleEditRowChange(rowIdx, 'firstAuthenticity', e.target.value)}
+                                                onBlur={() => handleAuthenticityBlur(rowIdx, true)}
                                                 style={{ padding: '6px' }}
                                               />
                                               <input
@@ -1400,28 +1527,54 @@ function ProductionCartridge() {
                                                 placeholder="Last Authenticity"
                                                 value={row.lastAuthenticity}
                                                 onChange={(e) => handleEditRowChange(rowIdx, 'lastAuthenticity', e.target.value)}
+                                                onBlur={() => handleAuthenticityBlur(rowIdx, true)}
                                                 style={{ padding: '6px' }}
                                               />
                                               <input
                                                 type="text"
                                                 placeholder="Roll Number"
                                                 value={row.rollNumber}
-                                                onChange={(e) => handleEditRowChange(rowIdx, 'rollNumber', e.target.value)}
+                                                onChange={(e) => {
+                                                  // Only allow numeric input
+                                                  const value = e.target.value.replace(/[^0-9]/g, '');
+                                                  handleEditRowChange(rowIdx, 'rollNumber', value);
+                                                }}
                                                 style={{ padding: '6px' }}
                                               />
-                                              <button
-                                                type="button"
-                                                onClick={() => !isRowEmpty && handleValidateRow(rowIdx, true)}
-                                                className={`validate-button ${isRowEmpty ? 'hidden' : ''}`}
-                                                style={{
-                                                  background: isValidated ? '#10b981' : '#3b82f6',
-                                                  color: 'white'
-                                                }}
-                                                title={isValidated ? 'Validated' : 'Validate row'}
-                                                disabled={isRowEmpty}
-                                              >
-                                                {isValidated ? '✓ Valid' : 'Validate'}
-                                              </button>
+                                              {isValidated ? (
+                                                <div
+                                                  className="validation-status-indicator"
+                                                  style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    padding: '6px 12px',
+                                                    background: '#10b981',
+                                                    color: 'white',
+                                                    borderRadius: '4px',
+                                                    fontSize: '14px',
+                                                    fontWeight: '500',
+                                                    minWidth: '80px'
+                                                  }}
+                                                  title="Validated"
+                                                >
+                                                  ✓ Valid
+                                                </div>
+                                              ) : (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => !isRowEmpty && handleValidateRow(rowIdx, true)}
+                                                  className={`validate-button ${isRowEmpty ? 'hidden' : ''}`}
+                                                  style={{
+                                                    background: '#3b82f6',
+                                                    color: 'white'
+                                                  }}
+                                                  title="Validate row"
+                                                  disabled={isRowEmpty}
+                                                >
+                                                  Validate
+                                                </button>
+                                              )}
                                               <button
                                                 type="button"
                                                 onClick={() => handleDeleteEditRow(rowIdx)}
@@ -1584,7 +1737,11 @@ function ProductionCartridge() {
               <input
                 type="text"
                 value={shiftNumber}
-                onChange={(e) => setShiftNumber(e.target.value)}
+                onChange={(e) => {
+                  // Only allow numeric input
+                  const value = e.target.value.replace(/[^0-9]/g, '');
+                  setShiftNumber(value);
+                }}
                 placeholder="Enter shift number"
               />
             </div>
@@ -1733,6 +1890,7 @@ function ProductionCartridge() {
                       placeholder="First Authenticity at"
                       value={row.firstAuthenticity}
                       onChange={(e) => handleRowChange(index, 'firstAuthenticity', e.target.value)}
+                      onBlur={() => handleAuthenticityBlur(index, false)}
                       onKeyDown={(e) => handleScannerKeyDown(e, index, 'firstAuthenticity')}
                     />
                     <input
@@ -1740,28 +1898,54 @@ function ProductionCartridge() {
                       placeholder="Last Authenticity at"
                       value={row.lastAuthenticity}
                       onChange={(e) => handleRowChange(index, 'lastAuthenticity', e.target.value)}
+                      onBlur={() => handleAuthenticityBlur(index, false)}
                       onKeyDown={(e) => handleScannerKeyDown(e, index, 'lastAuthenticity')}
                     />
                     <input
                       type="text"
                       placeholder="Roll Number"
                       value={row.rollNumber}
-                      onChange={(e) => handleRowChange(index, 'rollNumber', e.target.value)}
+                      onChange={(e) => {
+                        // Only allow numeric input
+                        const value = e.target.value.replace(/[^0-9]/g, '');
+                        handleRowChange(index, 'rollNumber', value);
+                      }}
                       onKeyDown={(e) => handleScannerKeyDown(e, index, 'rollNumber')}
                     />
-                    <button
-                      type="button"
-                      onClick={() => !isRowEmpty && handleValidateRow(index, false)}
-                      className={`validate-button ${isRowEmpty ? 'hidden' : ''}`}
-                      style={{
-                        background: isValidated ? '#10b981' : '#3b82f6',
-                        color: 'white'
-                      }}
-                      title={isValidated ? 'Validated' : 'Validate row'}
-                      disabled={isRowEmpty}
-                    >
-                      {isValidated ? '✓ Valid' : 'Validate'}
-                    </button>
+                    {isValidated ? (
+                      <div
+                        className="validation-status-indicator"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '8px 16px',
+                          background: '#10b981',
+                          color: 'white',
+                          borderRadius: '4px',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          minWidth: '100px'
+                        }}
+                        title="Validated"
+                      >
+                        ✓ Valid
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => !isRowEmpty && handleValidateRow(index, false)}
+                        className={`validate-button ${isRowEmpty ? 'hidden' : ''}`}
+                        style={{
+                          background: '#3b82f6',
+                          color: 'white'
+                        }}
+                        title="Validate row"
+                        disabled={isRowEmpty}
+                      >
+                        Validate
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleDeleteRow(index)}
@@ -2249,66 +2433,192 @@ function ProductionCartridge() {
 
       {/* Button Help Modal */}
       {showButtonHelpModal && (
-        <div className="modal-overlay" onClick={() => setShowButtonHelpModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '650px', maxHeight: '80vh', overflowY: 'auto' }}>
-            <h2 style={{ marginBottom: '20px', color: '#1f2937' }}>Petunjuk Penggunaan Button</h2>
+        <div 
+          className="modal-overlay" 
+          onClick={() => setShowButtonHelpModal(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(2px)'
+          }}
+        >
+          <div 
+            className="modal-content" 
+            onClick={(e) => e.stopPropagation()} 
+            style={{ 
+              maxWidth: '700px',
+              width: '90%',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              background: 'white',
+              borderRadius: '12px',
+              padding: '32px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              position: 'relative'
+            }}
+          >
+            {/* Close Button */}
+            <button
+              onClick={() => setShowButtonHelpModal(false)}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                right: '16px',
+                background: '#f3f4f6',
+                border: 'none',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                fontSize: '20px',
+                color: '#6b7280',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#e5e7eb';
+                e.currentTarget.style.color = '#374151';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#f3f4f6';
+                e.currentTarget.style.color = '#6b7280';
+              }}
+            >
+              ✕
+            </button>
+
+            <h2 style={{ 
+              marginTop: 0,
+              marginBottom: '24px', 
+              color: '#1f2937',
+              fontSize: '24px',
+              fontWeight: '700',
+              borderBottom: '3px solid #3b82f6',
+              paddingBottom: '12px'
+            }}>
+              🎮 Petunjuk Penggunaan Button
+            </h2>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ 
-                padding: '16px', 
+                padding: '20px', 
                 background: '#eff6ff', 
                 borderLeft: '4px solid #3b82f6', 
-                borderRadius: '4px'
+                borderRadius: '8px',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                transition: 'transform 0.2s'
               }}>
-                <h3 style={{ color: '#1e40af', marginTop: 0, marginBottom: '8px', fontSize: '16px' }}>
+                <h3 style={{ 
+                  color: '#1e40af', 
+                  marginTop: 0, 
+                  marginBottom: '10px', 
+                  fontSize: '17px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <span style={{ fontSize: '20px' }}>📝</span>
                   1. Input Authenticity Label Process
                 </h3>
-                <p style={{ margin: 0, color: '#1e3a8a', fontSize: '14px', lineHeight: '1.6' }}>
+                <p style={{ margin: 0, color: '#1e3a8a', fontSize: '15px', lineHeight: '1.7' }}>
                   Digunakan untuk melakukan input stiker holo/authenticity yang konsumsinya <strong>berurutan</strong> dengan 
                   melakukan <strong>scan awal</strong> dan <strong>scan akhir</strong> dari proses tersebut.
                 </p>
               </div>
 
               <div style={{ 
-                padding: '16px', 
+                padding: '20px', 
                 background: '#fefce8', 
                 borderLeft: '4px solid #eab308', 
-                borderRadius: '4px'
+                borderRadius: '8px',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                transition: 'transform 0.2s'
               }}>
-                <h3 style={{ color: '#a16207', marginTop: 0, marginBottom: '8px', fontSize: '16px' }}>
+                <h3 style={{ 
+                  color: '#a16207', 
+                  marginTop: 0, 
+                  marginBottom: '10px', 
+                  fontSize: '17px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <span style={{ fontSize: '20px' }}>📦</span>
                   2. Input Buffer Authenticity
                 </h3>
-                <p style={{ margin: 0, color: '#713f12', fontSize: '14px', lineHeight: '1.6' }}>
+                <p style={{ margin: 0, color: '#713f12', fontSize: '15px', lineHeight: '1.7' }}>
                   Digunakan untuk menginput nomor authenticity <strong>individual</strong> yang angka tersebut 
                   <strong> diluar dari range</strong> Input Authenticity Label Process.
                 </p>
               </div>
 
               <div style={{ 
-                padding: '16px', 
+                padding: '20px', 
                 background: '#fef2f2', 
                 borderLeft: '4px solid #ef4444', 
-                borderRadius: '4px'
+                borderRadius: '8px',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                transition: 'transform 0.2s'
               }}>
-                <h3 style={{ color: '#b91c1c', marginTop: 0, marginBottom: '8px', fontSize: '16px' }}>
+                <h3 style={{ 
+                  color: '#b91c1c', 
+                  marginTop: 0, 
+                  marginBottom: '10px', 
+                  fontSize: '17px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <span style={{ fontSize: '20px' }}>❌</span>
                   3. Input Reject Authenticity
                 </h3>
-                <p style={{ margin: 0, color: '#7f1d1d', fontSize: '14px', lineHeight: '1.6' }}>
+                <p style={{ margin: 0, color: '#7f1d1d', fontSize: '15px', lineHeight: '1.7' }}>
                   Digunakan untuk menginput nomor authenticity <strong>individual</strong> yang <strong>reject</strong>.
                 </p>
               </div>
 
               <div style={{ 
-                padding: '16px', 
+                padding: '20px', 
                 background: '#f0fdf4', 
                 borderLeft: '4px solid #10b981', 
-                borderRadius: '4px'
+                borderRadius: '8px',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                transition: 'transform 0.2s'
               }}>
-                <h3 style={{ color: '#047857', marginTop: 0, marginBottom: '8px', fontSize: '16px' }}>
+                <h3 style={{ 
+                  color: '#047857', 
+                  marginTop: 0, 
+                  marginBottom: '10px', 
+                  fontSize: '17px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <span style={{ fontSize: '20px' }}>✏️</span>
                   4. Tombol Edit
                 </h3>
-                <ul style={{ margin: 0, paddingLeft: '20px', color: '#065f46', fontSize: '14px', lineHeight: '1.6' }}>
-                  <li style={{ marginBottom: '8px' }}>
+                <ul style={{ 
+                  margin: 0, 
+                  paddingLeft: '24px', 
+                  color: '#065f46', 
+                  fontSize: '15px', 
+                  lineHeight: '1.7' 
+                }}>
+                  <li style={{ marginBottom: '10px' }}>
                     Tombol <strong>Edit</strong> digunakan untuk mengubah isi dari apa yang sudah kita input.
                   </li>
                   <li style={{ marginBottom: '0' }}>
@@ -2323,7 +2633,27 @@ function ProductionCartridge() {
               <button 
                 onClick={() => setShowButtonHelpModal(false)} 
                 className="confirm-button"
-                style={{ width: '100%' }}
+                style={{ 
+                  width: '100%',
+                  padding: '14px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: 'white',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s',
+                  boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 6px 12px rgba(59, 130, 246, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 6px rgba(59, 130, 246, 0.3)';
+                }}
               >
                 Mengerti
               </button>
@@ -2334,74 +2664,218 @@ function ProductionCartridge() {
 
       {/* Help Modal */}
       {showHelpModal && (
-        <div className="modal-overlay" onClick={() => setShowHelpModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '80vh', overflowY: 'auto' }}>
-            <h2 style={{ marginBottom: '20px', color: '#1f2937' }}>Petunjuk Pengisian Form Authenticity</h2>
+        <div 
+          className="modal-overlay" 
+          onClick={() => setShowHelpModal(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(2px)'
+          }}
+        >
+          <div 
+            className="modal-content" 
+            onClick={(e) => e.stopPropagation()} 
+            style={{ 
+              maxWidth: '750px',
+              width: '90%',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              background: 'white',
+              borderRadius: '12px',
+              padding: '32px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              position: 'relative'
+            }}
+          >
+            {/* Close Button */}
+            <button
+              onClick={() => setShowHelpModal(false)}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                right: '16px',
+                background: '#f3f4f6',
+                border: 'none',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                fontSize: '20px',
+                color: '#6b7280',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#e5e7eb';
+                e.currentTarget.style.color = '#374151';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#f3f4f6';
+                e.currentTarget.style.color = '#6b7280';
+              }}
+            >
+              ✕
+            </button>
+
+            <h2 style={{ 
+              marginTop: 0,
+              marginBottom: '24px', 
+              color: '#1f2937',
+              fontSize: '24px',
+              fontWeight: '700',
+              borderBottom: '3px solid #3b82f6',
+              paddingBottom: '12px'
+            }}>
+              📋 Petunjuk Pengisian Form Authenticity
+            </h2>
             
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ color: '#3b82f6', marginBottom: '12px', fontSize: '18px' }}>
+            {/* Case 1 */}
+            <div style={{ 
+              marginBottom: '28px',
+              padding: '20px',
+              background: '#f0f9ff',
+              borderRadius: '8px',
+              border: '1px solid #bfdbfe'
+            }}>
+              <h3 style={{ 
+                color: '#1e40af', 
+                marginTop: 0,
+                marginBottom: '16px', 
+                fontSize: '18px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span style={{ fontSize: '22px' }}>1️⃣</span>
                 Case 1: Satu Roll dalam 1 MO
               </h3>
-              <ol style={{ paddingLeft: '24px', lineHeight: '1.8', color: '#374151' }}>
-                <li style={{ marginBottom: '8px' }}>
-                  Lakukan input <strong>First Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+              <ol style={{ 
+                paddingLeft: '28px', 
+                lineHeight: '1.9', 
+                color: '#1e3a8a',
+                margin: 0
+              }}>
+                <li style={{ marginBottom: '12px' }}>
+                  Lakukan input <strong>First Authenticity</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
                   <strong> pertama</strong> yang ditempel pada MO itu
                 </li>
-                <li style={{ marginBottom: '8px' }}>
-                  Lakukan input <strong>Last Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                <li style={{ marginBottom: '12px' }}>
+                  Lakukan input <strong>Last Authenticity</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
                   <strong> terakhir</strong> yang ditempel pada saat MO itu dijalankan
                 </li>
               </ol>
             </div>
 
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ color: '#3b82f6', marginBottom: '12px', fontSize: '18px' }}>
+            {/* Case 2 */}
+            <div style={{ 
+              marginBottom: '28px',
+              padding: '20px',
+              background: '#f0fdf4',
+              borderRadius: '8px',
+              border: '1px solid #bbf7d0'
+            }}>
+              <h3 style={{ 
+                color: '#15803d', 
+                marginTop: 0,
+                marginBottom: '16px', 
+                fontSize: '18px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span style={{ fontSize: '22px' }}>2️⃣</span>
                 Case 2: Lebih dari 1 Roll untuk 1 MO
               </h3>
-              <ol style={{ paddingLeft: '24px', lineHeight: '1.8', color: '#374151' }}>
-                <li style={{ marginBottom: '8px' }}>
-                  Lakukan input <strong>First Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+              <ol style={{ 
+                paddingLeft: '28px', 
+                lineHeight: '1.9', 
+                color: '#166534',
+                margin: 0
+              }}>
+                <li style={{ marginBottom: '12px' }}>
+                  Lakukan input <strong>First Authenticity</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
                   <strong> pertama</strong> yang ditempel pada MO itu
                 </li>
-                <li style={{ marginBottom: '8px' }}>
-                  Lakukan input <strong>Last Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                <li style={{ marginBottom: '12px' }}>
+                  Lakukan input <strong>Last Authenticity</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
                   yang ditempel pada <strong>roll yang terakhir digunakan</strong> di roll pertama
                 </li>
-                <li style={{ marginBottom: '8px' }}>
+                <li style={{ marginBottom: '12px' }}>
                   Klik tombol <strong>"+ Add Row"</strong> untuk menambah baris baru
                 </li>
-                <li style={{ marginBottom: '8px' }}>
-                  Lakukan input <strong>First Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                <li style={{ marginBottom: '12px' }}>
+                  Lakukan input <strong>First Authenticity</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
                   <strong> pertama</strong> di roll baru yang ditempel pada MO itu
                 </li>
-                <li style={{ marginBottom: '8px' }}>
-                  Lakukan input <strong>Last Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                <li style={{ marginBottom: '12px' }}>
+                  Lakukan input <strong>Last Authenticity</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
                   <strong> terakhir</strong> di roll baru yang ditempel pada MO itu (jika roll ini terakhir digunakan)
                 </li>
-                <li style={{ marginBottom: '8px' }}>
+                <li style={{ marginBottom: '12px' }}>
                   <strong>Ikuti langkah 3, 4, dan 5</strong> jika ada penambahan roll lagi
                 </li>
               </ol>
             </div>
 
+            {/* Important Note */}
             <div style={{ 
-              padding: '12px', 
-              background: '#fef3c7', 
+              padding: '16px 20px', 
+              background: '#fffbeb', 
               borderLeft: '4px solid #f59e0b', 
-              borderRadius: '4px',
-              marginBottom: '20px'
+              borderRadius: '6px',
+              marginBottom: '24px',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
             }}>
-              <p style={{ margin: 0, color: '#92400e', fontSize: '14px' }}>
-                <strong>Catatan:</strong> Pastikan untuk klik tombol <strong>"Validate"</strong> pada setiap baris yang sudah diisi 
+              <p style={{ 
+                margin: 0, 
+                color: '#92400e', 
+                fontSize: '15px',
+                lineHeight: '1.6'
+              }}>
+                <strong style={{ fontSize: '16px' }}>⚠️ Catatan Penting:</strong><br/>
+                Pastikan untuk klik tombol <strong>"Validate"</strong> pada setiap baris yang sudah diisi 
                 sebelum melakukan <strong>"Confirm Input"</strong>
               </p>
             </div>
 
-            <div className="modal-buttons" style={{ marginTop: '20px' }}>
+            <div className="modal-buttons" style={{ marginTop: '24px' }}>
               <button 
                 onClick={() => setShowHelpModal(false)} 
                 className="confirm-button"
-                style={{ width: '100%' }}
+                style={{ 
+                  width: '100%',
+                  padding: '14px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: 'white',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s',
+                  boxShadow: '0 4px 6px rgba(59, 130, 246, 0.3)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 6px 12px rgba(59, 130, 246, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 6px rgba(59, 130, 246, 0.3)';
+                }}
               >
                 Mengerti
               </button>

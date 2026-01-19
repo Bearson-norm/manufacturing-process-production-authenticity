@@ -5,9 +5,12 @@ import './Dashboard.css';
 function Dashboard({ setIsAuthenticated }) {
   const navigate = useNavigate();
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const userRole = localStorage.getItem('userRole') || 'production';
+  const isAdmin = userRole === 'admin';
 
   const handleLogout = () => {
     localStorage.removeItem('isAuthenticated');
+    localStorage.removeItem('userRole');
     setIsAuthenticated(false);
     navigate('/login');
   };
@@ -61,24 +64,28 @@ function Dashboard({ setIsAuthenticated }) {
           </div>
         </div>
 
-        <h2 style={{ marginTop: '48px' }}>Menu Lainnya</h2>
-        <div className="production-cards">
-          <div className="production-card" onClick={() => navigate('/admin')}>
-            <div className="card-icon">⚙️</div>
-            <h3>Admin Configuration</h3>
-            <p>Configure Odoo API and manage data</p>
-          </div>
-          <div className="production-card" onClick={() => navigate('/report-dashboard')}>
-            <div className="card-icon">📊</div>
-            <h3>Laporan Manufacturing</h3>
-            <p>Lihat laporan hasil proses manufacturing berdasarkan MO yang selesai</p>
-          </div>
-          <div className="production-card" onClick={() => navigate('/production-chart')}>
-            <div className="card-icon">📈</div>
-            <h3>Grafik Statistik Produksi Pabrik</h3>
-            <p>Analisis performa produksi per leader dengan grafik interaktif</p>
-          </div>
-        </div>
+        {isAdmin && (
+          <>
+            <h2 style={{ marginTop: '48px' }}>Menu Lainnya</h2>
+            <div className="production-cards">
+              <div className="production-card" onClick={() => navigate('/admin')}>
+                <div className="card-icon">⚙️</div>
+                <h3>Admin Configuration</h3>
+                <p>Configure Odoo API and manage data</p>
+              </div>
+              <div className="production-card" onClick={() => navigate('/report-dashboard')}>
+                <div className="card-icon">📊</div>
+                <h3>Laporan Manufacturing</h3>
+                <p>Lihat laporan hasil proses manufacturing berdasarkan MO yang selesai</p>
+              </div>
+              <div className="production-card" onClick={() => navigate('/production-chart')}>
+                <div className="card-icon">📈</div>
+                <h3>Grafik Statistik Produksi Pabrik</h3>
+                <p>Analisis performa produksi per leader dengan grafik interaktif</p>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Help Modal */}

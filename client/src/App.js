@@ -8,6 +8,7 @@ import ProductionCartridge from './components/ProductionCartridge';
 import Admin from './components/Admin';
 import ReportDashboard from './components/ReportDashboard';
 import ProductionChart from './components/ProductionChart';
+import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 
 function App() {
@@ -30,57 +31,57 @@ function App() {
           <Route 
             path="/dashboard" 
             element={
-              isAuthenticated ? 
-                <Dashboard setIsAuthenticated={setIsAuthenticated} /> : 
-                <Navigate to="/login" />
+              <ProtectedRoute>
+                <Dashboard setIsAuthenticated={setIsAuthenticated} />
+              </ProtectedRoute>
             } 
           />
           <Route 
             path="/production/liquid" 
             element={
-              isAuthenticated ? 
-                <ProductionLiquid /> : 
-                <Navigate to="/login" />
+              <ProtectedRoute>
+                <ProductionLiquid />
+              </ProtectedRoute>
             } 
           />
           <Route 
             path="/production/device" 
             element={
-              isAuthenticated ? 
-                <ProductionDevice /> : 
-                <Navigate to="/login" />
+              <ProtectedRoute>
+                <ProductionDevice />
+              </ProtectedRoute>
             } 
           />
           <Route 
             path="/production/cartridge" 
             element={
-              isAuthenticated ? 
-                <ProductionCartridge /> : 
-                <Navigate to="/login" />
+              <ProtectedRoute>
+                <ProductionCartridge />
+              </ProtectedRoute>
             } 
           />
           <Route 
             path="/admin" 
             element={
-              isAuthenticated ? 
-                <Admin /> : 
-                <Navigate to="/login" />
+              <ProtectedRoute allowedRoles={['admin']}>
+                <Admin />
+              </ProtectedRoute>
             } 
           />
           <Route 
             path="/report-dashboard" 
             element={
-              isAuthenticated ? 
-                <ReportDashboard /> : 
-                <Navigate to="/login" />
+              <ProtectedRoute allowedRoles={['admin']}>
+                <ReportDashboard />
+              </ProtectedRoute>
             } 
           />
           <Route 
             path="/production-chart" 
             element={
-              isAuthenticated ? 
-                <ProductionChart /> : 
-                <Navigate to="/login" />
+              <ProtectedRoute allowedRoles={['admin']}>
+                <ProductionChart />
+              </ProtectedRoute>
             } 
           />
           <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />

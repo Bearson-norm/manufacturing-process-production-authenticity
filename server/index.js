@@ -100,8 +100,13 @@ app.post('/api/login', (req, res) => {
       return res.status(400).json({ success: false, message: 'Username and password are required' });
     }
     
-    if (username === 'production' && password === 'production123') {
-      res.json({ success: true, message: 'Login successful' });
+    // Admin credentials
+    if (username === 'admin' && password === 'admin123') {
+      res.json({ success: true, message: 'Login successful', role: 'admin' });
+    }
+    // Production credentials
+    else if (username === 'production' && password === 'production123') {
+      res.json({ success: true, message: 'Login successful', role: 'production' });
     } else {
       res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
