@@ -1,4 +1,4 @@
-# 🚀 Quick Guide: Staging Tidak Update - Langkah Cepat
+git add# 🚀 Quick Guide: Staging Tidak Update - Langkah Cepat
 
 ## 📋 Masalah
 Sudah push ke branch `staging` tapi perubahan tidak muncul di VPS.

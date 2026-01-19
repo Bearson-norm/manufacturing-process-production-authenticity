@@ -66,6 +66,7 @@ function ProductionCartridge() {
   const [showInputModal, setShowInputModal] = useState(false);
   const [showBufferModal, setShowBufferModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
   const [manufacturingStarted, setManufacturingStarted] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [leaderName, setLeaderName] = useState('');
@@ -1607,6 +1608,9 @@ function ProductionCartridge() {
                   ))
                 }
               </datalist>
+              <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                Input PIC yang menjalankan input Manufacturing Order ini
+              </small>
             </div>
             <div className="form-group">
               <label>MO Number *</label>
@@ -1645,6 +1649,9 @@ function ProductionCartridge() {
                   ))
                 }
               </datalist>
+              <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                Input MO yang mau diinput
+              </small>
               {selectedMo && (
                 <div className="mo-info-display">
                   <p><strong>SKU Name:</strong> {selectedMo.sku_name}</p>
@@ -1664,7 +1671,29 @@ function ProductionCartridge() {
               />
             </div>
             <div className="authenticity-section">
-              <label>Authenticity Data</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                <label style={{ margin: 0 }}>Authenticity Data</label>
+                <span 
+                  onClick={() => setShowHelpModal(true)}
+                  title="Klik untuk melihat petunjuk pengisian"
+                  style={{
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    background: '#3b82f6',
+                    color: 'white',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    userSelect: 'none'
+                  }}
+                >
+                  ?
+                </span>
+              </div>
               {formData.authenticityRows.map((row, index) => {
                 const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
                 const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
@@ -2186,6 +2215,84 @@ function ProductionCartridge() {
               </button>
               <button onClick={handleUpdateReject} className="confirm-button">
                 Update
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Help Modal */}
+      {showHelpModal && (
+        <div className="modal-overlay" onClick={() => setShowHelpModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '80vh', overflowY: 'auto' }}>
+            <h2 style={{ marginBottom: '20px', color: '#1f2937' }}>Petunjuk Pengisian Form Authenticity</h2>
+            
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ color: '#3b82f6', marginBottom: '12px', fontSize: '18px' }}>
+                Case 1: Satu Roll dalam 1 MO
+              </h3>
+              <ol style={{ paddingLeft: '24px', lineHeight: '1.8', color: '#374151' }}>
+                <li style={{ marginBottom: '8px' }}>
+                  Lakukan input <strong>First Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                  <strong> pertama</strong> yang ditempel pada MO itu
+                </li>
+                <li style={{ marginBottom: '8px' }}>
+                  Lakukan input <strong>Last Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                  <strong> terakhir</strong> yang ditempel pada saat MO itu dijalankan
+                </li>
+              </ol>
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ color: '#3b82f6', marginBottom: '12px', fontSize: '18px' }}>
+                Case 2: Lebih dari 1 Roll untuk 1 MO
+              </h3>
+              <ol style={{ paddingLeft: '24px', lineHeight: '1.8', color: '#374151' }}>
+                <li style={{ marginBottom: '8px' }}>
+                  Lakukan input <strong>First Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                  <strong> pertama</strong> yang ditempel pada MO itu
+                </li>
+                <li style={{ marginBottom: '8px' }}>
+                  Lakukan input <strong>Last Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                  yang ditempel pada <strong>roll yang terakhir digunakan</strong> di roll pertama
+                </li>
+                <li style={{ marginBottom: '8px' }}>
+                  Klik tombol <strong>"+ Add Row"</strong> untuk menambah baris baru
+                </li>
+                <li style={{ marginBottom: '8px' }}>
+                  Lakukan input <strong>First Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                  <strong> pertama</strong> di roll baru yang ditempel pada MO itu
+                </li>
+                <li style={{ marginBottom: '8px' }}>
+                  Lakukan input <strong>Last Authenticity at</strong> dengan melakukan scan pada packaging stiker holo (authenticity) 
+                  <strong> terakhir</strong> di roll baru yang ditempel pada MO itu (jika roll ini terakhir digunakan)
+                </li>
+                <li style={{ marginBottom: '8px' }}>
+                  <strong>Ikuti langkah 3, 4, dan 5</strong> jika ada penambahan roll lagi
+                </li>
+              </ol>
+            </div>
+
+            <div style={{ 
+              padding: '12px', 
+              background: '#fef3c7', 
+              borderLeft: '4px solid #f59e0b', 
+              borderRadius: '4px',
+              marginBottom: '20px'
+            }}>
+              <p style={{ margin: 0, color: '#92400e', fontSize: '14px' }}>
+                <strong>Catatan:</strong> Pastikan untuk klik tombol <strong>"Validate"</strong> pada setiap baris yang sudah diisi 
+                sebelum melakukan <strong>"Confirm Input"</strong>
+              </p>
+            </div>
+
+            <div className="modal-buttons" style={{ marginTop: '20px' }}>
+              <button 
+                onClick={() => setShowHelpModal(false)} 
+                className="confirm-button"
+                style={{ width: '100%' }}
+              >
+                Mengerti
               </button>
             </div>
           </div>
