@@ -67,6 +67,7 @@ function ProductionDevice() {
   const [showBufferModal, setShowBufferModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showButtonHelpModal, setShowButtonHelpModal] = useState(false);
   const [manufacturingStarted, setManufacturingStarted] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [leaderName, setLeaderName] = useState('');
@@ -1159,25 +1160,50 @@ function ProductionDevice() {
 
       <div className="production-content">
         {!manufacturingStarted ? (
-          <button onClick={handleStartManufacturing} className="start-button">
-            Start Manufacturing Process
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+            <button onClick={handleStartManufacturing} className="start-button">
+              Start Manufacturing Process
+            </button>
+            <small style={{ color: '#94a3b8', fontSize: '13px', textAlign: 'center', lineHeight: '1.4' }}>
+              Klik tombol ini untuk memulai proses manufacturing dan input data produksi
+            </small>
+          </div>
         ) : (
           <div>
             <div className="button-group">
-              <button onClick={handleInputAuthenticity} className="input-button">
-                Input Authenticity Label Process
-              </button>
-              <button onClick={handleInputBuffer} className="buffer-button">
-                Input Buffer Authenticity
-              </button>
-              <button onClick={handleInputReject} className="reject-button">
-                Input Reject Authenticity
-              </button>
-              <button onClick={handleEndManufacturing} className="end-button">
-                End Manufacturing Process
-              </button>
-            </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+                  <button onClick={handleInputAuthenticity} className="input-button">
+                    Input Authenticity Label Process
+                  </button>
+                  <small style={{ color: '#666', fontSize: '11px', textAlign: 'center', lineHeight: '1.2' }}>
+                    Input stiker holo berurutan (scan awal & akhir)
+                  </small>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+                  <button onClick={handleInputBuffer} className="buffer-button">
+                    Input Buffer Authenticity
+                  </button>
+                  <small style={{ color: '#666', fontSize: '11px', textAlign: 'center', lineHeight: '1.2' }}>
+                    Input nomor authenticity diluar range
+                  </small>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+                  <button onClick={handleInputReject} className="reject-button">
+                    Input Reject Authenticity
+                  </button>
+                  <small style={{ color: '#666', fontSize: '11px', textAlign: 'center', lineHeight: '1.2' }}>
+                    Input nomor authenticity yang reject
+                  </small>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+                  <button onClick={handleEndManufacturing} className="end-button">
+                    End Manufacturing Process
+                  </button>
+                  <small style={{ color: '#666', fontSize: '11px', textAlign: 'center', lineHeight: '1.2' }}>
+                    Akhiri proses manufacturing
+                  </small>
+                </div>
+              </div>
             <div className="info-display">
               <p><strong>Leader:</strong> {leaderName}</p>
               <p><strong>Shift Number:</strong> {shiftNumber}</p>
@@ -2222,6 +2248,91 @@ function ProductionDevice() {
         </div>
       )}
 
+      {/* Button Help Modal */}
+      {showButtonHelpModal && (
+        <div className="modal-overlay" onClick={() => setShowButtonHelpModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '650px', maxHeight: '80vh', overflowY: 'auto' }}>
+            <h2 style={{ marginBottom: '20px', color: '#1f2937' }}>Petunjuk Penggunaan Button</h2>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ 
+                padding: '16px', 
+                background: '#eff6ff', 
+                borderLeft: '4px solid #3b82f6', 
+                borderRadius: '4px'
+              }}>
+                <h3 style={{ color: '#1e40af', marginTop: 0, marginBottom: '8px', fontSize: '16px' }}>
+                  1. Input Authenticity Label Process
+                </h3>
+                <p style={{ margin: 0, color: '#1e3a8a', fontSize: '14px', lineHeight: '1.6' }}>
+                  Digunakan untuk melakukan input stiker holo/authenticity yang konsumsinya <strong>berurutan</strong> dengan 
+                  melakukan <strong>scan awal</strong> dan <strong>scan akhir</strong> dari proses tersebut.
+                </p>
+              </div>
+
+              <div style={{ 
+                padding: '16px', 
+                background: '#fefce8', 
+                borderLeft: '4px solid #eab308', 
+                borderRadius: '4px'
+              }}>
+                <h3 style={{ color: '#a16207', marginTop: 0, marginBottom: '8px', fontSize: '16px' }}>
+                  2. Input Buffer Authenticity
+                </h3>
+                <p style={{ margin: 0, color: '#713f12', fontSize: '14px', lineHeight: '1.6' }}>
+                  Digunakan untuk menginput nomor authenticity <strong>individual</strong> yang angka tersebut 
+                  <strong> diluar dari range</strong> Input Authenticity Label Process.
+                </p>
+              </div>
+
+              <div style={{ 
+                padding: '16px', 
+                background: '#fef2f2', 
+                borderLeft: '4px solid #ef4444', 
+                borderRadius: '4px'
+              }}>
+                <h3 style={{ color: '#b91c1c', marginTop: 0, marginBottom: '8px', fontSize: '16px' }}>
+                  3. Input Reject Authenticity
+                </h3>
+                <p style={{ margin: 0, color: '#7f1d1d', fontSize: '14px', lineHeight: '1.6' }}>
+                  Digunakan untuk menginput nomor authenticity <strong>individual</strong> yang <strong>reject</strong>.
+                </p>
+              </div>
+
+              <div style={{ 
+                padding: '16px', 
+                background: '#f0fdf4', 
+                borderLeft: '4px solid #10b981', 
+                borderRadius: '4px'
+              }}>
+                <h3 style={{ color: '#047857', marginTop: 0, marginBottom: '8px', fontSize: '16px' }}>
+                  4. Tombol Edit
+                </h3>
+                <ul style={{ margin: 0, paddingLeft: '20px', color: '#065f46', fontSize: '14px', lineHeight: '1.6' }}>
+                  <li style={{ marginBottom: '8px' }}>
+                    Tombol <strong>Edit</strong> digunakan untuk mengubah isi dari apa yang sudah kita input.
+                  </li>
+                  <li style={{ marginBottom: '0' }}>
+                    Tombol <strong>Edit</strong> pada <strong>Input Authenticity Label Process</strong> hanya bisa dilakukan 
+                    jika MO yang diinput <strong>belum disubmit</strong>.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="modal-buttons" style={{ marginTop: '24px' }}>
+              <button 
+                onClick={() => setShowButtonHelpModal(false)} 
+                className="confirm-button"
+                style={{ width: '100%' }}
+              >
+                Mengerti
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Help Modal */}
       {showHelpModal && (
         <div className="modal-overlay" onClick={() => setShowHelpModal(false)}>
@@ -2299,6 +2410,42 @@ function ProductionDevice() {
           </div>
         </div>
       )}
+
+      {/* Floating Help Button */}
+      <div 
+        onClick={() => setShowButtonHelpModal(true)}
+        title="Klik untuk melihat petunjuk penggunaan"
+        style={{
+          position: 'fixed',
+          bottom: '20px',
+          left: '20px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '56px',
+          height: '56px',
+          borderRadius: '50%',
+          background: '#3b82f6',
+          color: 'white',
+          fontSize: '28px',
+          fontWeight: 'bold',
+          userSelect: 'none',
+          zIndex: 1000,
+          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.5)',
+          transition: 'all 0.3s ease'
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'scale(1.1)';
+          e.currentTarget.style.boxShadow = '0 6px 16px rgba(59, 130, 246, 0.6)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'scale(1)';
+          e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.5)';
+        }}
+      >
+        ?
+      </div>
     </div>
   );
 }

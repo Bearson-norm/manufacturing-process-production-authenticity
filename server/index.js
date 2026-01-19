@@ -2162,12 +2162,12 @@ app.get('/api/reports/manufacturing', async (req, res) => {
     
     // Filter by date range if specified
     if (startDate) {
-      whereConditions.push('created_at::date >= $' + (params.length + 1) + '::date');
+      whereConditions.push('DATE(created_at) >= ?');
       params.push(startDate);
     }
     
     if (endDate) {
-      whereConditions.push('created_at::date <= $' + (params.length + 1) + '::date');
+      whereConditions.push('DATE(created_at) <= ?');
       params.push(endDate);
     }
     
@@ -2190,15 +2190,19 @@ app.get('/api/reports/manufacturing', async (req, res) => {
     
     // If type is specified, only query that table
     let queryToRun;
+    let queryParams;
     if (type && type !== 'all') {
       queryToRun = queries[type];
+      queryParams = params;
     } else {
       // Combine all queries with UNION
       queryToRun = `${queries.liquid} UNION ${queries.device} UNION ${queries.cartridge} ORDER BY created_at DESC`;
+      // Duplicate params for each UNION clause (3 times for 3 tables)
+      queryParams = [...params, ...params, ...params];
     }
     
     // Execute production query
-    db.all(queryToRun, params, async (err, productionRows) => {
+    db.all(queryToRun, queryParams, async (err, productionRows) => {
       if (err) {
         console.error('Error fetching production data:', err);
         return res.status(500).json({ error: err.message });

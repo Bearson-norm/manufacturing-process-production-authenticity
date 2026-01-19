@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './Login.css';
+import logoFoom from '../assets/Logo FOOM Hitam.webp';
 
 function Login({ setIsAuthenticated }) {
   const [username, setUsername] = useState('');
@@ -27,7 +28,36 @@ function Login({ setIsAuthenticated }) {
 
   return (
     <div className="login-container">
-      <div className="login-box">
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        width: '100%',
+        maxWidth: '500px'
+      }}>
+        {/* Logo centered above login box with white background */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          marginBottom: '24px',
+          background: 'white',
+          padding: '20px 40px',
+          borderRadius: '12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+        }}>
+          <img 
+            src={logoFoom} 
+            alt="FOOM Logo" 
+            style={{ 
+              height: '60px',
+              width: 'auto',
+              objectFit: 'contain'
+            }} 
+          />
+        </div>
+        
+        <div className="login-box">
         <h1>Manufacturing Process</h1>
         <h2>Production Authenticity System</h2>
         <form onSubmit={handleSubmit}>
@@ -55,49 +85,11 @@ function Login({ setIsAuthenticated }) {
           <button type="submit" className="login-button">Login</button>
         </form>
         <div className="production-options">
-          <h3>Select Production Type:</h3>
-          <div className="options-grid">
-            <button
-              type="button"
-              className="option-button"
-              onClick={() => {
-                if (localStorage.getItem('isAuthenticated') === 'true') {
-                  navigate('/production/liquid');
-                } else {
-                  setError('Please login first');
-                }
-              }}
-            >
-              Production Liquid
-            </button>
-            <button
-              type="button"
-              className="option-button"
-              onClick={() => {
-                if (localStorage.getItem('isAuthenticated') === 'true') {
-                  navigate('/production/device');
-                } else {
-                  setError('Please login first');
-                }
-              }}
-            >
-              Production Device
-            </button>
-            <button
-              type="button"
-              className="option-button"
-              onClick={() => {
-                if (localStorage.getItem('isAuthenticated') === 'true') {
-                  navigate('/production/cartridge');
-                } else {
-                  setError('Please login first');
-                }
-              }}
-            >
-              Production Cartridge
-            </button>
-          </div>
+          <p style={{ textAlign: 'center', fontSize: '16px', color: '#666', marginTop: '20px' }}>
+            Made by Internal FOOM
+          </p>
         </div>
+      </div>
       </div>
     </div>
   );
