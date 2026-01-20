@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './Production.css';
@@ -79,6 +79,7 @@ function ProductionDevice() {
     authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }]
   });
   const [authenticityValidationStatus, setAuthenticityValidationStatus] = useState({});
+  const [authenticityInvalidStatus, setAuthenticityInvalidStatus] = useState({});
   const [bufferData, setBufferData] = useState({
     pic: '',
     moNumber: '',
@@ -358,8 +359,10 @@ function ProductionDevice() {
   };
 
   const handleBufferNumberChange = (index, value) => {
+    // Hanya terima data numerik
+    const numericValue = value.replace(/\D/g, '');
     const newNumbers = [...bufferData.authenticityNumbers];
-    newNumbers[index] = value;
+    newNumbers[index] = numericValue;
     setBufferData({
       ...bufferData,
       authenticityNumbers: newNumbers
@@ -542,8 +545,10 @@ function ProductionDevice() {
   };
 
   const handleEditBufferNumberChange = (index, value) => {
+    // Hanya terima data numerik
+    const numericValue = value.replace(/\D/g, '');
     const newNumbers = [...editBufferData.authenticityNumbers];
-    newNumbers[index] = value;
+    newNumbers[index] = numericValue;
     setEditBufferData({
       ...editBufferData,
       authenticityNumbers: newNumbers
@@ -589,6 +594,14 @@ function ProductionDevice() {
   const validateAuthenticityRow = (index, firstAuth, lastAuth, isEdit = false) => {
     // Skip validation if fields are empty
     if (!firstAuth || !lastAuth || firstAuth.trim() === '' || lastAuth.trim() === '') {
+      // Clear invalid status for empty fields
+      if (!isEdit) {
+        setAuthenticityInvalidStatus(prev => {
+          const newStatus = { ...prev };
+          delete newStatus[index];
+          return newStatus;
+        });
+      }
       return { valid: true, message: '' }; // Allow empty fields
     }
 
@@ -597,6 +610,12 @@ function ProductionDevice() {
 
     // Check if values are valid numbers
     if (isNaN(first) || isNaN(last)) {
+      if (!isEdit) {
+        setAuthenticityInvalidStatus(prev => ({
+          ...prev,
+          [index]: 'First dan Last Authenticity harus berupa angka'
+        }));
+      }
       return { valid: false, message: 'First dan Last Authenticity harus berupa angka' };
     }
 
@@ -604,20 +623,38 @@ function ProductionDevice() {
 
     // Check if difference is negative
     if (difference < 0) {
+      if (!isEdit) {
+        setAuthenticityInvalidStatus(prev => ({
+          ...prev,
+          [index]: 'Selisih tidak boleh negatif'
+        }));
+      }
       return { valid: false, message: 'Selisih tidak boleh negatif' };
     }
 
     // Check if First and Last Authenticity are the same
     if (difference === 0) {
+      if (!isEdit) {
+        setAuthenticityInvalidStatus(prev => ({
+          ...prev,
+          [index]: 'First dan Last Authenticity tidak boleh sama'
+        }));
+      }
       return { valid: false, message: 'First dan Last Authenticity tidak boleh sama' };
     }
 
     // Check if difference is more than 7000
     if (difference > 7000) {
+      if (!isEdit) {
+        setAuthenticityInvalidStatus(prev => ({
+          ...prev,
+          [index]: 'Selisih tidak boleh lebih dari 7000'
+        }));
+      }
       return { valid: false, message: 'Selisih tidak boleh lebih dari 7000' };
     }
 
-    // Valid
+    // Valid - clear invalid status
     if (isEdit) {
       setEditAuthenticityValidationStatus(prev => ({
         ...prev,
@@ -628,12 +665,20 @@ function ProductionDevice() {
         ...prev,
         [index]: true
       }));
+      setAuthenticityInvalidStatus(prev => {
+        const newStatus = { ...prev };
+        delete newStatus[index];
+        return newStatus;
+      });
     }
 
     return { valid: true, message: 'Valid' };
   };
 
-  const handleValidateRow = (index, isEdit = false) => {
+  // Track if alert has been shown to prevent duplicate alerts
+  const validationAlertShown = useRef({});
+
+  const handleValidateRow = (index, isEdit = false, showAlert = true) => {
     const rows = isEdit ? editFormData.authenticityRows : formData.authenticityRows;
     const row = rows[index];
     
@@ -642,7 +687,19 @@ function ProductionDevice() {
     const result = validateAuthenticityRow(index, row.firstAuthenticity, row.lastAuthenticity, isEdit);
     
     if (!result.valid) {
-      alert(result.message);
+      const key = `${isEdit ? 'edit' : 'main'}_${index}`;
+      
+      // Only show alert if it hasn't been shown recently for this row
+      if (showAlert && !validationAlertShown.current[key]) {
+        alert(result.message);
+        validationAlertShown.current[key] = true;
+        
+        // Reset flag after a delay to allow re-validation if user fixes the issue
+        setTimeout(() => {
+          validationAlertShown.current[key] = false;
+        }, 3000);
+      }
+      
       if (isEdit) {
         setEditAuthenticityValidationStatus(prev => ({
           ...prev,
@@ -654,10 +711,14 @@ function ProductionDevice() {
           [index]: false
         }));
       }
+    } else {
+      // Reset alert flag if validation passes
+      const key = `${isEdit ? 'edit' : 'main'}_${index}`;
+      validationAlertShown.current[key] = false;
     }
   };
 
-  // Auto-validate on blur
+  // Auto-validate on blur - only show alert once
   const handleAuthenticityBlur = (index, isEdit = false) => {
     const rows = isEdit ? editFormData.authenticityRows : formData.authenticityRows;
     const row = rows[index];
@@ -668,8 +729,21 @@ function ProductionDevice() {
     const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
     const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
     
-    if (hasFirst || hasLast) {
-      handleValidateRow(index, isEdit);
+    // Only validate when both fields are filled
+    if (hasFirst && hasLast) {
+      // Use a small delay to prevent duplicate validation when blurring from one field to another
+      const key = `${isEdit ? 'edit' : 'main'}_${index}`;
+      
+      // Clear any existing timeout for this row
+      if (validationAlertShown.current[`timeout_${key}`]) {
+        clearTimeout(validationAlertShown.current[`timeout_${key}`]);
+      }
+      
+      // Validate after a short delay to ensure both blur events are processed
+      validationAlertShown.current[`timeout_${key}`] = setTimeout(() => {
+        handleValidateRow(index, isEdit, true);
+        delete validationAlertShown.current[`timeout_${key}`];
+      }, 150);
     }
   };
 
@@ -740,6 +814,12 @@ function ProductionDevice() {
         ...prev,
         [index]: false
       }));
+      // Clear invalid status when field changes
+      setAuthenticityInvalidStatus(prev => {
+        const newStatus = { ...prev };
+        delete newStatus[index];
+        return newStatus;
+      });
     }
   };
 
@@ -896,14 +976,35 @@ function ProductionDevice() {
     });
 
     if (rowsToValidate.length > 0) {
+      // Check if roll number is filled for rows with authenticity data
+      const rowsWithMissingRollNumber = rowsToValidate.filter((row, idx) => {
+        return !row.rollNumber || row.rollNumber.trim() === '';
+      });
+
+      if (rowsWithMissingRollNumber.length > 0) {
+        alert('Nomor roll tidak boleh kosong. Silakan isi nomor roll untuk semua row yang memiliki data authenticity.');
+        return;
+      }
+
+      // Check validation status but don't block confirm - just show warning
       const allValidated = rowsToValidate.every((row, idx) => {
         const originalIndex = formData.authenticityRows.findIndex(r => r === row);
         return authenticityValidationStatus[originalIndex] === true;
       });
 
       if (!allValidated) {
-        alert('Silakan validate semua row authenticity yang sudah diisi sebelum confirm');
-        return;
+        // Show warning but allow confirm
+        const hasInvalid = rowsToValidate.some((row, idx) => {
+          const originalIndex = formData.authenticityRows.findIndex(r => r === row);
+          return authenticityInvalidStatus[originalIndex];
+        });
+        
+        if (hasInvalid) {
+          const proceed = window.confirm('Ada authenticity data yang belum valid. Data yang tidak valid tidak akan bisa disubmit. Apakah Anda yakin ingin melanjutkan?');
+          if (!proceed) {
+            return;
+          }
+        }
       }
     }
 
@@ -977,7 +1078,7 @@ function ProductionDevice() {
     }
   };
 
-  // Helper function to validate authenticity data
+  // Helper function to validate authenticity data for submit
   const validateAuthenticityData = (inputs) => {
     for (const input of inputs) {
       if (input.authenticity_data && Array.isArray(input.authenticity_data)) {
@@ -990,6 +1091,40 @@ function ProductionDevice() {
             return {
               valid: false,
               message: `MO ${input.mo_number}: Ada authenticity data yang kosong. Pastikan semua First dan Last Authenticity sudah diisi.`
+            };
+          }
+          
+          // Validate the authenticity values
+          const first = parseInt(firstAuth);
+          const last = parseInt(lastAuth);
+          
+          if (isNaN(first) || isNaN(last)) {
+            return {
+              valid: false,
+              message: `MO ${input.mo_number}: First dan Last Authenticity harus berupa angka.`
+            };
+          }
+          
+          const difference = last - first;
+          
+          if (difference < 0) {
+            return {
+              valid: false,
+              message: `MO ${input.mo_number}: Selisih authenticity tidak boleh negatif.`
+            };
+          }
+          
+          if (difference === 0) {
+            return {
+              valid: false,
+              message: `MO ${input.mo_number}: First dan Last Authenticity tidak boleh sama.`
+            };
+          }
+          
+          if (difference > 7000) {
+            return {
+              valid: false,
+              message: `MO ${input.mo_number}: Selisih authenticity tidak boleh lebih dari 7000.`
             };
           }
         }
@@ -1159,6 +1294,16 @@ function ProductionDevice() {
     });
 
     if (rowsToValidate.length > 0) {
+      // Check if roll number is filled for rows with authenticity data
+      const rowsWithMissingRollNumber = rowsToValidate.filter((row, idx) => {
+        return !row.rollNumber || row.rollNumber.trim() === '';
+      });
+
+      if (rowsWithMissingRollNumber.length > 0) {
+        alert('Nomor roll tidak boleh kosong. Silakan isi nomor roll untuk semua row yang memiliki data authenticity.');
+        return;
+      }
+
       const allValidated = rowsToValidate.every((row, idx) => {
         const originalIndex = editFormData.authenticityRows.findIndex(r => r === row);
         return editAuthenticityValidationStatus[originalIndex] === true;
@@ -1883,6 +2028,7 @@ function ProductionDevice() {
                 const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
                 const isRowEmpty = !hasFirst && !hasLast;
                 const isValidated = authenticityValidationStatus[index] === true;
+                const isInvalid = authenticityInvalidStatus[index];
                 
                 return (
                   <div key={index} className="authenticity-row-input">
@@ -1931,6 +2077,25 @@ function ProductionDevice() {
                         title="Validated"
                       >
                         ✓ Valid
+                      </div>
+                    ) : isInvalid ? (
+                      <div
+                        className="validation-status-indicator"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '8px 16px',
+                          background: '#ef4444',
+                          color: 'white',
+                          borderRadius: '4px',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          minWidth: '100px'
+                        }}
+                        title={isInvalid}
+                      >
+                        ✗ Invalid
                       </div>
                     ) : (
                       <button
