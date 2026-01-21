@@ -369,6 +369,27 @@ function ProductionCartridge() {
     });
   };
 
+  const handleBufferNumberBlur = (index) => {
+    const currentValue = bufferData.authenticityNumbers[index]?.trim();
+    if (!currentValue) return; // Skip validation if field is empty
+
+    // Check for duplicates (excluding current index)
+    const duplicates = bufferData.authenticityNumbers.filter(
+      (num, idx) => idx !== index && num.trim() === currentValue && num.trim() !== ''
+    );
+
+    if (duplicates.length > 0) {
+      // Clear the duplicate value
+      const newNumbers = [...bufferData.authenticityNumbers];
+      newNumbers[index] = '';
+      setBufferData({
+        ...bufferData,
+        authenticityNumbers: newNumbers
+      });
+      alert(`Nomor authenticity "${currentValue}" sudah ada. Nomor tidak dapat duplikat.`);
+    }
+  };
+
   const handleConfirmBuffer = async () => {
     if (!bufferData.pic || !bufferData.moNumber || !bufferData.skuName) {
       alert('Silakan isi semua field yang wajib diisi');
@@ -423,12 +444,35 @@ function ProductionCartridge() {
   };
 
   const handleRejectNumberChange = (index, value) => {
+    // Hanya terima data numerik
+    const numericValue = value.replace(/\D/g, '');
     const newNumbers = [...rejectData.authenticityNumbers];
-    newNumbers[index] = value;
+    newNumbers[index] = numericValue;
     setRejectData({
       ...rejectData,
       authenticityNumbers: newNumbers
     });
+  };
+
+  const handleRejectNumberBlur = (index) => {
+    const currentValue = rejectData.authenticityNumbers[index]?.trim();
+    if (!currentValue) return; // Skip validation if field is empty
+
+    // Check for duplicates (excluding current index)
+    const duplicates = rejectData.authenticityNumbers.filter(
+      (num, idx) => idx !== index && num.trim() === currentValue && num.trim() !== ''
+    );
+
+    if (duplicates.length > 0) {
+      // Clear the duplicate value
+      const newNumbers = [...rejectData.authenticityNumbers];
+      newNumbers[index] = '';
+      setRejectData({
+        ...rejectData,
+        authenticityNumbers: newNumbers
+      });
+      alert(`Nomor authenticity "${currentValue}" sudah ada. Nomor tidak dapat duplikat.`);
+    }
   };
 
   const handleConfirmReject = async () => {
@@ -555,6 +599,27 @@ function ProductionCartridge() {
     });
   };
 
+  const handleEditBufferNumberBlur = (index) => {
+    const currentValue = editBufferData.authenticityNumbers[index]?.trim();
+    if (!currentValue) return; // Skip validation if field is empty
+
+    // Check for duplicates (excluding current index)
+    const duplicates = editBufferData.authenticityNumbers.filter(
+      (num, idx) => idx !== index && num.trim() === currentValue && num.trim() !== ''
+    );
+
+    if (duplicates.length > 0) {
+      // Clear the duplicate value
+      const newNumbers = [...editBufferData.authenticityNumbers];
+      newNumbers[index] = '';
+      setEditBufferData({
+        ...editBufferData,
+        authenticityNumbers: newNumbers
+      });
+      alert(`Nomor authenticity "${currentValue}" sudah ada. Nomor tidak dapat duplikat.`);
+    }
+  };
+
   const handleAddEditRejectNumber = () => {
     setEditRejectData({
       ...editRejectData,
@@ -573,12 +638,35 @@ function ProductionCartridge() {
   };
 
   const handleEditRejectNumberChange = (index, value) => {
+    // Hanya terima data numerik
+    const numericValue = value.replace(/\D/g, '');
     const newNumbers = [...editRejectData.authenticityNumbers];
-    newNumbers[index] = value;
+    newNumbers[index] = numericValue;
     setEditRejectData({
       ...editRejectData,
       authenticityNumbers: newNumbers
     });
+  };
+
+  const handleEditRejectNumberBlur = (index) => {
+    const currentValue = editRejectData.authenticityNumbers[index]?.trim();
+    if (!currentValue) return; // Skip validation if field is empty
+
+    // Check for duplicates (excluding current index)
+    const duplicates = editRejectData.authenticityNumbers.filter(
+      (num, idx) => idx !== index && num.trim() === currentValue && num.trim() !== ''
+    );
+
+    if (duplicates.length > 0) {
+      // Clear the duplicate value
+      const newNumbers = [...editRejectData.authenticityNumbers];
+      newNumbers[index] = '';
+      setEditRejectData({
+        ...editRejectData,
+        authenticityNumbers: newNumbers
+      });
+      alert(`Nomor authenticity "${currentValue}" sudah ada. Nomor tidak dapat duplikat.`);
+    }
   };
 
   const handleAddRow = () => {
@@ -774,34 +862,6 @@ function ProductionCartridge() {
   const handleRowChange = (index, field, value) => {
     const newRows = [...formData.authenticityRows];
     newRows[index][field] = value;
-    
-    // Auto-calculate Last Authenticity when First Authenticity is entered
-    if (field === 'firstAuthenticity' && value.trim() !== '') {
-      const firstNum = parseInt(value);
-      if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
-        // Calculate Last = First + rollNumber (if rollNumber exists and is valid), otherwise First + 1
-        const rollNum = parseInt(newRows[index].rollNumber);
-        const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
-          ? firstNum + rollNum 
-          : firstNum + 1;
-        newRows[index].lastAuthenticity = calculatedLast.toString();
-      }
-    }
-    
-    // Recalculate Last Authenticity when rollNumber changes (if First is set and Last is empty)
-    if (field === 'rollNumber') {
-      const firstValue = newRows[index].firstAuthenticity;
-      if (firstValue && firstValue.trim() !== '') {
-        const firstNum = parseInt(firstValue);
-        if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
-          const rollNum = parseInt(value);
-          const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
-            ? firstNum + rollNum 
-            : firstNum + 1;
-          newRows[index].lastAuthenticity = calculatedLast.toString();
-        }
-      }
-    }
     
     setFormData({
       ...formData,
@@ -1343,34 +1403,6 @@ function ProductionCartridge() {
   const handleEditRowChange = (index, field, value) => {
     const newRows = [...editFormData.authenticityRows];
     newRows[index][field] = value;
-    
-    // Auto-calculate Last Authenticity when First Authenticity is entered
-    if (field === 'firstAuthenticity' && value.trim() !== '') {
-      const firstNum = parseInt(value);
-      if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
-        // Calculate Last = First + rollNumber (if rollNumber exists and is valid), otherwise First + 1
-        const rollNum = parseInt(newRows[index].rollNumber);
-        const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
-          ? firstNum + rollNum 
-          : firstNum + 1;
-        newRows[index].lastAuthenticity = calculatedLast.toString();
-      }
-    }
-    
-    // Recalculate Last Authenticity when rollNumber changes (if First is set and Last is empty)
-    if (field === 'rollNumber') {
-      const firstValue = newRows[index].firstAuthenticity;
-      if (firstValue && firstValue.trim() !== '') {
-        const firstNum = parseInt(firstValue);
-        if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
-          const rollNum = parseInt(value);
-          const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
-            ? firstNum + rollNum 
-            : firstNum + 1;
-          newRows[index].lastAuthenticity = calculatedLast.toString();
-        }
-      }
-    }
     
     setEditFormData({
       ...editFormData,
@@ -2234,6 +2266,7 @@ function ProductionCartridge() {
                     placeholder="Enter authenticity number"
                     value={number}
                     onChange={(e) => handleBufferNumberChange(index, e.target.value)}
+                    onBlur={() => handleBufferNumberBlur(index)}
                     onKeyDown={(e) => handleBufferScannerKeyDown(e, index)}
                   />
                   {bufferData.authenticityNumbers.length > 1 && (
@@ -2356,6 +2389,7 @@ function ProductionCartridge() {
                     placeholder="Enter authenticity number"
                     value={number}
                     onChange={(e) => handleRejectNumberChange(index, e.target.value)}
+                    onBlur={() => handleRejectNumberBlur(index)}
                     onKeyDown={(e) => handleRejectScannerKeyDown(e, index)}
                   />
                   {rejectData.authenticityNumbers.length > 1 && (
@@ -2446,6 +2480,7 @@ function ProductionCartridge() {
                     type="text"
                     value={num}
                     onChange={(e) => handleEditBufferNumberChange(index, e.target.value)}
+                    onBlur={() => handleEditBufferNumberBlur(index)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -2551,6 +2586,7 @@ function ProductionCartridge() {
                     type="text"
                     value={num}
                     onChange={(e) => handleEditRejectNumberChange(index, e.target.value)}
+                    onBlur={() => handleEditRejectNumberBlur(index)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
