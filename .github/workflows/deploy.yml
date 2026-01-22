@@ -117,7 +117,7 @@ jobs:
             echo "NODE_ENV=production" > .env
             echo "PORT=1234" >> .env
             echo "DB_HOST=localhost" >> .env
-            echo "DB_PORT=5432" >> .env
+            echo "DB_PORT=5433" >> .env
             echo "DB_NAME=manufacturing_db" >> .env
             echo "DB_USER=admin" >> .env
             echo "DB_PASSWORD=Admin123" >> .env
@@ -144,11 +144,11 @@ jobs:
             if ! grep -q "^DB_PASSWORD=" .env; then
               echo "DB_PASSWORD=Admin123" >> .env
             fi
-            # Ensure DB_PORT is 5432 for production
+            # Ensure DB_PORT is 5433
             if grep -q "^DB_PORT=" .env; then
-              sed -i "s/^DB_PORT=.*/DB_PORT=5432/" .env
+              sed -i "s/^DB_PORT=.*/DB_PORT=5433/" .env
             else
-              echo "DB_PORT=5432" >> .env
+              echo "DB_PORT=5433" >> .env
             fi
           fi
           
