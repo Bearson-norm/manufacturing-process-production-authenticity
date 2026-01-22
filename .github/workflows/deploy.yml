@@ -111,6 +111,51 @@ jobs:
           cd manufacturing-app/server
           npm install --production
           
+          # Create production .env if it doesn't exist
+          if [ ! -f .env ]; then
+            echo "📝 Creating production .env file..."
+            echo "NODE_ENV=production" > .env
+            echo "PORT=1234" >> .env
+            echo "DB_HOST=localhost" >> .env
+            echo "DB_PORT=5432" >> .env
+            echo "DB_NAME=manufacturing_db" >> .env
+            echo "DB_USER=admin" >> .env
+            echo "DB_PASSWORD=Admin123" >> .env
+          else
+            # Ensure PORT is set to production port
+            if grep -q "^PORT=" .env; then
+              sed -i "s/^PORT=.*/PORT=1234/" .env
+            else
+              echo "PORT=1234" >> .env
+            fi
+            # Ensure NODE_ENV is production
+            if grep -q "^NODE_ENV=" .env; then
+              sed -i "s/^NODE_ENV=.*/NODE_ENV=production/" .env
+            else
+              echo "NODE_ENV=production" >> .env
+            fi
+            # Ensure DB_USER is admin
+            if grep -q "^DB_USER=" .env; then
+              sed -i "s/^DB_USER=.*/DB_USER=admin/" .env
+            else
+              echo "DB_USER=admin" >> .env
+            fi
+            # Ensure DB_PASSWORD is set
+            if ! grep -q "^DB_PASSWORD=" .env; then
+              echo "DB_PASSWORD=Admin123" >> .env
+            fi
+            # Ensure DB_PORT is 5432 for production
+            if grep -q "^DB_PORT=" .env; then
+              sed -i "s/^DB_PORT=.*/DB_PORT=5432/" .env
+            else
+              echo "DB_PORT=5432" >> .env
+            fi
+          fi
+          
+          # Verify .env file
+          echo "📝 Verifying production .env file..."
+          cat .env
+          
           # Restart application with PM2 using ecosystem config
           cd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
           mkdir -p logs
