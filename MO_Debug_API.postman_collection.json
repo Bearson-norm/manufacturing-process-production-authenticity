@@ -1,0 +1,249 @@
+{
+	"info": {
+		"_postman_id": "mo-debug-collection-001",
+		"name": "MO Debug & Query API",
+		"description": "Collection untuk debugging dan query Manufacturing Orders (MO) dari Odoo",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Query MO dari Odoo (Direct)",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/odoo/debug/query-mo?moNumber={{mo_number}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"odoo",
+						"debug",
+						"query-mo"
+					],
+					"query": [
+						{   
+							"key": "moNumber",
+							"value": "{{mo_number}}",
+							"description": "Nomor MO yang ingin dicari (e.g., PROD/MO/29884)"
+						}
+					]
+				},
+				"description": "Query MO langsung dari Odoo (tanpa filter date).\n\nResponse akan menampilkan:\n- Apakah MO ada di Odoo\n- Detail MO (SKU, quantity, note, create_date)\n- Analysis:\n  - days_old: Umur MO dalam hari\n  - within_30_days: Apakah < 30 hari?\n  - note_contains_cartridge: Apakah note ada kata 'cartridge'?\n  - would_pass_filter: Kesimpulan apakah akan muncul di mo-list"
+			},
+			"response": []
+		},
+		{
+			"name": "2. Get MO List by Type",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/odoo/mo-list?productionType={{production_type}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"odoo",
+						"mo-list"
+					],
+					"query": [
+						{
+							"key": "productionType",
+							"value": "{{production_type}}",
+							"description": "Tipe produksi: cartridge, liquid, atau device"
+						}
+					]
+				},
+				"description": "Mendapatkan list MO dari cache berdasarkan production type.\n\nFilter:\n- Note harus mengandung production type (case-insensitive)\n- create_date dalam 30 hari terakhir\n- Sorted by create_date DESC"
+			},
+			"response": []
+		},
+		{
+			"name": "3. Check MO in Cache",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/odoo/debug/mo-sync?moNumber={{mo_number}}",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"odoo",
+						"debug",
+						"mo-sync"
+					],
+					"query": [
+						{
+							"key": "moNumber",
+							"value": "{{mo_number}}",
+							"description": "Nomor MO (optional, jika kosong akan tampilkan status umum)"
+						}
+					]
+				},
+				"description": "Check status MO di cache database.\n\nResponse:\n- lastSync: Waktu terakhir sync\n- hoursSinceLastSync: Berapa jam sejak sync terakhir\n- syncStatus: OK / OUTDATED / NEVER_SYNCED\n- totalMosInCache: Total MO di cache\n- moFound: true/false (jika query dengan moNumber)\n- mosByType: Statistik MO per tipe produksi"
+			},
+			"response": []
+		},
+		{
+			"name": "4. Trigger Manual Sync",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/admin/sync-mo",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"admin",
+						"sync-mo"
+					]
+				},
+				"description": "Trigger manual sync MO dari Odoo ke cache.\n\nProses:\n1. Query Odoo untuk semua MO (cartridge, liquid, device)\n2. Filter berdasarkan date range (30 hari)\n3. Insert/Update ke cache database\n\nProses berjalan di background, check server logs untuk progress.\nTunggu 30-60 detik sebelum check cache."
+			},
+			"response": []
+		},
+		{
+			"name": "5. Check Sync Status",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/odoo/debug/mo-sync",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"odoo",
+						"debug",
+						"mo-sync"
+					]
+				},
+				"description": "Check status sync umum (tanpa moNumber parameter).\n\nResponse:\n- lastSync: Timestamp sync terakhir\n- hoursSinceLastSync: Durasi sejak sync terakhir\n- syncStatus: Status (OK/OUTDATED/NEVER_SYNCED)\n- totalMosInCache: Total MO di database\n- mosByType: Breakdown MO per production type"
+			},
+			"response": []
+		},
+		{
+			"name": "6. Get All Cartridge MOs",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/odoo/mo-list?productionType=cartridge",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"odoo",
+						"mo-list"
+					],
+					"query": [
+						{
+							"key": "productionType",
+							"value": "cartridge"
+						}
+					]
+				},
+				"description": "Get semua MO cartridge dari cache (30 hari terakhir)"
+			},
+			"response": []
+		},
+		{
+			"name": "7. Get All Liquid MOs",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/odoo/mo-list?productionType=liquid",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"odoo",
+						"mo-list"
+					],
+					"query": [
+						{
+							"key": "productionType",
+							"value": "liquid"
+						}
+					]
+				},
+				"description": "Get semua MO liquid dari cache (30 hari terakhir)"
+			},
+			"response": []
+		},
+		{
+			"name": "8. Get All Device MOs",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/odoo/mo-list?productionType=device",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"odoo",
+						"mo-list"
+					],
+					"query": [
+						{
+							"key": "productionType",
+							"value": "device"
+						}
+					]
+				},
+				"description": "Get semua MO device dari cache (30 hari terakhir)"
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "mo_number",
+			"value": "PROD/MO/29884",
+			"type": "string"
+		},
+		{
+			"key": "production_type",
+			"value": "cartridge",
+			"type": "string"
+		}
+	]
+}

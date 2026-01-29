@@ -5129,22 +5129,55 @@ cron.schedule('10 */6 * * *', () => {
   timezone: "Asia/Jakarta"
 });
 
-// Run initial sync on server start (after 30 seconds delay)
-setTimeout(() => {
+// Run initial sync on server start (immediate for faster startup)
+// Check if this is a fresh start or restart
+const runInitialSync = () => {
   console.log('🚀 [Scheduler] Running initial tasks...');
-  updateMoDataFromOdoo();
-  syncProductionData();
-  // Send MO list after a delay to ensure MO data is updated first
-  setTimeout(() => {
-    sendMoListToExternalAPI();
-  }, 35000);
-}, 30000);
+  
+  // Check last sync time to avoid duplicate sync on quick restarts
+  db.get('SELECT MAX(fetched_at) as last_sync FROM odoo_mo_cache', [], (err, row) => {
+    if (err) {
+      console.error('Error checking last sync:', err);
+      // Run sync anyway if error
+      updateMoDataFromOdoo();
+      syncProductionData();
+      return;
+    }
+    
+    const lastSync = row?.last_sync ? new Date(row.last_sync) : null;
+    const now = new Date();
+    const hoursSinceSync = lastSync ? (now - lastSync) / (1000 * 60 * 60) : 999;
+    
+    if (hoursSinceSync > 1) {
+      // Only sync if last sync was more than 1 hour ago
+      console.log(`⏰ [Scheduler] Last sync was ${hoursSinceSync.toFixed(2)} hours ago, running sync...`);
+      updateMoDataFromOdoo();
+      syncProductionData();
+      
+      // Send MO list after sync completes (delay to ensure MO data is updated)
+      setTimeout(() => {
+        sendMoListToExternalAPI();
+      }, 45000);
+    } else {
+      console.log(`✅ [Scheduler] Recent sync found (${hoursSinceSync.toFixed(2)} hours ago), skipping initial sync`);
+    }
+  });
+};
+
+// Run initial sync after database is ready (reduced delay for faster startup)
+setTimeout(runInitialSync, 5000);
 
 console.log('📅 [Scheduler] Schedulers initialized:');
-console.log('   - MO data update: Every 6 hours');
-console.log('   - Cleanup old MO data: Daily at 2 AM');
-console.log('   - Sync production data: Every 12 hours');
-console.log('   - Send MO list to external API: Every 6 hours (10 minutes after MO update)');
+console.log('   - MO data update: Every 6 hours (cron: 0 */6 * * *)');
+console.log('   - Cleanup old MO data: Daily at 2 AM (cron: 0 2 * * *)');
+console.log('   - Sync production data: Every 12 hours (cron: 0 */12 * * *)');
+console.log('   - Send MO list to external API: Every 6 hours (cron: 10 */6 * * *)');
+console.log('   - Timezone: Asia/Jakarta');
+console.log('   - Initial sync: Will run 5 seconds after server start (if needed)');
+
+// Log next scheduled times
+const now = new Date();
+console.log(`⏰ [Scheduler] Current time: ${now.toISOString()} (${now.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB)`);
 
 // Serve static files AFTER all API routes (only for non-API routes)
 // In production, client build is in ../client-build, in development it's in ../client/public
