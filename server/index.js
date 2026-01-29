@@ -3879,9 +3879,11 @@ app.get('/api/odoo/mo-list', async (req, res) => {
       FROM odoo_mo_cache
       WHERE (LOWER(note) LIKE LOWER($1)`;
     
-    // Add OR conditions for common typos if filtering for cartridge
+    // Add OR conditions for variations
     if (noteFilter === 'cartridge') {
       query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3)`;
+    } else if (noteFilter === 'liquid') {
+      query += ` OR LOWER(note) LIKE LOWER($2)`;
     }
     
     query += `)
@@ -3893,11 +3895,14 @@ app.get('/api/odoo/mo-list', async (req, res) => {
     // Search pattern with wildcards for case-insensitive match
     const searchPattern = `%${noteFilter}%`;
     
-    // Additional patterns for typo tolerance (cartridge specific)
+    // Additional patterns for variations
     let queryParams = [searchPattern];
     if (noteFilter === 'cartridge') {
       queryParams.push('%cartirdge%', '%cartrige%');
       console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: cartridge, cartirdge, cartrige`);
+    } else if (noteFilter === 'liquid') {
+      queryParams.push('%TEAM LIQUID%');
+      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TEAM LIQUID, liquid`);
     } else {
       console.log(`🔍 [MO List] Querying cache for ${productionType} with pattern: ${searchPattern}`);
     }
@@ -4527,7 +4532,11 @@ async function updateMoDataFromOdoo() {
             ['note', 'ilike', 'cartrige']     // Another typo (missing d)
           ];
         } else if (noteFilter === 'liquid') {
-          domainFilter = ['note', 'ilike', 'liquid'];
+          // Use OR condition to catch "TEAM LIQUID" and "liquid" variations
+          domainFilter = ['|', 
+            ['note', 'ilike', 'TEAM LIQUID'],  // Primary filter: TEAM LIQUID
+            ['note', 'ilike', 'liquid']         // Fallback: any note with "liquid"
+          ];
         } else if (noteFilter === 'device') {
           domainFilter = ['note', 'ilike', 'device'];
         } else {
@@ -4564,8 +4573,17 @@ async function updateMoDataFromOdoo() {
             ['note', 'ilike', 'cartrige'],
             ["create_date", ">=", startDateStr]
           ];
+        } else if (noteFilter === 'liquid') {
+          // Need '&' operator to combine OR condition with date filter
+          combinedDomain = [
+            '&',  // AND operator
+            '|',  // OR for TEAM LIQUID and liquid
+            ['note', 'ilike', 'TEAM LIQUID'],
+            ['note', 'ilike', 'liquid'],
+            ["create_date", ">=", startDateStr]
+          ];
         } else {
-          // Simple AND (implicit) for liquid and device
+          // Simple AND (implicit) for device
           combinedDomain = [
             domainFilter,
             ["create_date", ">=", startDateStr]
