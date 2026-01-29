@@ -3564,15 +3564,16 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
     }
 
     try {
-      // First, fetch MO data from last 7 days from Odoo
+      // First, fetch MO data from last 60 days from Odoo (for consistency with sync)
       const https = require('https');
       const url = require('url');
       const ODOO_URL = `${config.odooBaseUrl}/web/dataset/call_kw/mrp.production/search_read`;
       const COOKIE_HEADER = `session_id=${config.sessionId}; session_id=${config.sessionId}`;
 
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0] + ' 00:00:00';
+      const daysBack = 60; // Keep same as cleanup function
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - daysBack);
+      const startDateStr = startDate.toISOString().split('T')[0] + ' 00:00:00';
 
       const requestData = {
         "jsonrpc": "2.0",
@@ -3580,7 +3581,7 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
         "params": {
           "model": "mrp.production",
           "method": "search_read",
-          "args": [[["create_date", ">=", sevenDaysAgoStr]]],
+          "args": [[["create_date", ">=", startDateStr]]],
           "kwargs": {
             "fields": ["id", "name", "product_id", "product_qty", "product_uom_id", "note", "create_date"],
             "limit": 10000,
@@ -3870,24 +3871,38 @@ app.get('/api/odoo/mo-list', async (req, res) => {
   }
 
   try {
-    // Get MO data from cache filtered by note and create_date (last 7 days)
-    // Use case-insensitive search for note field
-    // Note: SQLite LOWER() function for case-insensitive comparison
-    const query = `
+    // Get MO data from cache filtered by note and create_date (last 30 days)
+    // Use case-insensitive search for note field with typo tolerance
+    // Note: PostgreSQL LOWER() function for case-insensitive comparison
+    let query = `
       SELECT mo_number, sku_name, quantity, uom, note, create_date
       FROM odoo_mo_cache
-      WHERE LOWER(note) LIKE LOWER(?)
-        AND create_date::TIMESTAMP >= NOW() - INTERVAL '7 days'
+      WHERE (LOWER(note) LIKE LOWER($1)`;
+    
+    // Add OR conditions for common typos if filtering for cartridge
+    if (noteFilter === 'cartridge') {
+      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3)`;
+    }
+    
+    query += `)
+        AND create_date::TIMESTAMP >= NOW() - INTERVAL '30 days'
       ORDER BY create_date DESC
       LIMIT 1000
     `;
 
     // Search pattern with wildcards for case-insensitive match
     const searchPattern = `%${noteFilter}%`;
+    
+    // Additional patterns for typo tolerance (cartridge specific)
+    let queryParams = [searchPattern];
+    if (noteFilter === 'cartridge') {
+      queryParams.push('%cartirdge%', '%cartrige%');
+      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: cartridge, cartirdge, cartrige`);
+    } else {
+      console.log(`🔍 [MO List] Querying cache for ${productionType} with pattern: ${searchPattern}`);
+    }
 
-    console.log(`🔍 [MO List] Querying cache for ${productionType} with pattern: ${searchPattern}`);
-
-    db.all(query, [searchPattern], (err, rows) => {
+    db.all(query, queryParams, (err, rows) => {
       if (err) {
         console.error('Error fetching MO data from cache:', err);
         return res.status(500).json({
@@ -3902,7 +3917,7 @@ app.get('/api/odoo/mo-list', async (req, res) => {
           success: true,
           count: 0,
           data: [],
-          message: `No MO records found for ${productionType} in the last 7 days`
+          message: `No MO records found for ${productionType} in the last 30 days`
         });
       }
 
@@ -3930,6 +3945,299 @@ app.get('/api/odoo/mo-list', async (req, res) => {
       error: error.message || 'Failed to fetch MO data from cache'
     });
   }
+});
+
+// Debug endpoint - Check MO sync status
+app.get('/api/odoo/debug/mo-sync', async (req, res) => {
+  const { moNumber } = req.query;
+  
+  try {
+    const debugInfo = {
+      timestamp: new Date().toISOString(),
+      moNumber: moNumber || 'all'
+    };
+    
+    // Check last sync time
+    const lastSyncQuery = 'SELECT MAX(fetched_at) as last_sync, COUNT(*) as total_mos FROM odoo_mo_cache';
+    db.get(lastSyncQuery, [], (err, syncInfo) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      
+      debugInfo.lastSync = syncInfo?.last_sync;
+      debugInfo.totalMosInCache = syncInfo?.total_mos;
+      
+      if (syncInfo?.last_sync) {
+        const lastSync = new Date(syncInfo.last_sync);
+        const now = new Date();
+        const hoursSinceSync = (now - lastSync) / (1000 * 60 * 60);
+        debugInfo.hoursSinceLastSync = hoursSinceSync.toFixed(2);
+        debugInfo.syncStatus = hoursSinceSync > 6 ? 'OUTDATED' : 'OK';
+      } else {
+        debugInfo.syncStatus = 'NEVER_SYNCED';
+      }
+      
+      // If specific MO number is provided, check if it exists
+      if (moNumber) {
+        db.get(
+          'SELECT * FROM odoo_mo_cache WHERE mo_number = $1',
+          [moNumber],
+          (err2, moRow) => {
+            if (err2) {
+              debugInfo.moCheckError = err2.message;
+            } else if (moRow) {
+              debugInfo.moFound = true;
+              debugInfo.moData = moRow;
+            } else {
+              debugInfo.moFound = false;
+              debugInfo.message = `MO ${moNumber} not found in cache. Possible reasons: not synced yet, create_date > 7 days old, note doesn't match filter, or doesn't exist in Odoo.`;
+            }
+            
+            return res.json(debugInfo);
+          }
+        );
+      } else {
+        // Get recent MOs by production type
+        const recentQuery = `
+          SELECT production_type, COUNT(*) as count 
+          FROM (
+            SELECT 
+              CASE 
+                WHEN LOWER(note) LIKE '%cartridge%' THEN 'cartridge'
+                WHEN LOWER(note) LIKE '%liquid%' THEN 'liquid'
+                WHEN LOWER(note) LIKE '%device%' THEN 'device'
+                ELSE 'unknown'
+              END as production_type
+            FROM odoo_mo_cache
+            WHERE create_date::TIMESTAMP >= NOW() - INTERVAL '30 days'
+          ) as categorized
+          GROUP BY production_type
+        `;
+        
+        db.all(recentQuery, [], (err3, typeStats) => {
+          if (err3) {
+            debugInfo.typeStatsError = err3.message;
+          } else {
+            debugInfo.mosByType = typeStats;
+          }
+          
+          return res.json(debugInfo);
+        });
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error.message || 'Failed to get debug info'
+    });
+  }
+});
+
+// Manual trigger MO sync from Odoo
+app.post('/api/admin/sync-mo', async (req, res) => {
+  try {
+    console.log('🔄 [Manual Sync] Triggered by API call');
+    
+    res.json({
+      success: true,
+      message: 'MO sync started. Check server logs for progress.',
+      timestamp: new Date().toISOString()
+    });
+    
+    // Run sync in background
+    updateMoDataFromOdoo();
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to start sync'
+    });
+  }
+});
+
+// Check if MO has been used in production
+app.get('/api/production/check-mo-used', (req, res) => {
+  const { moNumber, productionType } = req.query;
+  
+  if (!moNumber) {
+    return res.status(400).json({ error: 'moNumber parameter is required' });
+  }
+  
+  const type = productionType || 'liquid'; // default to liquid
+  const table = `production_${type}`;
+  
+  // Check if MO exists in production table
+  db.all(
+    `SELECT id, session_id, leader_name, shift_number, pic, status, created_at 
+     FROM ${table} 
+     WHERE mo_number = $1
+     ORDER BY created_at DESC`,
+    [moNumber],
+    (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      
+      if (rows && rows.length > 0) {
+        const activeCount = rows.filter(r => r.status === 'active').length;
+        const completedCount = rows.filter(r => r.status === 'completed').length;
+        
+        return res.json({
+          used: true,
+          count: rows.length,
+          activeCount,
+          completedCount,
+          records: rows,
+          message: `MO ${moNumber} telah digunakan ${rows.length} kali (${activeCount} active, ${completedCount} completed)`
+        });
+      } else {
+        return res.json({
+          used: false,
+          count: 0,
+          activeCount: 0,
+          completedCount: 0,
+          records: [],
+          message: `MO ${moNumber} belum pernah digunakan`
+        });
+      }
+    }
+  );
+});
+
+// Debug endpoint - Query specific MO from Odoo directly
+app.get('/api/odoo/debug/query-mo', async (req, res) => {
+  const { moNumber } = req.query;
+  
+  if (!moNumber) {
+    return res.status(400).json({ error: 'moNumber parameter is required' });
+  }
+  
+  getAdminConfig(async (err, config) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    
+    try {
+      const https = require('https');
+      const url = require('url');
+      
+      const ODOO_URL = `${config.odooBaseUrl}/web/dataset/call_kw/mrp.production/search_read`;
+      const COOKIE_HEADER = `session_id=${config.sessionId}; session_id=${config.sessionId}`;
+      
+      // Query specific MO by name (no date filter)
+      const requestData = {
+        "jsonrpc": "2.0",
+        "method": "call",
+        "params": {
+          "model": "mrp.production",
+          "method": "search_read",
+          "args": [[["name", "=", moNumber]]],
+          "kwargs": {
+            "fields": ["id", "name", "product_id", "product_qty", "product_uom_id", "note", "create_date", "state"],
+            "limit": 1
+          }
+        }
+      };
+      
+      const parsedUrl = url.parse(ODOO_URL);
+      const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || 443,
+        path: parsedUrl.path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': COOKIE_HEADER
+        }
+      };
+      
+      const postData = JSON.stringify(requestData);
+      
+      const response = await new Promise((resolve, reject) => {
+        const req = https.request(options, (res) => {
+          let responseData = '';
+          res.on('data', (chunk) => {
+            responseData += chunk;
+          });
+          res.on('end', () => {
+            try {
+              const jsonResponse = JSON.parse(responseData);
+              resolve(jsonResponse);
+            } catch (e) {
+              reject(new Error('Failed to parse Odoo response: ' + e.message));
+            }
+          });
+        });
+        
+        req.on('error', (error) => {
+          reject(error);
+        });
+        
+        req.setTimeout(30000, () => {
+          req.destroy();
+          reject(new Error('Request timeout'));
+        });
+        
+        req.write(postData);
+        req.end();
+      });
+      
+      if (response.error) {
+        return res.status(500).json({
+          success: false,
+          error: response.error.message || 'Odoo API error',
+          odooError: response.error
+        });
+      }
+      
+      if (response.result && Array.isArray(response.result) && response.result.length > 0) {
+        const mo = response.result[0];
+        const moData = {
+          found: true,
+          mo_number: mo.name,
+          sku_name: mo.product_id ? mo.product_id[1] : 'N/A',
+          quantity: mo.product_qty || 0,
+          uom: mo.product_uom_id ? mo.product_uom_id[1] : '',
+          note: mo.note || '',
+          create_date: mo.create_date,
+          state: mo.state,
+          raw_data: mo
+        };
+        
+        // Check if it would pass filters
+        const createDate = new Date(mo.create_date);
+        const now = new Date();
+        const daysOld = (now - createDate) / (1000 * 60 * 60 * 24);
+        
+        // Check for cartridge with typo tolerance
+        const noteText = (mo.note || '').toLowerCase();
+        const hasCartridge = noteText.includes('cartridge') || 
+                           noteText.includes('cartirdge') || // Common typo
+                           noteText.includes('cartrige');    // Another common typo
+        
+        moData.analysis = {
+          create_date_parsed: createDate.toISOString(),
+          days_old: daysOld.toFixed(2),
+          within_30_days: daysOld <= 30,
+          note_contains_cartridge: hasCartridge,
+          would_pass_filter: daysOld <= 30 && hasCartridge,
+          server_time: now.toISOString()
+        };
+        
+        return res.json(moData);
+      } else {
+        return res.json({
+          found: false,
+          message: `MO ${moNumber} not found in Odoo`,
+          server_time: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error('Error querying Odoo:', error);
+      return res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to query Odoo'
+      });
+    }
+  });
 });
 
 // Combined Production API endpoints
@@ -4210,8 +4518,14 @@ async function updateMoDataFromOdoo() {
         const noteFilter = productionType.toLowerCase();
         let domainFilter;
         
+        // Build domain filter with OR condition for common typos
         if (noteFilter === 'cartridge') {
-          domainFilter = ['note', 'ilike', 'cartridge'];
+          // Use OR condition to catch common typos: cartridge, cartirdge, cartrige
+          domainFilter = ['|', '|', 
+            ['note', 'ilike', 'cartridge'],
+            ['note', 'ilike', 'cartirdge'],  // Common typo (i instead of r, rd instead of dr)
+            ['note', 'ilike', 'cartrige']     // Another typo (missing d)
+          ];
         } else if (noteFilter === 'liquid') {
           domainFilter = ['note', 'ilike', 'liquid'];
         } else if (noteFilter === 'device') {
@@ -4220,22 +4534,43 @@ async function updateMoDataFromOdoo() {
           continue;
         }
 
-        // Calculate date 7 days ago
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0] + ' 00:00:00';
+        // Calculate date range (configurable, default 30 days for better coverage)
+        const daysBack = 30; // Increased from 7 to 30 days to ensure all recent MOs are captured
+        const now = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - daysBack);
+        const startDateStr = startDate.toISOString().split('T')[0] + ' 00:00:00';
+        const nowStr = now.toISOString().split('T')[0] + ' 23:59:59';
 
         console.log(`🔍 [Scheduler] Querying Odoo for ${productionType} with filter:`, domainFilter);
-        console.log(`📅 [Scheduler] Date range: From ${sevenDaysAgoStr} to now`);
+        console.log(`📅 [Scheduler] Server time: ${now.toISOString()}`);
+        console.log(`📅 [Scheduler] Date range: From ${startDateStr} (${daysBack} days ago) to ${nowStr}`);
+        console.log(`📅 [Scheduler] Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
+        console.log(`🎯 [Scheduler] Looking for MO: PROD/MO/29884 in the results...`);
 
         const ODOO_URL = `${config.odooBaseUrl}/web/dataset/call_kw/mrp.production/search_read`;
         const COOKIE_HEADER = `session_id=${config.sessionId}; session_id=${config.sessionId}`;
 
-        // Combine domain filter with date filter (last 7 days)
-        const combinedDomain = [
-          domainFilter,
-          ["create_date", ">=", sevenDaysAgoStr]
-        ];
+        // Combine domain filter with date filter (last N days)
+        // For Odoo, we need flat array with AND operator when combining OR with date
+        let combinedDomain;
+        if (noteFilter === 'cartridge') {
+          // Need '&' operator to combine OR condition with date filter
+          combinedDomain = [
+            '&',  // AND operator
+            '|', '|',  // OR for 3 typo variations
+            ['note', 'ilike', 'cartridge'],
+            ['note', 'ilike', 'cartirdge'],
+            ['note', 'ilike', 'cartrige'],
+            ["create_date", ">=", startDateStr]
+          ];
+        } else {
+          // Simple AND (implicit) for liquid and device
+          combinedDomain = [
+            domainFilter,
+            ["create_date", ">=", startDateStr]
+          ];
+        }
 
         const requestData = {
           "jsonrpc": "2.0",
@@ -4310,6 +4645,31 @@ async function updateMoDataFromOdoo() {
         if (response.result && Array.isArray(response.result)) {
           console.log(`📊 [Scheduler] Received ${response.result.length} MO records from Odoo for ${productionType}`);
           
+          // Log first 5 and last 5 MO numbers for debugging
+          if (response.result.length > 0) {
+            const moNumbers = response.result.map(mo => mo.name).filter(Boolean);
+            const firstFive = moNumbers.slice(0, 5);
+            const lastFive = moNumbers.slice(-5);
+            console.log(`📋 [Scheduler] First 5 MOs: ${firstFive.join(', ')}`);
+            console.log(`📋 [Scheduler] Last 5 MOs: ${lastFive.join(', ')}`);
+            
+            // Check if specific MO is in the result
+            const targetMo = 'PROD/MO/29884';
+            if (moNumbers.includes(targetMo)) {
+              console.log(`✅ [Scheduler] Found ${targetMo} in Odoo response!`);
+              const moData = response.result.find(mo => mo.name === targetMo);
+              console.log(`   Details:`, {
+                name: moData.name,
+                product: moData.product_id?.[1],
+                qty: moData.product_qty,
+                note: moData.note,
+                create_date: moData.create_date
+              });
+            } else {
+              console.log(`⚠️  [Scheduler] ${targetMo} NOT found in Odoo response for ${productionType}`);
+            }
+          }
+          
           if (response.result.length === 0) {
             console.log(`ℹ️  [Scheduler] No MO records found for ${productionType} (filter: note ilike '${noteFilter}')`);
             continue;
@@ -4372,7 +4732,7 @@ async function updateMoDataFromOdoo() {
   });
 }
 
-// Function to cleanup MO data older than 7 days
+// Function to cleanup MO data older than 60 days (keep more data for historical reference)
 function cleanupOldMoData() {
   console.log('🧹 [Scheduler] Starting cleanup of old MO data...');
   
@@ -4385,9 +4745,10 @@ function cleanupOldMoData() {
     try {
       const https = require('https');
       const url = require('url');
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0] + ' 00:00:00';
+      const cleanupDaysBack = 60; // Keep data for 60 days before cleanup
+      const cleanupDate = new Date();
+      cleanupDate.setDate(cleanupDate.getDate() - cleanupDaysBack);
+      const cleanupDateStr = cleanupDate.toISOString().split('T')[0] + ' 00:00:00';
 
       const ODOO_URL = `${config.odooBaseUrl}/web/dataset/call_kw/mrp.production/search_read`;
       const COOKIE_HEADER = `session_id=${config.sessionId}; session_id=${config.sessionId}`;
@@ -4398,7 +4759,7 @@ function cleanupOldMoData() {
         "params": {
           "model": "mrp.production",
           "method": "search_read",
-          "args": [[["create_date", ">=", sevenDaysAgoStr]]],
+          "args": [[["create_date", ">=", cleanupDateStr]]],
           "kwargs": {
             "fields": ["id", "name"],
             "limit": 10000,
@@ -4768,22 +5129,55 @@ cron.schedule('10 */6 * * *', () => {
   timezone: "Asia/Jakarta"
 });
 
-// Run initial sync on server start (after 30 seconds delay)
-setTimeout(() => {
+// Run initial sync on server start (immediate for faster startup)
+// Check if this is a fresh start or restart
+const runInitialSync = () => {
   console.log('🚀 [Scheduler] Running initial tasks...');
-  updateMoDataFromOdoo();
-  syncProductionData();
-  // Send MO list after a delay to ensure MO data is updated first
-  setTimeout(() => {
-    sendMoListToExternalAPI();
-  }, 35000);
-}, 30000);
+  
+  // Check last sync time to avoid duplicate sync on quick restarts
+  db.get('SELECT MAX(fetched_at) as last_sync FROM odoo_mo_cache', [], (err, row) => {
+    if (err) {
+      console.error('Error checking last sync:', err);
+      // Run sync anyway if error
+      updateMoDataFromOdoo();
+      syncProductionData();
+      return;
+    }
+    
+    const lastSync = row?.last_sync ? new Date(row.last_sync) : null;
+    const now = new Date();
+    const hoursSinceSync = lastSync ? (now - lastSync) / (1000 * 60 * 60) : 999;
+    
+    if (hoursSinceSync > 1) {
+      // Only sync if last sync was more than 1 hour ago
+      console.log(`⏰ [Scheduler] Last sync was ${hoursSinceSync.toFixed(2)} hours ago, running sync...`);
+      updateMoDataFromOdoo();
+      syncProductionData();
+      
+      // Send MO list after sync completes (delay to ensure MO data is updated)
+      setTimeout(() => {
+        sendMoListToExternalAPI();
+      }, 45000);
+    } else {
+      console.log(`✅ [Scheduler] Recent sync found (${hoursSinceSync.toFixed(2)} hours ago), skipping initial sync`);
+    }
+  });
+};
+
+// Run initial sync after database is ready (reduced delay for faster startup)
+setTimeout(runInitialSync, 5000);
 
 console.log('📅 [Scheduler] Schedulers initialized:');
-console.log('   - MO data update: Every 6 hours');
-console.log('   - Cleanup old MO data: Daily at 2 AM');
-console.log('   - Sync production data: Every 12 hours');
-console.log('   - Send MO list to external API: Every 6 hours (10 minutes after MO update)');
+console.log('   - MO data update: Every 6 hours (cron: 0 */6 * * *)');
+console.log('   - Cleanup old MO data: Daily at 2 AM (cron: 0 2 * * *)');
+console.log('   - Sync production data: Every 12 hours (cron: 0 */12 * * *)');
+console.log('   - Send MO list to external API: Every 6 hours (cron: 10 */6 * * *)');
+console.log('   - Timezone: Asia/Jakarta');
+console.log('   - Initial sync: Will run 5 seconds after server start (if needed)');
+
+// Log next scheduled times
+const now = new Date();
+console.log(`⏰ [Scheduler] Current time: ${now.toISOString()} (${now.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB)`);
 
 // Serve static files AFTER all API routes (only for non-API routes)
 // In production, client build is in ../client-build, in development it's in ../client/public
