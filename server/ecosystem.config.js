@@ -54,6 +54,32 @@ module.exports = {
       kill_timeout: 5000,
       wait_ready: true,
       listen_timeout: 10000
+    },
+    {
+      name: 'manufacturing-app-kmi',
+      script: './index.js',
+      instances: 1, // Single instance for KMI
+      exec_mode: 'fork', // Fork mode for KMI
+      env: {
+        NODE_ENV: 'kmi',
+        PORT: 3366
+      },
+      // Auto restart on crash
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '500M',
+      // Logging
+      error_file: './logs/kmi-err.log',
+      out_file: './logs/kmi-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      merge_logs: true,
+      // Performance monitoring
+      min_uptime: '10s',
+      max_restarts: 10,
+      // Graceful shutdown
+      kill_timeout: 5000,
+      wait_ready: true,
+      listen_timeout: 10000
     }
   ]
 };

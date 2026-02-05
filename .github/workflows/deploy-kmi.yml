@@ -1,0 +1,648 @@
+name: Deploy to KMI
+
+on:
+  push:
+    branches:
+      - KMI
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (DANGEROUS - only use if CI passed)'
+        required: false
+        default: 'false'
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Verify KMI configuration files exist
+      run: |
+        echo "🔍 Verifying KMI configuration files..."
+        
+        # Check ecosystem.config.js contains KMI config
+        if ! grep -q "manufacturing-app-kmi" server/ecosystem.config.js; then
+          echo "❌ ERROR: manufacturing-app-kmi not found in ecosystem.config.js"
+          exit 1
+        fi
+        echo "✅ ecosystem.config.js contains KMI configuration"
+        
+        # Check nginx config exists
+        if [ ! -f "nginx/manufacturing-app-kmi.conf" ]; then
+          echo "❌ ERROR: nginx/manufacturing-app-kmi.conf not found"
+          exit 1
+        fi
+        echo "✅ nginx/manufacturing-app-kmi.conf exists"
+        
+        # Verify nginx config contains correct port and domain
+        if ! grep -q "kmi.moof-set.web.id" nginx/manufacturing-app-kmi.conf; then
+          echo "❌ ERROR: nginx config missing kmi.moof-set.web.id"
+          exit 1
+        fi
+        if ! grep -q "127.0.0.1:3366" nginx/manufacturing-app-kmi.conf; then
+          echo "❌ ERROR: nginx config missing port 3366"
+          exit 1
+        fi
+        echo "✅ nginx config contains correct domain and port"
+        
+        # Check workflow file exists
+        if [ ! -f ".github/workflows/deploy-kmi.yml" ]; then
+          echo "❌ ERROR: deploy-kmi.yml workflow not found"
+          exit 1
+        fi
+        echo "✅ deploy-kmi.yml workflow exists"
+        
+        echo "✅ All KMI configuration files verified"
+        
+    - name: Install root dependencies
+      run: |
+        echo "📦 Installing root dependencies..."
+        npm install
+        
+    - name: Install and verify server dependencies
+      run: |
+        echo "📦 Installing server dependencies..."
+        cd server
+        npm install
+        
+        # Verify server files exist
+        if [ ! -f "index.js" ]; then
+          echo "❌ ERROR: server/index.js not found"
+          exit 1
+        fi
+        echo "✅ server/index.js exists"
+        
+        if [ ! -f "database.js" ]; then
+          echo "❌ ERROR: server/database.js not found"
+          exit 1
+        fi
+        echo "✅ server/database.js exists"
+        
+        if [ ! -f "config.js" ]; then
+          echo "❌ ERROR: server/config.js not found"
+          exit 1
+        fi
+        echo "✅ server/config.js exists"
+        
+        if [ ! -f "ecosystem.config.js" ]; then
+          echo "❌ ERROR: server/ecosystem.config.js not found"
+          exit 1
+        fi
+        echo "✅ server/ecosystem.config.js exists"
+        
+        # Syntax check server files
+        echo "🔍 Checking server JavaScript syntax..."
+        node -c index.js || (echo "❌ ERROR: server/index.js syntax error" && exit 1)
+        node -c database.js || (echo "❌ ERROR: server/database.js syntax error" && exit 1)
+        node -c config.js || (echo "❌ ERROR: server/config.js syntax error" && exit 1)
+        node -c ecosystem.config.js || (echo "❌ ERROR: server/ecosystem.config.js syntax error" && exit 1)
+        echo "✅ All server files syntax check passed"
+        
+        cd ..
+        
+    - name: Install and build client
+      run: |
+        echo "📦 Installing client dependencies..."
+        cd client
+        npm install
+        
+        echo "🏗️  Building client..."
+        npm run build
+        
+        # Verify build output exists
+        if [ ! -d "build" ]; then
+          echo "❌ ERROR: client build directory not found"
+          exit 1
+        fi
+        echo "✅ client/build directory exists"
+        
+        if [ ! -f "build/index.html" ]; then
+          echo "❌ ERROR: client/build/index.html not found"
+          exit 1
+        fi
+        echo "✅ client/build/index.html exists"
+        
+        # Check build size (should not be empty)
+        BUILD_SIZE=$(du -sh build | cut -f1)
+        echo "📊 Build size: $BUILD_SIZE"
+        
+        if [ ! -s "build/index.html" ]; then
+          echo "❌ ERROR: client/build/index.html is empty"
+          exit 1
+        fi
+        echo "✅ Client build completed successfully"
+        
+        cd ..
+        
+    - name: Verify deployment package structure
+      run: |
+        echo "📦 Verifying deployment package structure..."
+        
+        # Create temporary deployment structure
+        mkdir -p test-deploy/server
+        mkdir -p test-deploy/client-build
+        mkdir -p test-deploy/nginx
+        
+        # Copy files
+        cp -r server/* test-deploy/server/ 2>/dev/null || true
+        cp -r client/build/* test-deploy/client-build/ 2>/dev/null || true
+        cp nginx/manufacturing-app-kmi.conf test-deploy/nginx/ 2>/dev/null || true
+        
+        # Verify structure
+        if [ ! -f "test-deploy/server/index.js" ]; then
+          echo "❌ ERROR: Deployment package missing server/index.js"
+          exit 1
+        fi
+        
+        if [ ! -f "test-deploy/client-build/index.html" ]; then
+          echo "❌ ERROR: Deployment package missing client-build/index.html"
+          exit 1
+        fi
+        
+        if [ ! -f "test-deploy/nginx/manufacturing-app-kmi.conf" ]; then
+          echo "❌ ERROR: Deployment package missing nginx config"
+          exit 1
+        fi
+        
+        if [ ! -f "test-deploy/server/ecosystem.config.js" ]; then
+          echo "❌ ERROR: Deployment package missing ecosystem.config.js"
+          exit 1
+        fi
+        
+        echo "✅ Deployment package structure verified"
+        
+        # Cleanup
+        rm -rf test-deploy
+        
+    - name: Verify KMI-specific configurations
+      run: |
+        echo "🔍 Verifying KMI-specific configurations..."
+        
+        # Check ecosystem.config.js for KMI port
+        if ! grep -q "PORT: 3366" server/ecosystem.config.js; then
+          echo "❌ ERROR: KMI port 3366 not found in ecosystem.config.js"
+          exit 1
+        fi
+        echo "✅ KMI port 3366 configured in ecosystem.config.js"
+        
+        # Check ecosystem.config.js for KMI process name
+        if ! grep -q "name: 'manufacturing-app-kmi'" server/ecosystem.config.js; then
+          echo "❌ ERROR: manufacturing-app-kmi process name not found"
+          exit 1
+        fi
+        echo "✅ KMI process name configured correctly"
+        
+        # Check nginx config for KMI database path (should contain manufacturing-app-kmi)
+        if ! grep -q "manufacturing-app-kmi" nginx/manufacturing-app-kmi.conf; then
+          echo "❌ ERROR: nginx config missing manufacturing-app-kmi path"
+          exit 1
+        fi
+        echo "✅ nginx config contains correct KMI path"
+        
+        echo "✅ All KMI-specific configurations verified"
+        
+    - name: Test summary
+      run: |
+        echo "✅ =========================================="
+        echo "✅ All CI tests passed successfully!"
+        echo "✅ Ready for deployment to KMI environment"
+        echo "✅ =========================================="
+        
+    continue-on-error: false
+
+  deploy:
+    needs: ci
+    if: |
+      (github.ref == 'refs/heads/KMI' || github.event_name == 'workflow_dispatch') &&
+      (needs.ci.result == 'success' || github.event.inputs.skip_tests == 'true')
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Warning if tests were skipped
+      if: github.event.inputs.skip_tests == 'true'
+      run: |
+        echo "⚠️  =========================================="
+        echo "⚠️  WARNING: Tests were skipped!"
+        echo "⚠️  This is DANGEROUS and not recommended."
+        echo "⚠️  Only use this if CI tests passed previously."
+        echo "⚠️  =========================================="
+      
+    - name: Pre-deployment verification
+      run: |
+        echo "🔍 Pre-deployment verification..."
+        
+        # Verify critical files exist
+        REQUIRED_FILES=(
+          "server/index.js"
+          "server/database.js"
+          "server/config.js"
+          "server/ecosystem.config.js"
+          "nginx/manufacturing-app-kmi.conf"
+          ".github/workflows/deploy-kmi.yml"
+        )
+        
+        for file in "${REQUIRED_FILES[@]}"; do
+          if [ ! -f "$file" ]; then
+            echo "❌ ERROR: Required file not found: $file"
+            exit 1
+          fi
+        done
+        echo "✅ All required files present"
+        
+        # Verify KMI config in ecosystem
+        if ! grep -q "manufacturing-app-kmi" server/ecosystem.config.js; then
+          echo "❌ ERROR: KMI configuration missing in ecosystem.config.js"
+          exit 1
+        fi
+        echo "✅ KMI configuration verified in ecosystem.config.js"
+        
+        # Verify nginx config
+        if ! grep -q "kmi.moof-set.web.id" nginx/manufacturing-app-kmi.conf; then
+          echo "❌ ERROR: nginx config missing KMI domain"
+          exit 1
+        fi
+        if ! grep -q "3366" nginx/manufacturing-app-kmi.conf; then
+          echo "❌ ERROR: nginx config missing port 3366"
+          exit 1
+        fi
+        echo "✅ nginx configuration verified"
+        
+        echo "✅ Pre-deployment verification passed"
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: package-lock.json
+        
+    - name: Install dependencies
+      run: |
+        npm install
+        cd client && npm install && cd ..
+        cd server && npm install && cd ..
+        
+    - name: Build client
+      run: |
+        cd client
+        echo "🏗️  Building client for KMI deployment..."
+        npm run build
+        
+        # Verify build output
+        if [ ! -d "build" ]; then
+          echo "❌ ERROR: Client build directory not created"
+          exit 1
+        fi
+        
+        if [ ! -f "build/index.html" ]; then
+          echo "❌ ERROR: Client build missing index.html"
+          exit 1
+        fi
+        
+        # Check build is not empty
+        BUILD_FILES=$(find build -type f | wc -l)
+        if [ "$BUILD_FILES" -lt 10 ]; then
+          echo "❌ ERROR: Client build seems incomplete (only $BUILD_FILES files)"
+          exit 1
+        fi
+        
+        echo "✅ Client build verified: $BUILD_FILES files"
+        echo "✅ Client build completed successfully"
+        
+    - name: Create deployment package
+      run: |
+        mkdir -p deploy
+        cp -r server deploy/
+        cp -r client/build deploy/client-build
+        cp package.json deploy/
+        cp -r .github/scripts deploy/scripts || true
+        # Ensure ecosystem.config.js is included
+        if [ -f server/ecosystem.config.js ]; then
+          cp server/ecosystem.config.js deploy/server/
+        fi
+        # Copy nginx config for KMI
+        mkdir -p deploy/nginx
+        if [ -f nginx/manufacturing-app-kmi.conf ]; then
+          cp nginx/manufacturing-app-kmi.conf deploy/nginx/
+        fi
+        tar -czf deploy.tar.gz deploy/
+        
+    - name: Deploy to VPS
+      uses: appleboy/scp-action@master
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        port: ${{ secrets.VPS_PORT || 22 }}
+        source: "deploy.tar.gz"
+        target: "/home/${{ secrets.VPS_USER }}/deployments"
+        
+    - name: Execute deployment script on VPS
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        port: ${{ secrets.VPS_PORT || 22 }}
+        script: |
+          set -e
+          
+          KMI_DIR="/home/${{ secrets.VPS_USER }}/deployments/manufacturing-app-kmi"
+          KMI_PORT=3366
+          DB_NAME="KMI_Manufacturing_Order"
+          DB_USER="admin"
+          DB_PASSWORD="Admin123"
+          DB_PORT="5433"
+          
+          echo "🚀 Starting KMI deployment..."
+          echo "📍 KMI directory: $KMI_DIR"
+          echo "📍 KMI port: $KMI_PORT"
+          echo "📍 Database: $DB_NAME"
+          
+          cd /home/${{ secrets.VPS_USER }}/deployments
+          tar -xzf deploy.tar.gz
+          
+          # Verify extracted files
+          echo "📋 Checking extracted files..."
+          ls -la deploy/ || echo "⚠️  Deploy directory check"
+          ls -la deploy/server/ || echo "⚠️  Server directory check"
+          
+          # Backup existing KMI deployment
+          if [ -d "$KMI_DIR" ]; then
+            echo "📦 Creating KMI backup..."
+            mv "$KMI_DIR" "${KMI_DIR}-backup-$(date +%Y%m%d-%H%M%S)"
+          fi
+          
+          # Create new KMI deployment directory
+          echo "📁 Creating KMI directory..."
+          mkdir -p "$KMI_DIR"
+          mv deploy/* "$KMI_DIR/"
+          
+          # Verify files moved correctly
+          echo "📋 Verifying deployment files..."
+          if [ ! -d "$KMI_DIR/server" ]; then
+            echo "❌ ERROR: Server directory not found in $KMI_DIR"
+            ls -la "$KMI_DIR/"
+            exit 1
+          fi
+          
+          if [ ! -f "$KMI_DIR/server/index.js" ]; then
+            echo "❌ ERROR: index.js not found in $KMI_DIR/server"
+            ls -la "$KMI_DIR/server/"
+            exit 1
+          fi
+          
+          # Verify client-build exists
+          if [ ! -d "$KMI_DIR/client-build" ]; then
+            echo "❌ ERROR: client-build directory not found in $KMI_DIR"
+            ls -la "$KMI_DIR/"
+            exit 1
+          fi
+          
+          if [ ! -f "$KMI_DIR/client-build/index.html" ]; then
+            echo "❌ ERROR: index.html not found in $KMI_DIR/client-build"
+            ls -la "$KMI_DIR/client-build/" | head -10
+            exit 1
+          fi
+          
+          echo "✅ Client build verified: $(ls -1 $KMI_DIR/client-build | wc -l) files"
+          
+          # Grant database privileges to admin user for KMI_Manufacturing_Order
+          echo "🔐 Granting database privileges..."
+          sudo -u postgres psql << EOF || echo "⚠️  Database privileges may already be granted"
+            GRANT CONNECT ON DATABASE "$DB_NAME" TO $DB_USER;
+            \c "$DB_NAME"
+            GRANT ALL ON SCHEMA public TO $DB_USER;
+            GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $DB_USER;
+            GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $DB_USER;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO $DB_USER;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO $DB_USER;
+          EOF
+          echo "✅ Database privileges granted"
+          
+          # Install/update dependencies
+          echo "📦 Installing KMI dependencies..."
+          cd "$KMI_DIR/server"
+          npm install --production
+          
+          # Create KMI .env if it doesn't exist
+          if [ ! -f .env ]; then
+            echo "📝 Creating KMI .env file..."
+            echo "NODE_ENV=kmi" > .env
+            echo "PORT=$KMI_PORT" >> .env
+            echo "DB_HOST=localhost" >> .env
+            echo "DB_PORT=$DB_PORT" >> .env
+            echo "DB_NAME=$DB_NAME" >> .env
+            echo "DB_USER=$DB_USER" >> .env
+            echo "DB_PASSWORD=$DB_PASSWORD" >> .env
+          else
+            # Ensure PORT is set to KMI port
+            if grep -q "^PORT=" .env; then
+              sed -i "s/^PORT=.*/PORT=$KMI_PORT/" .env
+            else
+              echo "PORT=$KMI_PORT" >> .env
+            fi
+            # Ensure NODE_ENV is kmi
+            if grep -q "^NODE_ENV=" .env; then
+              sed -i "s/^NODE_ENV=.*/NODE_ENV=kmi/" .env
+            else
+              echo "NODE_ENV=kmi" >> .env
+            fi
+            # Ensure DB_NAME is KMI_Manufacturing_Order
+            if grep -q "^DB_NAME=" .env; then
+              sed -i "s/^DB_NAME=.*/DB_NAME=$DB_NAME/" .env
+            else
+              echo "DB_NAME=$DB_NAME" >> .env
+            fi
+            # Ensure DB_USER is admin
+            if grep -q "^DB_USER=" .env; then
+              sed -i "s/^DB_USER=.*/DB_USER=$DB_USER/" .env
+            else
+              echo "DB_USER=$DB_USER" >> .env
+            fi
+            # Ensure DB_PASSWORD is set
+            if ! grep -q "^DB_PASSWORD=" .env; then
+              echo "DB_PASSWORD=$DB_PASSWORD" >> .env
+            fi
+            # Ensure DB_PORT is correct
+            if grep -q "^DB_PORT=" .env; then
+              sed -i "s/^DB_PORT=.*/DB_PORT=$DB_PORT/" .env
+            else
+              echo "DB_PORT=$DB_PORT" >> .env
+            fi
+          fi
+          
+          # Verify .env file
+          echo "📝 Verifying KMI .env file..."
+          cat .env
+          
+          # Create logs directory
+          mkdir -p logs
+          
+          # Restart KMI application with PM2
+          echo "🔄 Restarting KMI application with PM2..."
+          cd "$KMI_DIR/server"
+          
+          # Delete existing process if exists
+          pm2 delete manufacturing-app-kmi 2>/dev/null || echo "No existing KMI process to delete"
+          
+          # Verify current directory and files
+          echo "📋 Current directory: $(pwd)"
+          echo "📋 Files in server directory:"
+          ls -la
+          
+          # Start application with PM2
+          echo "🚀 Starting KMI application..."
+          if [ -f ecosystem.config.js ]; then
+            echo "📋 Using ecosystem.config.js (KMI config)"
+            # Use --only to start only the KMI app from ecosystem file
+            pm2 start ecosystem.config.js --only manufacturing-app-kmi --update-env
+          else
+            echo "📋 Using direct start with index.js"
+            pm2 start index.js --name manufacturing-app-kmi --instances 1 --cwd "$KMI_DIR/server" --env NODE_ENV=kmi --env PORT=$KMI_PORT
+          fi
+          
+          # Verify PM2 process started
+          echo "⏳ Waiting 2 seconds for PM2 to register process..."
+          sleep 2
+          
+          echo "📊 PM2 Status:"
+          pm2 status
+          
+          # Check if process is running
+          if pm2 list | grep -q "manufacturing-app-kmi"; then
+            echo "✅ PM2 process 'manufacturing-app-kmi' is registered"
+          else
+            echo "❌ ERROR: PM2 process 'manufacturing-app-kmi' NOT found!"
+            echo "📋 PM2 list output:"
+            pm2 list
+            echo "📋 PM2 logs:"
+            pm2 logs manufacturing-app-kmi --lines 20 --nostream || true
+            exit 1
+          fi
+          
+          pm2 save
+          echo "✅ PM2 process saved"
+          
+          # Wait a bit for app to start and initialize database
+          echo "⏳ Waiting for application to start and initialize database..."
+          sleep 10
+          
+          # Setup nginx config for KMI
+          echo "📝 Setting up nginx config for KMI..."
+          NGINX_CONF_SOURCE=""
+          NGINX_CONF_AVAILABLE="/etc/nginx/sites-available/manufacturing-app-kmi.conf"
+          NGINX_CONF_ENABLED="/etc/nginx/sites-enabled/manufacturing-app-kmi.conf"
+          
+          # Try to find nginx config - check deployment package first
+          if [ -f "$KMI_DIR/nginx/manufacturing-app-kmi.conf" ]; then
+            NGINX_CONF_SOURCE="$KMI_DIR/nginx/manufacturing-app-kmi.conf"
+            echo "   ✅ Found nginx config in deployment package"
+          elif [ -f "/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-kmi.conf" ]; then
+            NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-kmi.conf"
+            echo "   ✅ Found nginx config in deployments/nginx"
+          elif [ -f "/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-kmi.conf" ]; then
+            NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-kmi.conf"
+            echo "   ✅ Found nginx config in user nginx directory"
+          else
+            echo "   ⚠️  Nginx config not found, skipping nginx setup"
+            echo "   💡 Please setup manually: cp nginx/manufacturing-app-kmi.conf /etc/nginx/sites-available/"
+          fi
+          
+          if [ -n "$NGINX_CONF_SOURCE" ] && [ -f "$NGINX_CONF_SOURCE" ]; then
+            # Update nginx config with correct user path
+            echo "   📋 Updating nginx config with correct paths..."
+            # Create temp config with replaced paths
+            sed "s|/home/foom|/home/${{ secrets.VPS_USER }}|g" "$NGINX_CONF_SOURCE" > /tmp/manufacturing-app-kmi.conf.tmp
+            
+            # Copy nginx config
+            echo "   📋 Copying nginx config from: $NGINX_CONF_SOURCE"
+            sudo cp /tmp/manufacturing-app-kmi.conf.tmp "$NGINX_CONF_AVAILABLE"
+            rm -f /tmp/manufacturing-app-kmi.conf.tmp
+            echo "   ✅ Nginx config copied to $NGINX_CONF_AVAILABLE"
+            
+            # Enable config
+            if [ ! -L "$NGINX_CONF_ENABLED" ] && [ ! -f "$NGINX_CONF_ENABLED" ]; then
+              sudo ln -s "$NGINX_CONF_AVAILABLE" "$NGINX_CONF_ENABLED"
+              echo "   ✅ Nginx config enabled"
+            fi
+            
+            # Test and reload nginx
+            echo "   🧪 Testing nginx configuration..."
+            if sudo nginx -t 2>&1 | grep -q "successful"; then
+              echo "   ✅ Nginx config test passed"
+              sudo systemctl reload nginx
+              echo "   ✅ Nginx reloaded successfully"
+              # Verify nginx is running
+              sudo systemctl status nginx --no-pager -l | head -5
+            else
+              echo "   ❌ Nginx config test failed!"
+              sudo nginx -t
+              echo "   ⚠️  Nginx not reloaded - please fix config manually"
+            fi
+          fi
+          
+          # Health check
+          echo "🏥 Checking KMI health..."
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          HEALTH_CHECK_PASSED=false
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HEALTH_CHECK=$(curl -s http://localhost:$KMI_PORT/health || echo "failed")
+            if echo "$HEALTH_CHECK" | grep -q "healthy"; then
+              echo "✅ KMI health check passed!"
+              HEALTH_CHECK_PASSED=true
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "⏳ Health check attempt $RETRY_COUNT/$MAX_RETRIES failed, retrying in 3 seconds..."
+              echo "   Response: $HEALTH_CHECK"
+              sleep 3
+            fi
+          done
+          
+          if [ "$HEALTH_CHECK_PASSED" = false ]; then
+            echo "❌ CRITICAL: KMI health check FAILED after $MAX_RETRIES attempts!"
+            echo "🔄 Attempting rollback to previous version..."
+            
+            # Find latest backup
+            LATEST_BACKUP=$(ls -dt /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app-kmi-backup-* 2>/dev/null | head -1)
+            if [ -n "$LATEST_BACKUP" ]; then
+              echo "📦 Rolling back to: $LATEST_BACKUP"
+              rm -rf "$KMI_DIR"
+              cp -r "$LATEST_BACKUP" "$KMI_DIR"
+              cd "$KMI_DIR/server"
+              pm2 restart manufacturing-app-kmi
+              pm2 save
+              echo "✅ Rollback completed. Please check the application manually."
+            else
+              echo "⚠️  No backup found for rollback. Manual intervention required!"
+            fi
+            
+            exit 1
+          fi
+          
+          # Cleanup old KMI backups (keep last 3)
+          echo "🧹 Cleaning up old KMI backups..."
+          cd /home/${{ secrets.VPS_USER }}/deployments
+          ls -dt manufacturing-app-kmi-backup-* 2>/dev/null | tail -n +4 | xargs rm -rf || true
+          
+          # Cleanup
+          rm -f deploy.tar.gz
+          
+          echo "✅ KMI deployment completed!"
+          echo "📍 KMI app running on port: $KMI_PORT"
+          echo "📍 Subdomain: kmi.moof-set.web.id"
+          pm2 status | grep manufacturing-app-kmi || echo "⚠️  Check PM2 status manually"

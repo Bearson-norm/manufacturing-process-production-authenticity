@@ -5,12 +5,12 @@
  * Output dalam format JSON yang rapi
  * 
  * Usage: 
- *   node scripts/query_mrp_production_by_date.js [session_id] --date-start "2025-01-15"
- *   node scripts/query_mrp_production_by_date.js [session_id] --date-finished "2025-01-15"
- *   node scripts/query_mrp_production_by_date.js [session_id] --date-from "2025-01-01" --date-to "2025-01-31"
- *   node scripts/query_mrp_production_by_date.js [session_id] --create-date "2025-01-15"
+ *   node query_mrp_bydate.js [session_id] --date-start "2025-01-15"
+ *   node query_mrp_bydate.js [session_id] --date-finished "2025-01-15"
+ *   node query_mrp_bydate.js [session_id] --date-from "2025-01-01" --date-to "2025-01-31"
+ *   node query_mrp_bydate.js [session_id] --create-date "2025-01-15"
  * 
- * Opsi filter waktu:
+ * Opsi filter waktu (mendukung format --key=value atau --key value):
  *   --date-start=DATE      : Filter berdasarkan tanggal mulai produksi (date_start)
  *   --date-finished=DATE   : Filter berdasarkan tanggal selesai produksi (date_finished)
  *   --create-date=DATE     : Filter berdasarkan tanggal dibuat MO (create_date)
@@ -22,19 +22,20 @@
  * 
  * Contoh:
  *   # MO yang dibuat pada tanggal tertentu
- *   node scripts/query_mrp_production_by_date.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae --create-date "2025-01-15"
+ *   node query_mrp_bydate.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae --create-date "2025-01-15"
+ *   node query_mrp_bydate.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae --create-date="2025-01-15"
  * 
  *   # MO yang selesai pada tanggal tertentu
- *   node scripts/query_mrp_production_by_date.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae --date-finished "2025-01-15"
+ *   node query_mrp_bydate.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae --date-finished "2025-01-15"
  * 
  *   # MO yang dibuat dalam range tanggal
- *   node scripts/query_mrp_production_by_date.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae --date-from "2025-01-01" --date-to "2025-01-31"
+ *   node query_mrp_bydate.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae --date-from "2025-01-01" --date-to "2025-01-31"
  * 
  *   # JSON only output
- *   node scripts/query_mrp_production_by_date.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae --date-finished "2025-01-15" --json-only
+ *   node query_mrp_bydate.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae --date-finished "2025-01-15" --json-only
  * 
  *   # Help
- *   node scripts/query_mrp_production_by_date.js --help
+ *   node query_mrp_bydate.js --help
  */
 
 const https = require('https');
@@ -46,16 +47,16 @@ const args = process.argv.slice(2);
 // Show help if requested (check first, before parsing)
 if (args.includes('--help') || args.includes('-h')) {
     console.log(`
-Usage: node scripts/query_mrp_production_by_date.js [session_id] [options]
+Usage: node query_mrp_bydate.js [session_id] [options]
 
-Options:
+Options (supports both --key=value and --key value formats):
   --date-start=DATE        Filter by production start date (date_start)
   --date-finished=DATE     Filter by production finish date (date_finished)
   --create-date=DATE       Filter by MO creation date (create_date)
   --date-from=DATE         Filter from date (for create_date)
   --date-to=DATE           Filter to date (for create_date)
   --date-range=FROM,TO     Filter date range (for create_date)
-  --limit=N                Limit number of records (default: 10)
+  --limit=N                Limit number of records (default: 20)
   --offset=N               Offset for pagination (default: 0)
   --json-only              Output JSON only (no summary)
   --help, -h               Show this help message
@@ -63,17 +64,18 @@ Options:
 Date Format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS
 
 Examples:
-  # MO created on specific date
-  node scripts/query_mrp_production_by_date.js [session_id] --create-date="2025-01-15"
+  # MO created on specific date (both formats work)
+  node query_mrp_bydate.js [session_id] --create-date "2025-01-15"
+  node query_mrp_bydate.js [session_id] --create-date="2025-01-15"
   
   # MO finished on specific date
-  node scripts/query_mrp_production_by_date.js [session_id] --date-finished="2025-01-15"
+  node query_mrp_bydate.js [session_id] --date-finished "2025-01-15"
   
   # MO created in date range
-  node scripts/query_mrp_production_by_date.js [session_id] --date-from="2025-01-01" --date-to="2025-01-31"
+  node query_mrp_bydate.js [session_id] --date-from "2025-01-01" --date-to "2025-01-31"
   
   # JSON only output
-  node scripts/query_mrp_production_by_date.js [session_id] --date-finished="2025-01-15" --json-only
+  node query_mrp_bydate.js [session_id] --date-finished "2025-01-15" --json-only
 
 Session ID:
   Can be provided as first argument, or via environment variable ODOO_SESSION_ID
@@ -102,45 +104,116 @@ for (let i = 0; i < args.length; i++) {
     }
 }
 
+// Track consumed argument indices to avoid processing values twice
+const consumedIndices = new Set();
+
+// Helper function to get argument value (supports both --key=value and --key value formats)
+function getArgValue(arg, index) {
+    if (arg.includes('=')) {
+        // Format: --key=value
+        return arg.split('=')[1];
+    } else {
+        // Format: --key value (check next argument)
+        if (index + 1 < args.length && !args[index + 1].startsWith('--')) {
+            consumedIndices.add(index + 1); // Mark next argument as consumed
+            return args[index + 1];
+        }
+        return null;
+    }
+}
+
 // Then parse other arguments
 args.forEach((arg, index) => {
-    if (arg.startsWith('--date-start=')) {
-        dateStart = arg.split('=')[1];
-    } else if (arg.startsWith('--date-finished=')) {
-        dateFinished = arg.split('=')[1];
-    } else if (arg.startsWith('--create-date=')) {
-        createDate = arg.split('=')[1];
-    } else if (arg.startsWith('--date-from=')) {
-        dateFrom = arg.split('=')[1];
-    } else if (arg.startsWith('--date-to=')) {
-        dateTo = arg.split('=')[1];
-    } else if (arg.startsWith('--date-range=')) {
-        const range = arg.split('=')[1].split(',');
-        if (range.length === 2) {
-            dateFrom = range[0].trim();
-            dateTo = range[1].trim();
+    // Skip if this argument was already consumed as a value
+    if (consumedIndices.has(index)) {
+        return;
+    }
+    
+    if (arg.startsWith('--date-start')) {
+        const value = getArgValue(arg, index);
+        if (value) {
+            dateStart = value;
         } else {
-            console.error('❌ Error: --date-range requires format: FROM,TO');
+            console.error('❌ Error: --date-start requires a value');
             process.exit(1);
         }
-    } else if (arg.startsWith('--limit=')) {
-        const limitValue = parseInt(arg.split('=')[1]);
-        if (isNaN(limitValue) || limitValue < 1) {
-            console.error('❌ Error: --limit must be a positive number');
+    } else if (arg.startsWith('--date-finished')) {
+        const value = getArgValue(arg, index);
+        if (value) {
+            dateFinished = value;
+        } else {
+            console.error('❌ Error: --date-finished requires a value');
             process.exit(1);
         }
-        limit = limitValue;
-    } else if (arg.startsWith('--offset=')) {
-        const offsetValue = parseInt(arg.split('=')[1]);
-        if (isNaN(offsetValue) || offsetValue < 0) {
-            console.error('❌ Error: --offset must be a non-negative number');
+    } else if (arg.startsWith('--create-date')) {
+        const value = getArgValue(arg, index);
+        if (value) {
+            createDate = value;
+        } else {
+            console.error('❌ Error: --create-date requires a value');
             process.exit(1);
         }
-        offset = offsetValue;
+    } else if (arg.startsWith('--date-from')) {
+        const value = getArgValue(arg, index);
+        if (value) {
+            dateFrom = value;
+        } else {
+            console.error('❌ Error: --date-from requires a value');
+            process.exit(1);
+        }
+    } else if (arg.startsWith('--date-to')) {
+        const value = getArgValue(arg, index);
+        if (value) {
+            dateTo = value;
+        } else {
+            console.error('❌ Error: --date-to requires a value');
+            process.exit(1);
+        }
+    } else if (arg.startsWith('--date-range')) {
+        const value = getArgValue(arg, index);
+        if (value) {
+            const range = value.split(',');
+            if (range.length === 2) {
+                dateFrom = range[0].trim();
+                dateTo = range[1].trim();
+            } else {
+                console.error('❌ Error: --date-range requires format: FROM,TO');
+                process.exit(1);
+            }
+        } else {
+            console.error('❌ Error: --date-range requires a value');
+            process.exit(1);
+        }
+    } else if (arg.startsWith('--limit')) {
+        const value = getArgValue(arg, index);
+        if (value) {
+            const limitValue = parseInt(value);
+            if (isNaN(limitValue) || limitValue < 1) {
+                console.error('❌ Error: --limit must be a positive number');
+                process.exit(1);
+            }
+            limit = limitValue;
+        } else {
+            console.error('❌ Error: --limit requires a value');
+            process.exit(1);
+        }
+    } else if (arg.startsWith('--offset')) {
+        const value = getArgValue(arg, index);
+        if (value) {
+            const offsetValue = parseInt(value);
+            if (isNaN(offsetValue) || offsetValue < 0) {
+                console.error('❌ Error: --offset must be a non-negative number');
+                process.exit(1);
+            }
+            offset = offsetValue;
+        } else {
+            console.error('❌ Error: --offset requires a value');
+            process.exit(1);
+        }
     } else if (arg === '--json-only') {
         jsonOnly = true;
-    } else if (arg.startsWith('--') && !arg.includes('=') && arg !== '--json-only') {
-        // Unknown flag without value
+    } else if (arg.startsWith('--') && arg !== '--json-only') {
+        // Unknown flag
         console.error(`❌ Error: Unknown flag: ${arg}`);
         console.error('   Use --help to see available options');
         process.exit(1);

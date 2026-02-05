@@ -3873,17 +3873,17 @@ app.get('/api/odoo/mo-list', async (req, res) => {
   try {
     // Get MO data from cache filtered by note and create_date (last 30 days)
     // Use case-insensitive search for note field with typo tolerance
-    // Note: PostgreSQL LOWER() function for case-insensitive comparison
+    // Note: Using LOWER() function for case-insensitive comparison
     let query = `
       SELECT mo_number, sku_name, quantity, uom, note, create_date
       FROM odoo_mo_cache
-      WHERE (LOWER(note) LIKE LOWER($1)`;
+      WHERE (LOWER(note) LIKE LOWER(?)`;
     
     // Add OR conditions for variations
     if (noteFilter === 'cartridge') {
-      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3)`;
+      query += ` OR LOWER(note) LIKE LOWER(?) OR LOWER(note) LIKE LOWER(?)`;
     } else if (noteFilter === 'liquid') {
-      query += ` OR LOWER(note) LIKE LOWER($2)`;
+      query += ` OR LOWER(note) LIKE LOWER(?)`;
     }
     
     query += `)
@@ -3903,11 +3903,34 @@ app.get('/api/odoo/mo-list', async (req, res) => {
     } else if (noteFilter === 'liquid') {
       queryParams.push('%TEAM LIQUID%');
       console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TEAM LIQUID, liquid`);
+      console.log(`   Query params:`, queryParams);
+      console.log(`   SQL query:`, query);
     } else {
       console.log(`🔍 [MO List] Querying cache for ${productionType} with pattern: ${searchPattern}`);
     }
 
     db.all(query, queryParams, (err, rows) => {
+      if (err) {
+        console.error('Error fetching MO data from cache:', err);
+        console.error('   Query:', query);
+        console.error('   Params:', queryParams);
+        return res.status(500).json({
+          success: false,
+          error: err.message || 'Failed to fetch MO data from cache'
+        });
+      }
+      
+      if (noteFilter === 'liquid') {
+        console.log(`📊 [MO List] Found ${rows?.length || 0} liquid MOs in cache`);
+        // Log sample MOs with TEAM LIQUID
+        if (rows && rows.length > 0) {
+          const teamLiquidMOs = rows.filter(r => r.note && r.note.toLowerCase().includes('team liquid'));
+          console.log(`   MOs with 'TEAM LIQUID': ${teamLiquidMOs.length}`);
+          if (teamLiquidMOs.length > 0) {
+            console.log(`   Sample: ${teamLiquidMOs[0].mo_number} - ${teamLiquidMOs[0].note?.substring(0, 50)}`);
+          }
+        }
+      }
       if (err) {
         console.error('Error fetching MO data from cache:', err);
         return res.status(500).json({

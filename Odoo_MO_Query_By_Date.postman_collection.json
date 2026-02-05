@@ -1,0 +1,893 @@
+{
+	"info": {
+		"_postman_id": "odoo-mo-query-bydate-001",
+		"name": "Odoo MO - Query by Date (Multiple Filters)",
+		"description": "Postman Collection untuk query Manufacturing Order (MO) dari Odoo API dengan berbagai filter tanggal/waktu.\n\n**Fitur:**\n- Filter berdasarkan tanggal mulai produksi (date_start)\n- Filter berdasarkan tanggal selesai produksi (date_finished)\n- Filter berdasarkan tanggal dibuat MO (create_date)\n- Filter range tanggal (date-from dan date-to)\n- Support limit dan offset untuk pagination\n\n**Cara Penggunaan:**\n1. Set variable `odoo_base_url` (default: https://foomx.odoo.com)\n2. Set variable `odoo_session_id` dengan session ID Odoo Anda (atau gunakan request Login)\n3. Set variable tanggal sesuai kebutuhan\n4. Jalankan request yang sesuai\n\n**Format Tanggal:** YYYY-MM-DD atau YYYY-MM-DD HH:MM:SS (contoh: 2026-01-01 atau 2026-01-01 00:00:00)\n\n**⚠️ PENTING - Session Expired Fix:**\nCollection ini sudah dilengkapi dengan header tambahan (User-Agent, Referer, Origin, Accept) untuk mencegah session expired. Jika masih mengalami session expired:\n1. Pastikan session ID masih valid (tidak lebih dari beberapa jam)\n2. Coba login ulang menggunakan request \"🔐 Login to Odoo\"\n3. Pastikan semua header dikirim dengan benar",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "🔐 Login to Odoo (Get Session ID)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"db\": \"{{odoo_database}}\",\n    \"login\": \"{{odoo_username}}\",\n    \"password\": \"{{odoo_password}}\",\n    \"base_location\": \"{{odoo_base_url}}\"\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/session/authenticate",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"session",
+						"authenticate"
+					]
+				},
+				"description": "**LOGIN KE ODOO** - Request ini untuk login ke Odoo dan mendapatkan session ID baru.\n\n**Variable yang diperlukan:**\n- `odoo_database`: Nama database Odoo (biasanya sama dengan nama company)\n- `odoo_username`: Username untuk login\n- `odoo_password`: Password untuk login\n\n**Cara menggunakan:**\n1. Set variable `odoo_database`, `odoo_username`, dan `odoo_password`\n2. Jalankan request ini\n3. Session ID akan otomatis tersimpan di variable `odoo_session_id`\n\n**Setelah login berhasil:**\n- ✅ Session ID otomatis ter-update\n- ✅ Bisa langsung menggunakan request lain"
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"// Extract session ID from response cookies",
+							"if (pm.response.code === 200) {",
+							"    const jsonData = pm.response.json();",
+							"    ",
+							"    if (jsonData.error) {",
+							"        console.error('❌ Login failed:', jsonData.error.message);",
+							"        pm.test('Login successful', function () {",
+							"            pm.expect(jsonData.error).to.be.undefined;",
+							"        });",
+							"    } else {",
+							"        // Try to get session ID from Set-Cookie header",
+							"        const setCookieHeader = pm.response.headers.get('Set-Cookie');",
+							"        ",
+							"        if (setCookieHeader) {",
+							"            // Extract session_id from cookie",
+							"            const sessionIdMatch = setCookieHeader.match(/session_id=([^;]+)/);",
+							"            if (sessionIdMatch && sessionIdMatch[1]) {",
+							"                const sessionId = sessionIdMatch[1];",
+							"                pm.collectionVariables.set('odoo_session_id', sessionId);",
+							"                console.log('✅ Session ID extracted and saved:', sessionId.substring(0, 20) + '...');",
+							"                ",
+							"                pm.test('Session ID saved', function () {",
+							"                    pm.expect(sessionId).to.not.be.empty;",
+							"                });",
+							"            } else {",
+							"                console.warn('⚠️  Could not extract session_id from Set-Cookie header');",
+							"            }",
+							"        } else {",
+							"            // Alternative: Get from response body if available",
+							"            if (jsonData.result && jsonData.result.session_id) {",
+							"                const sessionId = jsonData.result.session_id;",
+							"                pm.collectionVariables.set('odoo_session_id', sessionId);",
+							"                console.log('✅ Session ID from response body:', sessionId.substring(0, 20) + '...');",
+							"            } else {",
+							"                console.warn('⚠️  No Set-Cookie header found. Please manually get session_id from browser cookie after login.');",
+							"            }",
+							"        }",
+							"        ",
+							"        pm.test('Login successful', function () {",
+							"            pm.expect(jsonData.error).to.be.undefined;",
+							"        });",
+							"    }",
+							"} else {",
+							"    console.error('❌ Request failed with status:', pm.response.code);",
+							"}"
+						]
+					}
+				}
+			],
+			"response": []
+		},
+		{
+			"name": "0. Test Connection (No Filter)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [[]],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": 5,\n      \"offset\": 0,\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**TEST CONNECTION** - Request ini untuk test koneksi ke Odoo tanpa filter apapun.\n\n**Gunakan ini untuk:**\n- Test apakah session_id valid\n- Test apakah URL Odoo benar\n- Debug masalah koneksi\n- Melihat struktur response\n\n**Jika request ini berhasil, berarti:**\n- ✅ Session ID valid\n- ✅ URL Odoo benar\n- ✅ Koneksi ke Odoo OK"
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"// Check for session expired error",
+							"if (pm.response.code === 200) {",
+							"    try {",
+							"        const jsonData = pm.response.json();",
+							"        if (jsonData.error && jsonData.error.message && jsonData.error.message.includes('Session expired')) {",
+							"            console.error('❌ Session Expired!');",
+							"            console.error('Please run \"🔐 Login to Odoo (Get Session ID)\" request to get a new session ID.');",
+							"            pm.test('Session valid', function () {",
+							"                pm.expect(jsonData.error).to.be.undefined;",
+							"            });",
+							"        } else if (jsonData.error) {",
+							"            console.error('❌ API Error:', jsonData.error.message);",
+							"        } else {",
+							"            console.log('✅ Connection successful!');",
+							"            pm.test('Request successful', function () {",
+							"                pm.expect(jsonData.error).to.be.undefined;",
+							"            });",
+							"        }",
+							"    } catch (e) {",
+							"        console.error('Error parsing response:', e);",
+							"    }",
+							"}"
+						]
+					}
+				}
+			],
+			"response": []
+		},
+		{
+			"name": "1. Filter by Create Date (Single Date)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [\n      [\n        [\"create_date\", \">=\", \"{{create_date}} 00:00:00\"],\n        [\"create_date\", \"<=\", \"{{create_date}} 23:59:59\"]\n      ]\n    ],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": {{limit}},\n      \"offset\": {{offset}},\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**FILTER BY CREATE DATE** - Mendapatkan MO yang dibuat pada tanggal tertentu.\n\n**Variable yang diperlukan:**\n- `create_date`: Tanggal pembuatan MO (format: YYYY-MM-DD, contoh: 2026-01-15)\n- `limit`: Jumlah maksimal record (default: 20)\n- `offset`: Offset untuk pagination (default: 0)\n\n**Filter:**\n- `create_date >= create_date 00:00:00`\n- `create_date <= create_date 23:59:59`\n\n**Gunakan ini untuk:**\n- Mencari MO yang dibuat pada tanggal tertentu\n- Monitoring MO harian"
+			},
+			"response": []
+		},
+		{
+			"name": "2. Filter by Date Range (Date From & Date To)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [\n      [\n        [\"create_date\", \">=\", \"{{date_from}} 00:00:00\"],\n        [\"create_date\", \"<=\", \"{{date_to}} 23:59:59\"]\n      ]\n    ],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": {{limit}},\n      \"offset\": {{offset}},\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**FILTER BY DATE RANGE** - Mendapatkan MO yang dibuat dalam rentang tanggal tertentu.\n\n**Variable yang diperlukan:**\n- `date_from`: Tanggal mulai (format: YYYY-MM-DD, contoh: 2026-01-01)\n- `date_to`: Tanggal akhir (format: YYYY-MM-DD, contoh: 2026-01-31)\n- `limit`: Jumlah maksimal record (default: 20)\n- `offset`: Offset untuk pagination (default: 0)\n\n**Filter:**\n- `create_date >= date_from 00:00:00`\n- `create_date <= date_to 23:59:59`\n\n**Gunakan ini untuk:**\n- Mencari MO dalam periode tertentu (bulanan, mingguan, dll)\n- Laporan periode\n- Analisis data dalam range waktu"
+			},
+			"response": []
+		},
+		{
+			"name": "3. Filter by Production Start Date (date_start)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [\n      [\n        [\"date_start\", \">=\", \"{{date_start}} 00:00:00\"],\n        [\"date_start\", \"<=\", \"{{date_start}} 23:59:59\"]\n      ]\n    ],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": {{limit}},\n      \"offset\": {{offset}},\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**FILTER BY PRODUCTION START DATE** - Mendapatkan MO yang mulai diproduksi pada tanggal tertentu.\n\n**Variable yang diperlukan:**\n- `date_start`: Tanggal mulai produksi (format: YYYY-MM-DD, contoh: 2026-01-15)\n- `limit`: Jumlah maksimal record (default: 20)\n- `offset`: Offset untuk pagination (default: 0)\n\n**Filter:**\n- `date_start >= date_start 00:00:00`\n- `date_start <= date_start 23:59:59`\n\n**Gunakan ini untuk:**\n- Mencari MO yang mulai diproduksi pada tanggal tertentu\n- Monitoring produksi harian\n- Tracking kapan produksi dimulai"
+			},
+			"response": []
+		},
+		{
+			"name": "4. Filter by Production Finish Date (date_finished)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [\n      [\n        [\"date_finished\", \">=\", \"{{date_finished}} 00:00:00\"],\n        [\"date_finished\", \"<=\", \"{{date_finished}} 23:59:59\"]\n      ]\n    ],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": {{limit}},\n      \"offset\": {{offset}},\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**FILTER BY PRODUCTION FINISH DATE** - Mendapatkan MO yang selesai diproduksi pada tanggal tertentu.\n\n**Variable yang diperlukan:**\n- `date_finished`: Tanggal selesai produksi (format: YYYY-MM-DD, contoh: 2026-01-15)\n- `limit`: Jumlah maksimal record (default: 20)\n- `offset`: Offset untuk pagination (default: 0)\n\n**Filter:**\n- `date_finished >= date_finished 00:00:00`\n- `date_finished <= date_finished 23:59:59`\n\n**Gunakan ini untuk:**\n- Mencari MO yang selesai diproduksi pada tanggal tertentu\n- Monitoring produksi yang selesai\n- Laporan penyelesaian produksi"
+			},
+			"response": []
+		},
+		{
+			"name": "5. Filter by Date Range with Time (Precise)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [\n      [\n        [\"create_date\", \">=\", \"{{date_from_with_time}}\"],\n        [\"create_date\", \"<=\", \"{{date_to_with_time}}\"]\n      ]\n    ],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": {{limit}},\n      \"offset\": {{offset}},\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**FILTER BY DATE RANGE WITH TIME** - Mendapatkan MO dengan filter waktu yang lebih presisi (termasuk jam, menit, detik).\n\n**Variable yang diperlukan:**\n- `date_from_with_time`: Tanggal mulai dengan waktu (format: YYYY-MM-DD HH:MM:SS, contoh: 2026-01-01 08:00:00)\n- `date_to_with_time`: Tanggal akhir dengan waktu (format: YYYY-MM-DD HH:MM:SS, contoh: 2026-01-31 17:00:00)\n- `limit`: Jumlah maksimal record (default: 20)\n- `offset`: Offset untuk pagination (default: 0)\n\n**Filter:**\n- `create_date >= date_from_with_time`\n- `create_date <= date_to_with_time`\n\n**Gunakan ini untuk:**\n- Filter dengan waktu yang lebih presisi\n- Mencari MO dalam rentang jam tertentu\n- Analisis waktu produksi"
+			},
+			"response": []
+		},
+		{
+			"name": "6. Combined Filter (Create Date Range + State)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [\n      [\n        [\"create_date\", \">=\", \"{{date_from}} 00:00:00\"],\n        [\"create_date\", \"<=\", \"{{date_to}} 23:59:59\"],\n        [\"state\", \"=\", \"{{state}}\"]\n      ]\n    ],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": {{limit}},\n      \"offset\": {{offset}},\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**COMBINED FILTER** - Mendapatkan MO dengan kombinasi filter tanggal dan status.\n\n**Variable yang diperlukan:**\n- `date_from`: Tanggal mulai (format: YYYY-MM-DD)\n- `date_to`: Tanggal akhir (format: YYYY-MM-DD)\n- `state`: Status MO (contoh: 'draft', 'confirmed', 'progress', 'done', 'cancel')\n- `limit`: Jumlah maksimal record (default: 20)\n- `offset`: Offset untuk pagination (default: 0)\n\n**Filter:**\n- `create_date >= date_from 00:00:00`\n- `create_date <= date_to 23:59:59`\n- `state = state`\n\n**Gunakan ini untuk:**\n- Mencari MO dengan status tertentu dalam periode tertentu\n- Filter MO yang sudah selesai (state='done')\n- Filter MO yang masih dalam proses (state='progress')"
+			},
+			"response": []
+		},
+		{
+			"name": "7. Get MO Last 7 Days",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [\n      [\n        [\"create_date\", \">=\", \"{{last_7_days_start}}\"]\n      ]\n    ],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": {{limit}},\n      \"offset\": {{offset}},\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**GET MO LAST 7 DAYS** - Mendapatkan semua MO dari 7 hari terakhir.\n\n**Pre-request Script:**\nOtomatis menghitung tanggal 7 hari yang lalu dan set ke variable `last_7_days_start`.\n\n**Gunakan ini untuk:**\n- Monitoring MO mingguan\n- Data terbaru\n- Dashboard harian"
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"// Calculate date 7 days ago",
+							"const date = new Date();",
+							"date.setDate(date.getDate() - 7);",
+							"const year = date.getFullYear();",
+							"const month = String(date.getMonth() + 1).padStart(2, '0');",
+							"const day = String(date.getDate()).padStart(2, '0');",
+							"const last7DaysStart = `${year}-${month}-${day} 00:00:00`;",
+							"pm.collectionVariables.set('last_7_days_start', last7DaysStart);",
+							"console.log('📅 Last 7 days start:', last7DaysStart);"
+						]
+					}
+				}
+			],
+			"response": []
+		},
+		{
+			"name": "8. Get MO Last 30 Days",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [\n      [\n        [\"create_date\", \">=\", \"{{last_30_days_start}}\"]\n      ]\n    ],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": {{limit}},\n      \"offset\": {{offset}},\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**GET MO LAST 30 DAYS** - Mendapatkan semua MO dari 30 hari terakhir.\n\n**Pre-request Script:**\nOtomatis menghitung tanggal 30 hari yang lalu dan set ke variable `last_30_days_start`.\n\n**Gunakan ini untuk:**\n- Monitoring MO bulanan\n- Laporan bulanan\n- Analisis data bulanan"
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"// Calculate date 30 days ago",
+							"const date = new Date();",
+							"date.setDate(date.getDate() - 30);",
+							"const year = date.getFullYear();",
+							"const month = String(date.getMonth() + 1).padStart(2, '0');",
+							"const day = String(date.getDate()).padStart(2, '0');",
+							"const last30DaysStart = `${year}-${month}-${day} 00:00:00`;",
+							"pm.collectionVariables.set('last_30_days_start', last30DaysStart);",
+							"console.log('📅 Last 30 days start:', last30DaysStart);"
+						]
+					}
+				}
+			],
+			"response": []
+		},
+		{
+			"name": "9. Get MO This Month",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					},
+					{
+						"key": "Cookie",
+						"value": "session_id={{odoo_session_id}}; session_id={{odoo_session_id}}",
+						"type": "text"
+					},
+					{
+						"key": "User-Agent",
+						"value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+						"type": "text"
+					},
+					{
+						"key": "Referer",
+						"value": "{{odoo_base_url}}/",
+						"type": "text"
+					},
+					{
+						"key": "Origin",
+						"value": "{{odoo_base_url}}",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"call\",\n  \"params\": {\n    \"model\": \"mrp.production\",\n    \"method\": \"search_read\",\n    \"args\": [\n      [\n        [\"create_date\", \">=\", \"{{this_month_start}}\"],\n        [\"create_date\", \"<=\", \"{{this_month_end}}\"]\n      ]\n    ],\n    \"kwargs\": {\n      \"fields\": [\"id\", \"name\", \"product_id\", \"product_qty\", \"product_uom_id\", \"initial_qty_target\", \"note\", \"group_worker\", \"date_start\", \"date_finished\", \"date_deadline\", \"state\", \"origin\", \"create_date\"],\n      \"limit\": {{limit}},\n      \"offset\": {{offset}},\n      \"order\": \"create_date desc\"\n    }\n  }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{odoo_base_url}}/web/dataset/call_kw/mrp.production/search_read",
+					"host": [
+						"{{odoo_base_url}}"
+					],
+					"path": [
+						"web",
+						"dataset",
+						"call_kw",
+						"mrp.production",
+						"search_read"
+					]
+				},
+				"description": "**GET MO THIS MONTH** - Mendapatkan semua MO yang dibuat bulan ini.\n\n**Pre-request Script:**\nOtomatis menghitung tanggal awal dan akhir bulan ini.\n\n**Gunakan ini untuk:**\n- Laporan bulanan\n- Monitoring produksi bulan ini\n- Dashboard bulanan"
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							"// Calculate start and end of current month",
+							"const now = new Date();",
+							"const year = now.getFullYear();",
+							"const month = now.getMonth();",
+							"",
+							"// First day of month",
+							"const firstDay = new Date(year, month, 1);",
+							"const firstDayStr = `${year}-${String(month + 1).padStart(2, '0')}-01 00:00:00`;",
+							"",
+							"// Last day of month",
+							"const lastDay = new Date(year, month + 1, 0);",
+							"const lastDayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')} 23:59:59`;",
+							"",
+							"pm.collectionVariables.set('this_month_start', firstDayStr);",
+							"pm.collectionVariables.set('this_month_end', lastDayStr);",
+							"console.log('📅 This month:', firstDayStr, 'to', lastDayStr);"
+						]
+					}
+				}
+			],
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "odoo_base_url",
+			"value": "https://foomx.odoo.com",
+			"type": "string"
+		},
+		{
+			"key": "odoo_session_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "odoo_database",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "odoo_username",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "odoo_password",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "create_date",
+			"value": "2026-01-15",
+			"type": "string"
+		},
+		{
+			"key": "date_from",
+			"value": "2026-01-01",
+			"type": "string"
+		},
+		{
+			"key": "date_to",
+			"value": "2026-01-31",
+			"type": "string"
+		},
+		{
+			"key": "date_start",
+			"value": "2026-01-15",
+			"type": "string"
+		},
+		{
+			"key": "date_finished",
+			"value": "2026-01-15",
+			"type": "string"
+		},
+		{
+			"key": "date_from_with_time",
+			"value": "2026-01-01 08:00:00",
+			"type": "string"
+		},
+		{
+			"key": "date_to_with_time",
+			"value": "2026-01-31 17:00:00",
+			"type": "string"
+		},
+		{
+			"key": "state",
+			"value": "done",
+			"type": "string"
+		},
+		{
+			"key": "limit",
+			"value": "20",
+			"type": "string"
+		},
+		{
+			"key": "offset",
+			"value": "0",
+			"type": "string"
+		}
+	]
+}

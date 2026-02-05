@@ -223,4 +223,18 @@ jobs:
           
           echo "✅ PRODUCTION deployment completed successfully!"
           echo "📍 Production app verified and running on port: $PROD_PORT"
+          
+          # Trigger MO sync to update cache with new filters
+          echo "🔄 Triggering MO sync to update cache with new filters..."
+          sleep 10  # Wait a bit more for app to be fully ready
+          SYNC_RESPONSE=$(curl -s -X POST http://localhost:$PROD_PORT/api/admin/sync-mo || echo "failed")
+          if echo "$SYNC_RESPONSE" | grep -q "success\|started"; then
+            echo "✅ MO sync triggered successfully"
+            echo "   Response: $SYNC_RESPONSE"
+            echo "⏳ Sync is running in background. MO data will be updated within 60-90 seconds."
+          else
+            echo "⚠️  MO sync trigger may have failed (this is non-critical)"
+            echo "   Response: $SYNC_RESPONSE"
+            echo "   You can manually trigger sync later: curl -X POST http://localhost:$PROD_PORT/api/admin/sync-mo"
+          fi
 
