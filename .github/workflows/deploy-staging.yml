@@ -25,6 +25,12 @@ jobs:
         node-version: '18'
         cache: 'npm'
         
+    - name: Install dependencies
+      run: |
+        npm install
+        cd client && npm install && cd ..
+        cd server && npm install && cd ..
+        
     - name: Quick validation
       run: |
         echo "🔍 Quick validation before deployment..."
