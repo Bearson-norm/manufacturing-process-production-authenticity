@@ -98,11 +98,16 @@ jobs:
           set -e
           
           STAGING_DIR="/home/${{ secrets.VPS_USER }}/deployments/manufacturing-app-staging"
-          STAGING_PORT=5678
+          STAGING_PORT=3467
+          STAGING_DB_NAME="Staging_Manufacturing_Order"
+          DB_USER="admin"
+          DB_PASSWORD="Admin123"
+          DB_PORT=5433
           
           echo "🚀 Starting STAGING deployment..."
           echo "📍 Staging directory: $STAGING_DIR"
           echo "📍 Staging port: $STAGING_PORT"
+          echo "📍 Staging database: $STAGING_DB_NAME"
           
           cd /home/${{ secrets.VPS_USER }}/deployments
           tar -xzf deploy.tar.gz
@@ -152,6 +157,49 @@ jobs:
           
           echo "✅ Client build verified: $(ls -1 $STAGING_DIR/client-build | wc -l) files"
           
+          # Setup staging database
+          echo "🗄️  Setting up staging database..."
+          export PGPASSWORD="$DB_PASSWORD"
+          
+          # Check if database exists
+          DB_EXISTS=$(psql -h localhost -p $DB_PORT -U "$DB_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$STAGING_DB_NAME'" | grep -q 1 && echo "yes" || echo "no")
+          
+          if [ "$DB_EXISTS" = "no" ]; then
+            # Create database if it doesn't exist
+            echo "   📋 Creating database $STAGING_DB_NAME..."
+            # Try with admin user first, fallback to superuser if needed
+            if ! psql -h localhost -p $DB_PORT -U "$DB_USER" -d postgres -c "CREATE DATABASE \"$STAGING_DB_NAME\";" 2>/dev/null; then
+              echo "   ⚠️  User $DB_USER doesn't have permission to create database"
+              echo "   📋 Using superuser (postgres) to create database..."
+              sudo -u postgres psql -h localhost -p $DB_PORT -d postgres -c "CREATE DATABASE \"$STAGING_DB_NAME\";"
+            fi
+            echo "   ✅ Database $STAGING_DB_NAME created"
+          else
+            echo "   ✅ Database $STAGING_DB_NAME already exists"
+          fi
+          
+          # Grant privileges to admin user
+          echo "   🔐 Granting privileges to user $DB_USER..."
+          # Try with admin user first, fallback to superuser if needed
+          if ! psql -h localhost -p $DB_PORT -U "$DB_USER" -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"$STAGING_DB_NAME\" TO \"$DB_USER\";" 2>/dev/null; then
+            echo "   ⚠️  Using superuser to grant privileges..."
+            sudo -u postgres psql -h localhost -p $DB_PORT -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"$STAGING_DB_NAME\" TO \"$DB_USER\";"
+          fi
+          
+          # Connect to the database and grant schema privileges
+          echo "   🔐 Granting schema privileges..."
+          psql -h localhost -p $DB_PORT -U "$DB_USER" -d "$STAGING_DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$DB_USER\";" || \
+          sudo -u postgres psql -h localhost -p $DB_PORT -d "$STAGING_DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$DB_USER\";"
+          
+          psql -h localhost -p $DB_PORT -U "$DB_USER" -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"$DB_USER\";" || \
+          sudo -u postgres psql -h localhost -p $DB_PORT -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"$DB_USER\";"
+          
+          psql -h localhost -p $DB_PORT -U "$DB_USER" -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"$DB_USER\";" || \
+          sudo -u postgres psql -h localhost -p $DB_PORT -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"$DB_USER\";"
+          
+          echo "✅ Database setup completed"
+          unset PGPASSWORD
+          
           # Install/update dependencies
           echo "📦 Installing staging dependencies..."
           cd "$STAGING_DIR/server"
@@ -161,12 +209,12 @@ jobs:
           if [ ! -f .env ]; then
             echo "📝 Creating staging .env file..."
             echo "NODE_ENV=staging" > .env
-            echo "PORT=5678" >> .env
+            echo "PORT=$STAGING_PORT" >> .env
             echo "DB_HOST=localhost" >> .env
-            echo "DB_PORT=5433" >> .env
-            echo "DB_NAME=manufacturing_db" >> .env
-            echo "DB_USER=admin" >> .env
-            echo "DB_PASSWORD=Admin123" >> .env
+            echo "DB_PORT=$DB_PORT" >> .env
+            echo "DB_NAME=$STAGING_DB_NAME" >> .env
+            echo "DB_USER=$DB_USER" >> .env
+            echo "DB_PASSWORD=$DB_PASSWORD" >> .env
           else
             # Ensure PORT is set to staging port
             if grep -q "^PORT=" .env; then
@@ -180,21 +228,29 @@ jobs:
             else
               echo "NODE_ENV=staging" >> .env
             fi
-            # Ensure DB_USER is admin (not manufacturing_user)
-            if grep -q "^DB_USER=" .env; then
-              sed -i "s/^DB_USER=.*/DB_USER=admin/" .env
+            # Ensure DB_NAME is set to staging database
+            if grep -q "^DB_NAME=" .env; then
+              sed -i "s/^DB_NAME=.*/DB_NAME=$STAGING_DB_NAME/" .env
             else
-              echo "DB_USER=admin" >> .env
+              echo "DB_NAME=$STAGING_DB_NAME" >> .env
+            fi
+            # Ensure DB_USER is admin
+            if grep -q "^DB_USER=" .env; then
+              sed -i "s/^DB_USER=.*/DB_USER=$DB_USER/" .env
+            else
+              echo "DB_USER=$DB_USER" >> .env
             fi
             # Ensure DB_PASSWORD is set
-            if ! grep -q "^DB_PASSWORD=" .env; then
-              echo "DB_PASSWORD=Admin123" >> .env
+            if grep -q "^DB_PASSWORD=" .env; then
+              sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
+            else
+              echo "DB_PASSWORD=$DB_PASSWORD" >> .env
             fi
             # Ensure DB_PORT is 5433
             if grep -q "^DB_PORT=" .env; then
-              sed -i "s/^DB_PORT=.*/DB_PORT=5433/" .env
+              sed -i "s/^DB_PORT=.*/DB_PORT=$DB_PORT/" .env
             else
-              echo "DB_PORT=5433" >> .env
+              echo "DB_PORT=$DB_PORT" >> .env
             fi
           fi
           
@@ -225,7 +281,7 @@ jobs:
             pm2 start ecosystem.config.js --only manufacturing-app-staging --update-env
           else
             echo "📋 Using direct start with index.js"
-            pm2 start index.js --name manufacturing-app-staging --instances 1 --cwd "$STAGING_DIR/server" --env NODE_ENV=staging --env PORT=5678
+            pm2 start index.js --name manufacturing-app-staging --instances 1 --cwd "$STAGING_DIR/server" --env NODE_ENV=staging --env PORT=$STAGING_PORT
           fi
           
           # Verify PM2 process started

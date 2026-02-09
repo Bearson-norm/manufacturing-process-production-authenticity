@@ -36,7 +36,7 @@ module.exports = {
       exec_mode: 'fork', // Fork mode for staging
       env: {
         NODE_ENV: 'staging',
-        PORT: 5678
+        PORT: 3467
       },
       // Auto restart on crash
       autorestart: true,
