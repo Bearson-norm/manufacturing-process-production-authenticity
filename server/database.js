@@ -1,18 +1,30 @@
 // PostgreSQL Database Wrapper
 // Provides an interface similar to sqlite3 for easier migration
-const { Pool } = require('pg');
+const { Pool, Client } = require('pg');
 const config = require('./config');
+
+// Log database configuration (without password)
+// This runs when database.js is first loaded
+console.log('\n' + '='.repeat(60));
+console.log('📊 DATABASE CONFIGURATION');
+console.log('='.repeat(60));
+console.log(`   Host: ${config.database.host}`);
+console.log(`   Port: ${config.database.port}`);
+console.log(`   Database: ${config.database.database}`);
+console.log(`   User: ${config.database.user}`);
+console.log(`   Password: ${config.database.password ? '***' : 'not set'}`);
+console.log('='.repeat(60) + '\n');
 
 // Create PostgreSQL connection pool
 const pool = new Pool(config.database);
 
 // Test connection on startup
-pool.on('connect', () => {
-  console.log('PostgreSQL: New client connected to pool');
+pool.on('connect', (client) => {
+  console.log(`✅ PostgreSQL: Connected to database "${config.database.database}"`);
 });
 
 pool.on('error', (err) => {
-  console.error('PostgreSQL: Unexpected error on idle client', err);
+  console.error('❌ PostgreSQL: Unexpected error on idle client', err);
 });
 
 // Helper function to convert PostgreSQL placeholders
@@ -181,10 +193,20 @@ const db = new Database();
 
 // Initialize database tables
 async function initializeTables() {
-  console.log('Initializing PostgreSQL tables...');
+  console.log('🔄 Initializing PostgreSQL tables...');
+  console.log(`📦 Target database: ${config.database.database}`);
 
   const client = await pool.connect();
   try {
+    // Verify we're connected to the correct database
+    const dbCheckResult = await client.query('SELECT current_database() as db_name');
+    const currentDbName = dbCheckResult.rows[0].db_name;
+    
+    if (currentDbName !== config.database.database) {
+      console.warn(`⚠️  WARNING: Connected to database "${currentDbName}" but expected "${config.database.database}"`);
+    } else {
+      console.log(`✅ Connected to correct database: "${currentDbName}"`);
+    }
     // Production Liquid table
     await client.query(`
       CREATE TABLE IF NOT EXISTS production_liquid (
@@ -332,35 +354,64 @@ async function initializeTables() {
       CREATE TABLE IF NOT EXISTS production_results (
         id SERIAL PRIMARY KEY,
         production_type TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        leader_name TEXT NOT NULL,
-        shift_number TEXT NOT NULL,
-        pic TEXT NOT NULL,
-        mo_number TEXT NOT NULL,
-        sku_name TEXT NOT NULL,
-        quantity REAL,
-        authenticity_data TEXT NOT NULL,
-        status TEXT NOT NULL,
-        completed_at TIMESTAMP,
+        session_id TEXT,
+        leader_name TEXT,
+        shift_number TEXT,
+        pic TEXT,
+        mo_number TEXT,
+        sku_name TEXT,
+        authenticity_data JSONB,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(production_type, session_id, mo_number, created_at)
       )
     `);
 
-  // Odoo MO Cache table
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS odoo_mo_cache (
-      id SERIAL PRIMARY KEY,
-      mo_number TEXT UNIQUE NOT NULL,
-      sku_name TEXT NOT NULL,
-      quantity REAL,
-      uom TEXT,
-      note TEXT,
-      create_date TIMESTAMP,
-      fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+    // Odoo MO Cache table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS odoo_mo_cache (
+        id SERIAL PRIMARY KEY,
+        mo_number TEXT UNIQUE NOT NULL,
+        sku_name TEXT NOT NULL,
+        quantity REAL,
+        uom TEXT,
+        note TEXT,
+        create_date TIMESTAMP,
+        fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Receiver Logs table (for external API receiver endpoint)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS receiver_logs (
+        id SERIAL PRIMARY KEY,
+        source TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        response_status INTEGER,
+        response_message TEXT,
+        ip_address TEXT,
+        user_agent TEXT
+      )
+    `);
+
+    // Manufacturing Identity table (for storing data received from external API)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS manufacturing_identity (
+        id SERIAL PRIMARY KEY,
+        manufacturing_id TEXT NOT NULL,
+        sku TEXT NOT NULL,
+        sku_name TEXT NOT NULL,
+        target_qty INTEGER NOT NULL DEFAULT 0,
+        done_qty INTEGER,
+        leader_name TEXT NOT NULL,
+        finished_at TIMESTAMP,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
     // Admin Configuration table
     await client.query(`
@@ -391,9 +442,13 @@ async function initializeTables() {
       'CREATE INDEX IF NOT EXISTS idx_production_results_mo_number ON production_results(mo_number)',
       'CREATE INDEX IF NOT EXISTS idx_production_results_created_at ON production_results(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_production_results_type ON production_results(production_type)',
-      'CREATE INDEX IF NOT EXISTS idx_production_results_status ON production_results(status)',
       'CREATE INDEX IF NOT EXISTS idx_odoo_mo_cache_mo_number ON odoo_mo_cache(mo_number)',
       'CREATE INDEX IF NOT EXISTS idx_odoo_mo_cache_fetched_at ON odoo_mo_cache(fetched_at)',
+      'CREATE INDEX IF NOT EXISTS idx_receiver_logs_source ON receiver_logs(source)',
+      'CREATE INDEX IF NOT EXISTS idx_receiver_logs_received_at ON receiver_logs(received_at)',
+      'CREATE INDEX IF NOT EXISTS idx_manufacturing_identity_manufacturing_id ON manufacturing_identity(manufacturing_id)',
+      'CREATE INDEX IF NOT EXISTS idx_manufacturing_identity_status ON manufacturing_identity(status)',
+      'CREATE INDEX IF NOT EXISTS idx_manufacturing_identity_created_at ON manufacturing_identity(created_at)',
     ];
 
     for (const indexQuery of indexes) {
@@ -453,9 +508,51 @@ async function initializeTables() {
       console.log('✅ Default PIC list initialized');
     }
 
-    console.log('✅ PostgreSQL tables initialized successfully');
+    // Count existing tables
+    const tablesResult = await client.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `);
+    
+    console.log(`✅ PostgreSQL tables initialized successfully`);
+    console.log(`📋 Total tables in database: ${tablesResult.rows.length}`);
+    
+    if (tablesResult.rows.length > 0) {
+      console.log(`📊 Tables found:`);
+      tablesResult.rows.forEach((row, index) => {
+        console.log(`   ${index + 1}. ${row.table_name}`);
+      });
+    }
+    
+    // Check if database has data
+    const dataCheckQueries = [
+      { name: 'production_liquid', query: 'SELECT COUNT(*) as count FROM production_liquid' },
+      { name: 'production_device', query: 'SELECT COUNT(*) as count FROM production_device' },
+      { name: 'production_cartridge', query: 'SELECT COUNT(*) as count FROM production_cartridge' },
+      { name: 'odoo_mo_cache', query: 'SELECT COUNT(*) as count FROM odoo_mo_cache' },
+      { name: 'admin_config', query: 'SELECT COUNT(*) as count FROM admin_config' },
+    ];
+    
+    console.log(`\n📈 Database Data Summary:`);
+    for (const check of dataCheckQueries) {
+      try {
+        const result = await client.query(check.query);
+        const count = parseInt(result.rows[0].count) || 0;
+        if (count > 0) {
+          console.log(`   ${check.name}: ${count} records`);
+        }
+      } catch (err) {
+        // Table might not exist yet, ignore
+      }
+    }
+    
   } catch (err) {
-    console.error('Error initializing tables:', err);
+    console.error('❌ Error initializing tables:', err);
+    console.error(`   Database: ${config.database.database}`);
+    console.error(`   Host: ${config.database.host}:${config.database.port}`);
     throw err;
   } finally {
     client.release();

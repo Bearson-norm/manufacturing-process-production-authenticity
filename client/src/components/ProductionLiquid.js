@@ -1244,6 +1244,18 @@ function ProductionLiquid() {
       return;
     }
 
+    // Validate: Check if all inputs for this MO are active (active_count == 0 for this session)
+    // This is a frontend validation - backend will also check
+    const allInputsForMo = session.inputs.filter(input => input.mo_number === moNumber);
+    const activeInputsForMo = allInputsForMo.filter(input => input.status === 'active');
+    
+    // Only allow submit if all inputs for this MO in this session are active (no completed ones)
+    // Note: There might be other inputs with same MO in other sessions, but we check that in backend
+    if (activeInputsForMo.length !== allInputsForMo.length) {
+      alert(`Tidak dapat submit MO ${moNumber}. Masih ada input dengan status completed di session ini.`);
+      return;
+    }
+
     // Validate authenticity data before submit
     const validation = validateAuthenticityData(inputsWithSameMo);
     if (!validation.valid) {
@@ -1256,17 +1268,65 @@ function ProductionLiquid() {
     }
 
     try {
-      const updatePromises = inputsWithSameMo.map(input => 
-        axios.put(`/api/production/liquid/update-status/${input.id}`, {
-          status: 'completed'
-        })
-      );
+      // Use the new batch submit endpoint instead of individual updates
+      // MO number is passed in body to handle special characters like '/'
+      const response = await axios.put(`/api/production/liquid/submit-mo-group`, {
+        mo_number: moNumber,
+        session_id: sessionId
+      });
       
-      await Promise.all(updatePromises);
+      // Check if response has auto_reverted flag
+      if (response.data && response.data.auto_reverted === true) {
+        const activeCount = response.data.active_count || 0;
+        alert(`Submit MO ${moNumber} gagal. Masih ada ${activeCount} input aktif dengan MO yang sama di session lain. Semua input yang sudah di-submit telah di-revert kembali ke aktif. Silakan submit ulang setelah semua input siap.`);
+      } else {
+        const updatedCount = response.data?.updated_count || inputsWithSameMo.length;
+        alert(`Berhasil submit ${updatedCount} input untuk MO ${moNumber}`);
+      }
+      
       fetchData();
     } catch (error) {
-      console.error('Error updating status:', error);
-      alert('Error memperbarui status');
+      console.error('Error submitting MO:', error);
+      if (error.response && error.response.data && error.response.data.error) {
+        alert(`Error: ${error.response.data.error}`);
+      } else {
+        alert('Error memperbarui status');
+      }
+    }
+  };
+
+  const handleRevertMoGroup = async (moNumber) => {
+    const userRole = localStorage.getItem('userRole') || 'production';
+    const isAdmin = userRole === 'admin';
+    
+    if (!isAdmin) {
+      alert('Hanya admin yang dapat melakukan revert MO');
+      return;
+    }
+    
+    if (!window.confirm(`Apakah Anda yakin ingin revert semua input untuk MO ${moNumber}? Status akan diubah dari completed kembali ke active.`)) {
+      return;
+    }
+    
+    try {
+      const response = await axios.put(`/api/production/liquid/revert-mo-group/${moNumber}`, {
+        userRole: userRole
+      });
+      
+      if (response.data && response.data.reverted_count > 0) {
+        alert(`Berhasil revert ${response.data.reverted_count} input untuk MO ${moNumber}`);
+      } else {
+        alert(response.data?.message || 'Tidak ada input yang dapat di-revert');
+      }
+      
+      fetchData();
+    } catch (error) {
+      console.error('Error reverting MO group:', error);
+      if (error.response && error.response.status === 403) {
+        alert('Akses ditolak: Hanya admin yang dapat melakukan revert MO');
+      } else {
+        alert('Error melakukan revert MO');
+      }
     }
   };
 
@@ -1679,6 +1739,10 @@ function ProductionLiquid() {
 
                         // Check if this MO group is being edited
                         const isEditing = editingMoNumber === moNumber && editingSessionId === session.session_id;
+                        
+                        // Check if user is admin
+                        const userRole = localStorage.getItem('userRole') || 'production';
+                        const isAdmin = userRole === 'admin';
 
                         return (
                           <div key={moNumber} className="mo-group-card">
@@ -1687,34 +1751,76 @@ function ProductionLiquid() {
                                 <strong>MO Number:</strong> {moNumber}
                                 <span className="mo-sku-badge">{inputs[0].sku_name}</span>
                               </div>
-                              <span className={`status-badge ${moGroupStatus}`} style={{ marginLeft: 'auto' }}>
-                                {moGroupStatus === 'completed' ? 'Completed' : 'Active'}
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+                                {isMoGroupCompleted && isAdmin && !isEditing ? (
+                                  <button
+                                    onClick={() => handleRevertMoGroup(moNumber)}
+                                    className="revert-button"
+                                    style={{ 
+                                      padding: '4px 8px', 
+                                      fontSize: '11px', 
+                                      background: '#dc2626', 
+                                      color: 'white', 
+                                      border: 'none', 
+                                      borderRadius: '4px', 
+                                      cursor: 'pointer'
+                                    }}
+                                    title="Revert MO (Admin only)"
+                                  >
+                                    Revert
+                                  </button>
+                                ) : null}
+                                <span className={`status-badge ${moGroupStatus}`}>
+                                  {moGroupStatus === 'completed' ? 'Completed' : 'Active'}
+                                </span>
+                              </div>
                             </div>
                             <div className="input-card">
                               <div className="input-card-header">
                                 <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                  {activeInputs.length > 0 && !isEditing && (
-                                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-                                      <button
-                                        onClick={() => handleSubmitMoGroup(moNumber, session.session_id)}
-                                        className="submit-button"
-                                        style={{ padding: '6px 12px', fontSize: '12px', background: '#059669', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                                      >
-                                        Submit MO
-                                      </button>
-                                      <button
-                                        onClick={() => handleEditInput(moNumber, session.session_id)}
-                                        className="edit-button"
-                                        style={{ padding: '6px 12px', fontSize: '12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                                      >
-                                        Edit
-                                      </button>
-                                    </div>
-                                  )}
+                                  {(() => {
+                                    if (activeInputs.length === 0 || isEditing) {
+                                      return null;
+                                    }
+                                    
+                                    // Check if all inputs for this MO in this session are active (no completed ones)
+                                    const allInputsForMo = inputs.filter(input => input.mo_number === moNumber);
+                                    const activeInputsForMo = allInputsForMo.filter(input => input.status === 'active');
+                                    const canSubmit = activeInputsForMo.length === allInputsForMo.length && activeInputsForMo.length > 0;
+                                    
+                                    return (
+                                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                                        <button
+                                          onClick={() => handleSubmitMoGroup(moNumber, session.session_id)}
+                                          className="submit-button"
+                                          disabled={!canSubmit}
+                                          style={{ 
+                                            padding: '6px 12px', 
+                                            fontSize: '12px', 
+                                            background: canSubmit ? '#059669' : '#9ca3af', 
+                                            color: 'white', 
+                                            border: 'none', 
+                                            borderRadius: '4px', 
+                                            cursor: canSubmit ? 'pointer' : 'not-allowed',
+                                            opacity: canSubmit ? 1 : 0.6
+                                          }}
+                                          title={!canSubmit ? 'Tidak dapat submit: masih ada input dengan status completed untuk MO ini' : ''}
+                                        >
+                                          Submit MO
+                                        </button>
+                                        <button
+                                          onClick={() => handleEditInput(moNumber, session.session_id)}
+                                          className="edit-button"
+                                          style={{ padding: '6px 12px', fontSize: '12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                        >
+                                          Edit
+                                        </button>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </div>
-                                <div className="input-card-body">
+                              <div className="input-card-body">
                                   {isEditing ? (
                                     <div className="edit-form">
                                       <div className="form-group" style={{ marginBottom: '12px' }}>

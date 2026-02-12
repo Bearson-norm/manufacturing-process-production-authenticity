@@ -12,7 +12,7 @@ module.exports = {
   database: {
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432', 10),
-    database: process.env.DB_NAME || 'manufacturing_db',
+    database: process.env.DB_NAME || 'Staging_Manufacturing_Order',
     user: process.env.DB_USER || 'admin',
     password: process.env.DB_PASSWORD || 'Admin123',
     max: parseInt(process.env.DB_POOL_MAX || '20', 10), // Connection pool max

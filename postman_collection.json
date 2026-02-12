@@ -1,0 +1,273 @@
+{
+    "info": {
+        "_postman_id": "cukai-go-collection",
+        "name": "Cukai Go API",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Manufacturing Identity",
+            "item": [
+                {
+                    "name": "Create Manufacturing Identity",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"manufacturing_id\": \"MFG-{{$randomInt}}\",\n    \"sku\": \"SKU-{{$randomInt}}\",\n    \"sku_name\": \"Product {{$randomInt}}\",\n    \"target_qty\": 100,\n    \"done_qty\": 0,\n    \"leader_name\": \"John Doe\",\n    \"finished_at\": null\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/manufacturing",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "manufacturing"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List Manufacturing Identity",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/manufacturing",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "manufacturing"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Manufacturing Identity",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/manufacturing/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "manufacturing",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": ""
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Manufacturing Identity",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"manufacturing_id\": \"MFG-UPDATED\",\n    \"sku\": \"SKU-UPDATED\",\n    \"sku_name\": \"Product UPDATED\",\n    \"target_qty\": 200,\n    \"done_qty\": 50,\n    \"leader_name\": \"John Doe Updated\",\n    \"finished_at\": null\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/manufacturing/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "manufacturing",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": ""
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Delete Manufacturing Identity",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/manufacturing/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "manufacturing",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": ""
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Cukai Availability",
+            "item": [
+                {
+                    "name": "Create Cukai Availability",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"manufacturing_order_id\": \"MO-{{$randomInt}}\",\n    \"authenticity_label\": \"LABEL-{{$randomInt}}\",\n    \"status\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/cukai",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "cukai"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List Cukai Availability",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/cukai",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "cukai"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Cukai Availability",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/cukai/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "cukai",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": ""
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Cukai Availability",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"manufacturing_order_id\": \"MO-UPDATED\",\n    \"authenticity_label\": \"LABEL-UPDATED\",\n    \"status\": false\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/cukai/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "cukai",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": ""
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Delete Cukai Availability",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/cukai/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "cukai",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": ""
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8080/api/v1"
+        }
+    ]
+}
