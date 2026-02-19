@@ -23,6 +23,7 @@ initializeTables().then(() => {
 const { getAdminConfig } = require('./routes/admin.routes');
 const { db } = require('./database');
 const { sendToExternalAPIWithUrl, sendToExternalAPI, getExternalAPIUrl } = require('./services/external-api.service');
+const { apiKeyAuth } = require('./middleware/auth.middleware');
 
 // Helper function to parse authenticity data
 function parseAuthenticityData(row) {
