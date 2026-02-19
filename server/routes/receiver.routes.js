@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../database');
+const { convertDBTimestampToJakarta } = require('../utils/timezone.utils');
 
 // Initialize receiver_logs table if not exists
 function initializeReceiverLogsTable() {
@@ -531,12 +532,21 @@ router.get('/manufacturing', (req, res) => {
           console.error('Error counting manufacturing identities:', countErr);
         }
         
+        // Convert timestamps to Jakarta timezone
+        const formattedRows = rows.map(row => ({
+          ...row,
+          created_at: convertDBTimestampToJakarta(row.created_at),
+          updated_at: convertDBTimestampToJakarta(row.updated_at),
+          finished_at: row.finished_at ? convertDBTimestampToJakarta(row.finished_at) : null,
+          started_at: convertDBTimestampToJakarta(row.created_at) // Alias for created_at
+        }));
+        
         res.json({
           success: true,
           total: countRow ? parseInt(countRow.total) : rows.length,
           limit: limitNum,
           offset: offsetNum,
-          data: rows
+          data: formattedRows
         });
       });
     });
@@ -574,6 +584,15 @@ router.get('/manufacturing/:manufacturing_id', (req, res) => {
         });
       }
       
+      // Convert timestamps to Jakarta timezone
+      const formattedRows = rows.map(row => ({
+        ...row,
+        created_at: convertDBTimestampToJakarta(row.created_at),
+        updated_at: convertDBTimestampToJakarta(row.updated_at),
+        finished_at: row.finished_at ? convertDBTimestampToJakarta(row.finished_at) : null,
+        started_at: convertDBTimestampToJakarta(row.created_at) // Alias for created_at
+      }));
+      
       if (rows.length === 0) {
         return res.status(404).json({
           success: false,
@@ -583,8 +602,8 @@ router.get('/manufacturing/:manufacturing_id', (req, res) => {
       
       res.json({
         success: true,
-        count: rows.length,
-        data: rows
+        count: formattedRows.length,
+        data: formattedRows
       });
     });
   } catch (error) {
