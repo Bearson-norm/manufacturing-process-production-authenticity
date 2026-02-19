@@ -164,9 +164,9 @@ jobs:
           pm2 delete manufacturing-app 2>/dev/null || true
           
           # Start application with PM2
-          # Use simple start command without unsupported flags
-          echo "🚀 Starting application with PM2..."
-          pm2 start index.js --name manufacturing-app --instances 1 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+          # Use cluster mode with 2 instances for load balancing
+          echo "🚀 Starting application with PM2 (2 instances)..."
+          pm2 start index.js --name manufacturing-app --instances 2 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
           
           # Verify PM2 process started
           echo "⏳ Waiting 2 seconds for PM2 to register process..."
@@ -231,7 +231,7 @@ jobs:
               rm -rf manufacturing-app
               cp -r "$LATEST_BACKUP" manufacturing-app
               cd manufacturing-app/server
-              pm2 start index.js --name manufacturing-app --instances 1 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+              pm2 start index.js --name manufacturing-app --instances 2 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
               pm2 save
               echo "✅ Rollback completed. Please check the application manually."
             else
