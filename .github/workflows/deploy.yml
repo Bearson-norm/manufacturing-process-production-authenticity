@@ -156,18 +156,39 @@ jobs:
           echo "📝 Verifying production .env file..."
           cat .env
           
-          # Restart application with PM2 using ecosystem config
+          # Restart application with PM2
           cd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
           mkdir -p logs
-          pm2 delete manufacturing-app || true
           
-          # Start with ecosystem config if available, otherwise use direct start
-          if [ -f ecosystem.config.js ]; then
-            pm2 start ecosystem.config.js
+          # Delete existing process if exists
+          pm2 delete manufacturing-app 2>/dev/null || true
+          
+          # Start application with PM2
+          # Use simple start command without unsupported flags
+          echo "🚀 Starting application with PM2..."
+          pm2 start index.js --name manufacturing-app --instances 1 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+          
+          # Verify PM2 process started
+          echo "⏳ Waiting 2 seconds for PM2 to register process..."
+          sleep 2
+          
+          echo "📊 PM2 Status:"
+          pm2 status
+          
+          # Check if process is running
+          if pm2 list | grep -q "manufacturing-app"; then
+            echo "✅ PM2 process 'manufacturing-app' is registered"
           else
-            pm2 start index.js --name manufacturing-app --instances max --exec-mode cluster --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server --env production
+            echo "❌ ERROR: PM2 process 'manufacturing-app' NOT found!"
+            echo "📋 PM2 list output:"
+            pm2 list
+            echo "📋 PM2 logs:"
+            pm2 logs manufacturing-app --lines 20 --nostream || true
+            exit 1
           fi
+          
           pm2 save
+          echo "✅ PM2 process saved"
           
           # Cleanup old backups (keep last 5)
           cd /home/${{ secrets.VPS_USER }}/deployments
@@ -202,13 +223,15 @@ jobs:
             echo "🔄 Attempting rollback to previous version..."
             
             # Find latest backup
-            LATEST_BACKUP=$(ls -dt /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app-backup-* 2>/dev/null | head -1)
+            cd /home/${{ secrets.VPS_USER }}/deployments
+            LATEST_BACKUP=$(ls -dt manufacturing-app-backup-* 2>/dev/null | head -1)
             if [ -n "$LATEST_BACKUP" ]; then
               echo "📦 Rolling back to: $LATEST_BACKUP"
+              pm2 delete manufacturing-app 2>/dev/null || true
               rm -rf manufacturing-app
               cp -r "$LATEST_BACKUP" manufacturing-app
               cd manufacturing-app/server
-              pm2 restart manufacturing-app
+              pm2 start index.js --name manufacturing-app --instances 1 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
               pm2 save
               echo "✅ Rollback completed. Please check the application manually."
             else
