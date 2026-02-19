@@ -286,7 +286,7 @@ router.post('/liquid', (req, res) => {
               }
             })
             .catch(apiErr => {
-              console.error(`❌ [External API] Failed to send active status for MO ${mo_number}:`, apiErr.message);
+          console.error(`❌ [External API] Failed to send active status for MO ${mo_number}:`, apiErr.message);
             });
         });
         
@@ -593,12 +593,12 @@ router.put('/liquid/update-status/:id', (req, res) => {
                               }
                             })
                             .catch(apiErr => {
-                              console.error(`❌ [External API] Failed to send completed status for MO ${row.mo_number}:`, apiErr.message);
+                    console.error(`❌ [External API] Failed to send completed status for MO ${row.mo_number}:`, apiErr.message);
                             });
                           
                           res.json({ message: 'Status updated successfully', id: id, status: status });
                         });
-                      });
+                  });
                     }
                   );
                 } else {
@@ -612,7 +612,7 @@ router.put('/liquid/update-status/:id', (req, res) => {
           }
         } else {
           // Status is 'active' (revert) - don't send to external API
-          res.json({ message: 'Status updated successfully', id: id, status: status });
+        res.json({ message: 'Status updated successfully', id: id, status: status });
         }
       }
     );
@@ -791,11 +791,23 @@ router.put('/liquid/submit-mo-group', (req, res) => {
                       
                       // Construct PUT URL with mo_number
                       // Encode MO number to handle special characters like '/'
-                      const baseUrl = externalApiUrl.replace(/\/$/, '');
                       const encodedMoNumber = encodeURIComponent(mo_number);
-                      const putUrl = `${baseUrl}/manufacturing/${encodedMoNumber}`;
+                      
+                      // Check if URL already ends with /manufacturing
+                      // If yes, just append /:id, otherwise append /manufacturing/:id
+                      let putUrl;
+                      const trimmedUrl = externalApiUrl.trim().replace(/\/$/, ''); // Remove trailing slash
+                      
+                      if (trimmedUrl.toLowerCase().endsWith('/manufacturing')) {
+                        // URL already contains /manufacturing, just append /:id
+                        putUrl = `${trimmedUrl}/${encodedMoNumber}`;
+                      } else {
+                        // URL doesn't contain /manufacturing, append /manufacturing/:id
+                        putUrl = `${trimmedUrl}/manufacturing/${encodedMoNumber}`;
+                      }
                       
                       console.log(`📤 [Submit MO] Sending completed status for MO ${mo_number} to: ${putUrl}`);
+                      console.log(`📤 [Submit MO] Base URL: ${trimmedUrl}`);
                       console.log(`📤 [Submit MO] Encoded MO Number: ${encodedMoNumber}`);
                       console.log(`📤 [Submit MO] Data:`, JSON.stringify(formattedData, null, 2));
                       

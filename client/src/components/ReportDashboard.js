@@ -72,10 +72,15 @@ function ReportDashboard() {
     setLoading(true);
     try {
       const response = await axios.get('/api/reports/manufacturing');
-      setReportData(response.data);
+      // API returns { success: true, total: ..., data: [...] }
+      // Extract the data array from response
+      const data = response.data?.data || response.data || [];
+      // Ensure it's an array
+      setReportData(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching report data:', error);
       alert('Error mengambil data laporan');
+      setReportData([]); // Set to empty array on error
     } finally {
       setLoading(false);
     }
@@ -91,10 +96,15 @@ function ReportDashboard() {
       if (searchMo) params.moNumber = searchMo;
 
       const response = await axios.get('/api/reports/manufacturing', { params });
-      setReportData(response.data);
+      // API returns { success: true, total: ..., data: [...] }
+      // Extract the data array from response
+      const data = response.data?.data || response.data || [];
+      // Ensure it's an array
+      setReportData(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error filtering report data:', error);
       alert('Error mengambil data laporan dengan filter');
+      setReportData([]); // Set to empty array on error
     } finally {
       setLoading(false);
     }
@@ -129,6 +139,12 @@ function ReportDashboard() {
 
   const groupByMo = (data) => {
     const grouped = {};
+    
+    // Ensure data is an array
+    if (!Array.isArray(data)) {
+      console.warn('groupByMo: data is not an array, returning empty array', data);
+      return [];
+    }
     
     data.forEach(item => {
       const key = `${item.mo_number}`;

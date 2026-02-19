@@ -68,10 +68,11 @@ function getFallbackUrl(callback, defaultUrl, status) {
         console.log(`⚠️  [External API] Constructed active URL from fallback: ${finalUrl}`);
       }
     } else if (status === 'completed') {
-      // For completed status, base URL should be /api/receiver (without /manufacturing)
+      // For completed status, URL should be the base URL (can contain /manufacturing or not)
       // The mo_number will be added in production.routes.js
+      // Don't remove /manufacturing here, let production.routes.js handle it
       const baseUrl = fallbackUrl.split('?')[0];
-      const cleanUrl = baseUrl.replace(/\/test.*$/, '').replace(/\/manufacturing.*$/, '');
+      const cleanUrl = baseUrl.replace(/\/test.*$/, '').replace(/\/$/, ''); // Remove trailing slash
       finalUrl = cleanUrl;
       console.log(`⚠️  [External API] Constructed completed base URL from fallback: ${finalUrl}`);
     }

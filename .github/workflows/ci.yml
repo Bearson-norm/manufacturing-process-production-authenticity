@@ -84,13 +84,20 @@ jobs:
         
     - name: Verify health endpoint exists
       run: |
-        if [ -f "server/index.js" ]; then
+        if [ -f "server/app.js" ]; then
+          if grep -q "app.get('/health'" server/app.js || grep -q 'app.get("/health"' server/app.js; then
+            echo "✅ Health endpoint found in server/app.js"
+          else
+            echo "⚠️  Health endpoint might be missing in server/app.js"
+            exit 1
+          fi
+        elif [ -f "server/index.js" ]; then
           if grep -q "app.get('/health'" server/index.js || grep -q 'app.get("/health"' server/index.js; then
-            echo "✅ Health endpoint found"
+            echo "✅ Health endpoint found in server/index.js"
           else
             echo "⚠️  Health endpoint might be missing"
             exit 1
           fi
         else
-          echo "⚠️  server/index.js not found, skipping health endpoint check"
+          echo "⚠️  server/app.js and server/index.js not found, skipping health endpoint check"
         fi

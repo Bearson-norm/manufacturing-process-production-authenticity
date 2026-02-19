@@ -1290,7 +1290,7 @@ function ProductionLiquid() {
       if (error.response && error.response.data && error.response.data.error) {
         alert(`Error: ${error.response.data.error}`);
       } else {
-        alert('Error memperbarui status');
+      alert('Error memperbarui status');
       }
     }
   };
@@ -1771,8 +1771,8 @@ function ProductionLiquid() {
                                   </button>
                                 ) : null}
                                 <span className={`status-badge ${moGroupStatus}`}>
-                                  {moGroupStatus === 'completed' ? 'Completed' : 'Active'}
-                                </span>
+                                {moGroupStatus === 'completed' ? 'Completed' : 'Active'}
+                              </span>
                               </div>
                             </div>
                             <div className="input-card">
@@ -1789,10 +1789,10 @@ function ProductionLiquid() {
                                     const canSubmit = activeInputsForMo.length === allInputsForMo.length && activeInputsForMo.length > 0;
                                     
                                     return (
-                                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-                                        <button
-                                          onClick={() => handleSubmitMoGroup(moNumber, session.session_id)}
-                                          className="submit-button"
+                                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                                      <button
+                                        onClick={() => handleSubmitMoGroup(moNumber, session.session_id)}
+                                        className="submit-button"
                                           disabled={!canSubmit}
                                           style={{ 
                                             padding: '6px 12px', 
@@ -1805,22 +1805,22 @@ function ProductionLiquid() {
                                             opacity: canSubmit ? 1 : 0.6
                                           }}
                                           title={!canSubmit ? 'Tidak dapat submit: masih ada input dengan status completed untuk MO ini' : ''}
-                                        >
-                                          Submit MO
-                                        </button>
-                                        <button
-                                          onClick={() => handleEditInput(moNumber, session.session_id)}
-                                          className="edit-button"
-                                          style={{ padding: '6px 12px', fontSize: '12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                                        >
-                                          Edit
-                                        </button>
-                                      </div>
+                                      >
+                                        Submit MO
+                                      </button>
+                                      <button
+                                        onClick={() => handleEditInput(moNumber, session.session_id)}
+                                        className="edit-button"
+                                        style={{ padding: '6px 12px', fontSize: '12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                      >
+                                        Edit
+                                      </button>
+                                    </div>
                                     );
                                   })()}
                                 </div>
                               </div>
-                              <div className="input-card-body">
+                                <div className="input-card-body">
                                   {isEditing ? (
                                     <div className="edit-form">
                                       <div className="form-group" style={{ marginBottom: '12px' }}>
