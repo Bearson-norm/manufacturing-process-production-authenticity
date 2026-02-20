@@ -583,14 +583,10 @@ router.put('/liquid/update-status/:id', (req, res) => {
                           getManufacturingIdentityByMoNumber(row.mo_number, externalApiUrl)
                             .then(getResult => {
                               if (!getResult.success || !getResult.id) {
-                                console.log(`⚠️  [External API] Could not find Manufacturing Identity ID for MO ${row.mo_number}, using MO number directly`);
-                                // Fallback: use MO number directly if ID not found
-                                const baseUrl = externalApiUrl.replace(/\/$/, '');
-                                const putUrl = `${baseUrl}/manufacturing/${encodeURIComponent(row.mo_number)}`;
-                                
-                                console.log(`📤 [External API] Sending completed status for MO ${row.mo_number} to: ${putUrl} (using MO number)`);
-                                
-                                return sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT');
+                                console.error(`❌ [External API] Could not find Manufacturing Identity ID for MO ${row.mo_number}`);
+                                console.error(`   Cannot send PUT request without ID. Please ensure MO ${row.mo_number} exists in external API.`);
+                                // Skip PUT request if ID not found (endpoint requires ID, not MO number)
+                                return { success: false, skipped: true, message: 'Manufacturing Identity ID not found' };
                               }
                               
                               // Step 2: Use the ID from GET response for PUT request
@@ -818,22 +814,10 @@ router.put('/liquid/submit-mo-group', (req, res) => {
                       getManufacturingIdentityByMoNumber(mo_number, externalApiUrl)
                         .then(getResult => {
                           if (!getResult.success || !getResult.id) {
-                            console.log(`⚠️  [Submit MO] Could not find Manufacturing Identity ID for MO ${mo_number}, using MO number directly`);
-                            // Fallback: use MO number directly if ID not found
-                            const encodedMoNumber = encodeURIComponent(mo_number);
-                            const trimmedUrl = externalApiUrl.trim().replace(/\/$/, '');
-                            let putUrl;
-                            
-                            if (trimmedUrl.toLowerCase().endsWith('/manufacturing')) {
-                              putUrl = `${trimmedUrl}/${encodedMoNumber}`;
-                            } else {
-                              putUrl = `${trimmedUrl}/manufacturing/${encodedMoNumber}`;
-                            }
-                            
-                            console.log(`📤 [Submit MO] Sending completed status for MO ${mo_number} to: ${putUrl} (using MO number)`);
-                            console.log(`📤 [Submit MO] Data:`, JSON.stringify(formattedData, null, 2));
-                            
-                            return sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT');
+                            console.error(`❌ [Submit MO] Could not find Manufacturing Identity ID for MO ${mo_number}`);
+                            console.error(`   Cannot send PUT request without ID. Please ensure MO ${mo_number} exists in external API.`);
+                            // Skip PUT request if ID not found (endpoint requires ID, not MO number)
+                            return { success: false, skipped: true, message: 'Manufacturing Identity ID not found' };
                           }
                           
                           // Step 2: Use the ID from GET response for PUT request
