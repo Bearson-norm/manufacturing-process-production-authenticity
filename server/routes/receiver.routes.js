@@ -345,28 +345,32 @@ function handleSuccessResponse(status, manufacturing_id, sku_name, target_qty, l
 
 // PUT /api/receiver/manufacturing/:manufacturing_id - Receive completed status from External API
 // Note: manufacturing_id may contain special characters like '/', so it should be URL encoded
+// IMPORTANT: URL parameter may be ID, but manufacturing_id for database should come from request body
 router.put('/manufacturing/:manufacturing_id(*)', (req, res) => {
   try {
     // Use wildcard route to capture everything after /manufacturing/
-    // This handles MO numbers with '/' like PROD/MO/30739
-    const manufacturing_id = req.params[0] || req.params.manufacturing_id;
-    const { sku, sku_name, target_qty, done_qty, leader_name, finished_at } = req.body;
+    // This handles MO numbers with '/' like PROD/MO/30739 or IDs like 14
+    const urlParam = req.params[0] || req.params.manufacturing_id;
+    const { manufacturing_id, sku, sku_name, target_qty, done_qty, leader_name, finished_at } = req.body;
     
-    // Decode the manufacturing_id if it was encoded
-    const decodedManufacturingId = decodeURIComponent(manufacturing_id);
+    // Decode the URL parameter if it was encoded
+    const decodedUrlParam = decodeURIComponent(urlParam);
     
     console.log(`\n📥 [Receiver] ==========================================`);
     console.log(`📥 [Receiver] PUT /manufacturing/:manufacturing_id`);
-    console.log(`📥 [Receiver] Raw Manufacturing ID: ${manufacturing_id}`);
-    console.log(`📥 [Receiver] Decoded Manufacturing ID: ${decodedManufacturingId}`);
+    console.log(`📥 [Receiver] URL Parameter: ${decodedUrlParam}`);
     console.log(`📥 [Receiver] Request Body:`, JSON.stringify(req.body, null, 2));
     console.log(`📥 [Receiver] ==========================================\n`);
     
+    // Use manufacturing_id from request body if available, otherwise use URL parameter
+    // This ensures we use MO number (from body) not ID (from URL) for database
+    const moNumberForDb = manufacturing_id || decodedUrlParam;
+    
     // Validate required fields
-    if (!decodedManufacturingId) {
+    if (!moNumberForDb) {
       return res.status(400).json({
         success: false,
-        error: 'manufacturing_id is required in URL parameter'
+        error: 'manufacturing_id is required (in URL parameter or request body)'
       });
     }
     
@@ -381,8 +385,7 @@ router.put('/manufacturing/:manufacturing_id(*)', (req, res) => {
     const ipAddress = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'] || 'unknown';
     const userAgent = req.headers['user-agent'] || 'unknown';
     
-    // Use decoded manufacturing_id for database operations
-    const moNumberForDb = decodedManufacturingId;
+    console.log(`📝 [Receiver] Using manufacturing_id for database: ${moNumberForDb} (from ${manufacturing_id ? 'body' : 'URL parameter'})`);
     
     // Check if record with same manufacturing_id and status 'completed' exists
     // Also check if there's an 'active' record that should be updated
