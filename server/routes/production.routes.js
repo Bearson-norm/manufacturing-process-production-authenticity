@@ -1,9 +1,40 @@
 const express = require('express');
 const router = express.Router();
+const http = require('http');
+const https = require('https');
+const url = require('url');
 const { db } = require('../database');
 const { parseAuthenticityData, normalizeAuthenticityArray } = require('../utils/authenticity.utils');
 const { sendToExternalAPI, sendToExternalAPIWithUrl, getExternalAPIUrl } = require('../services/external-api.service');
 const { convertDBTimestampToJakarta } = require('../utils/timezone.utils');
+
+// Helper function to get manufacturing identity ID by MO number
+// This queries the internal database to get the ID from manufacturing_identity table
+function getManufacturingIdentityId(moNumber, callback) {
+  // Query manufacturing_identity table directly to get ID
+  // Try to get the most recent active or completed record
+  db.get(
+    `SELECT id FROM manufacturing_identity 
+     WHERE manufacturing_id = $1 
+     ORDER BY created_at DESC 
+     LIMIT 1`,
+    [moNumber],
+    (err, row) => {
+      if (err) {
+        console.error(`❌ [Manufacturing Identity] Error getting ID for MO ${moNumber}:`, err);
+        return callback(err, null);
+      }
+      
+      if (row && row.id) {
+        console.log(`✅ [Manufacturing Identity] Found ID ${row.id} for MO ${moNumber}`);
+        callback(null, row.id);
+      } else {
+        console.log(`⚠️  [Manufacturing Identity] No ID found for MO ${moNumber}, will use MO number as fallback`);
+        callback(null, null); // Return null if not found, will use MO number as fallback
+      }
+    }
+  );
+}
 
 // Helper function to calculate done_qty from authenticity_data array (handle multiple rolls)
 function calculateDoneQty(authenticityDataArray) {
@@ -578,25 +609,43 @@ router.put('/liquid/update-status/:id', (req, res) => {
                             return res.json({ message: 'Status updated successfully', id: id, status: status });
                           }
                           
-                          // Construct PUT URL with mo_number
-                          // Remove trailing slash if present, then add /manufacturing/{mo_number}
-                          const baseUrl = externalApiUrl.replace(/\/$/, '');
-                          const putUrl = `${baseUrl}/manufacturing/${row.mo_number}`;
-                          
-                          console.log(`📤 [External API] Sending completed status for MO ${row.mo_number} to: ${putUrl}`);
-                          
-                          // Send to external API with PUT method
-                          sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT')
-                            .then(result => {
-                              if (result.success) {
-                                console.log(`✅ [External API] Successfully sent completed status for MO ${row.mo_number}`);
-                              } else {
-                                console.log(`⚠️  [External API] Completed status send skipped for MO ${row.mo_number}: ${result.message}`);
-                              }
-                            })
-                            .catch(apiErr => {
-                    console.error(`❌ [External API] Failed to send completed status for MO ${row.mo_number}:`, apiErr.message);
-                            });
+                          // Get manufacturing identity ID by MO number
+                          getManufacturingIdentityId(row.mo_number, (idErr, manufacturingId) => {
+                            if (idErr) {
+                              console.error(`❌ [Submit MO] Error getting manufacturing identity ID for MO ${row.mo_number}:`, idErr.message);
+                              // Continue with MO number as fallback
+                            }
+                            
+                            // Use ID if found, otherwise use MO number as fallback
+                            const identifier = manufacturingId || row.mo_number;
+                            const encodedIdentifier = encodeURIComponent(identifier);
+                            
+                            // Construct PUT URL with ID (or MO number as fallback)
+                            const baseUrl = externalApiUrl.replace(/\/$/, '');
+                            let putUrl;
+                            
+                            if (baseUrl.toLowerCase().endsWith('/manufacturing')) {
+                              putUrl = `${baseUrl}/${encodedIdentifier}`;
+                            } else {
+                              putUrl = `${baseUrl}/manufacturing/${encodedIdentifier}`;
+                            }
+                            
+                            console.log(`📤 [External API] Sending completed status for MO ${row.mo_number} to: ${putUrl}`);
+                            console.log(`📤 [External API] Using identifier: ${identifier} (${manufacturingId ? 'ID from database' : 'MO number as fallback'})`);
+                            
+                            // Send to external API with PUT method
+                            sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT')
+                              .then(result => {
+                                if (result.success) {
+                                  console.log(`✅ [External API] Successfully sent completed status for MO ${row.mo_number} (ID: ${identifier})`);
+                                } else {
+                                  console.log(`⚠️  [External API] Completed status send skipped for MO ${row.mo_number}: ${result.message}`);
+                                }
+                              })
+                              .catch(apiErr => {
+                                console.error(`❌ [External API] Failed to send completed status for MO ${row.mo_number}:`, apiErr.message);
+                              });
+                          });
                           
                           res.json({ message: 'Status updated successfully', id: id, status: status });
                         });
@@ -791,46 +840,54 @@ router.put('/liquid/submit-mo-group', (req, res) => {
                         });
                       }
                       
-                      // Construct PUT URL with mo_number
-                      // Encode MO number to handle special characters like '/'
-                      const encodedMoNumber = encodeURIComponent(mo_number);
-                      
-                      // Check if URL already ends with /manufacturing
-                      // If yes, just append /:id, otherwise append /manufacturing/:id
-                      let putUrl;
-                      const trimmedUrl = externalApiUrl.trim().replace(/\/$/, ''); // Remove trailing slash
-                      
-                      if (trimmedUrl.toLowerCase().endsWith('/manufacturing')) {
-                        // URL already contains /manufacturing, just append /:id
-                        putUrl = `${trimmedUrl}/${encodedMoNumber}`;
-                      } else {
-                        // URL doesn't contain /manufacturing, append /manufacturing/:id
-                        putUrl = `${trimmedUrl}/manufacturing/${encodedMoNumber}`;
-                      }
-                      
-                      console.log(`📤 [Submit MO] Sending completed status for MO ${mo_number} to: ${putUrl}`);
-                      console.log(`📤 [Submit MO] Base URL: ${trimmedUrl}`);
-                      console.log(`📤 [Submit MO] Encoded MO Number: ${encodedMoNumber}`);
-                      console.log(`📤 [Submit MO] Data:`, JSON.stringify(formattedData, null, 2));
-                      
-                      // Send to external API with PUT method
-                      sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT')
-                        .then(result => {
-                          if (result.success) {
-                            console.log(`✅ [Submit MO] Successfully sent completed status for MO ${mo_number}`);
-                          } else {
-                            console.log(`⚠️  [Submit MO] Completed status send skipped for MO ${mo_number}: ${result.message}`);
-                          }
-                        })
-                        .catch(apiErr => {
-                          console.error(`❌ [Submit MO] Failed to send completed status for MO ${mo_number}:`, apiErr.message);
+                      // Get manufacturing identity ID by MO number (matching with target MO number)
+                      getManufacturingIdentityId(mo_number, (idErr, manufacturingId) => {
+                        if (idErr) {
+                          console.error(`❌ [Submit MO] Error getting manufacturing identity ID for MO ${mo_number}:`, idErr.message);
+                          // Continue with MO number as fallback
+                        }
+                        
+                        // Use ID if found, otherwise use MO number as fallback
+                        const identifier = manufacturingId || mo_number;
+                        const encodedIdentifier = encodeURIComponent(identifier);
+                        
+                        // Construct PUT URL with ID (or MO number as fallback)
+                        const trimmedUrl = externalApiUrl.trim().replace(/\/$/, ''); // Remove trailing slash
+                        let putUrl;
+                        
+                        if (trimmedUrl.toLowerCase().endsWith('/manufacturing')) {
+                          // URL already contains /manufacturing, just append /:id
+                          putUrl = `${trimmedUrl}/${encodedIdentifier}`;
+                        } else {
+                          // URL doesn't contain /manufacturing, append /manufacturing/:id
+                          putUrl = `${trimmedUrl}/manufacturing/${encodedIdentifier}`;
+                        }
+                        
+                        console.log(`📤 [Submit MO] Sending completed status for MO ${mo_number} to: ${putUrl}`);
+                        console.log(`📤 [Submit MO] Base URL: ${trimmedUrl}`);
+                        console.log(`📤 [Submit MO] Using identifier: ${identifier} (${manufacturingId ? 'ID from GET Manufacturing Identity' : 'MO number as fallback'})`);
+                        console.log(`📤 [Submit MO] Data:`, JSON.stringify(formattedData, null, 2));
+                        
+                        // Send to external API with PUT method
+                        sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT')
+                          .then(result => {
+                            if (result.success) {
+                              console.log(`✅ [Submit MO] Successfully sent completed status for MO ${mo_number} (ID: ${identifier})`);
+                            } else {
+                              console.log(`⚠️  [Submit MO] Completed status send skipped for MO ${mo_number}: ${result.message}`);
+                            }
+                          })
+                          .catch(apiErr => {
+                            console.error(`❌ [Submit MO] Failed to send completed status for MO ${mo_number}:`, apiErr.message);
+                          });
+                        
+                        res.json({ 
+                          message: 'MO submitted successfully', 
+                          mo_number: mo_number,
+                          updated_count: updatedCount,
+                          external_api_sent: true,
+                          manufacturing_id: identifier
                         });
-                      
-                      res.json({ 
-                        message: 'MO submitted successfully', 
-                        mo_number: mo_number,
-                        updated_count: updatedCount,
-                        external_api_sent: true
                       });
                     });
                   });
