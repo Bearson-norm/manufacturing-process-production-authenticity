@@ -126,19 +126,32 @@ function ProductionChart() {
       device: { bg: 'rgba(139, 92, 246, 0.6)', border: 'rgba(139, 92, 246, 1)' },
       cartridge: { bg: 'rgba(245, 158, 11, 0.6)', border: 'rgba(245, 158, 11, 1)' }
     };
+    
+    // Default color fallback
+    const defaultColor = { bg: 'rgba(156, 163, 175, 0.6)', border: 'rgba(156, 163, 175, 1)' };
 
     // Create datasets for each leader-production combination
     const datasets = [];
     leaderProductionSet.forEach(leaderProd => {
-      const [leaderName, prodType] = leaderProd.split('_');
+      const parts = leaderProd.split('_');
+      if (parts.length < 2) {
+        console.warn(`Invalid leader-production format: ${leaderProd}`);
+        return;
+      }
+      
+      const leaderName = parts[0];
+      const prodType = parts.slice(1).join('_'); // Handle cases where production type might contain underscores
+      
       const data = sortedPeriods.map(period => {
         const periodData = periodMap.get(period);
         return periodData[leaderProd]?.[metric] || 0;
       });
 
-      const colors = colorMap[prodType];
+      // Get colors with fallback to default
+      const colors = colorMap[prodType] || defaultColor;
+      
       datasets.push({
-        label: `${leaderName} (${prodType})`,
+        label: `${leaderName} (${prodType || 'unknown'})`,
         data: data,
         backgroundColor: colors.bg,
         borderColor: colors.border,
