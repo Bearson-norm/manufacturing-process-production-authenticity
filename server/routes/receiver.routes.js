@@ -345,32 +345,28 @@ function handleSuccessResponse(status, manufacturing_id, sku_name, target_qty, l
 
 // PUT /api/receiver/manufacturing/:manufacturing_id - Receive completed status from External API
 // Note: manufacturing_id may contain special characters like '/', so it should be URL encoded
-// IMPORTANT: URL parameter may be ID, but manufacturing_id for database should come from request body
 router.put('/manufacturing/:manufacturing_id(*)', (req, res) => {
   try {
     // Use wildcard route to capture everything after /manufacturing/
-    // This handles MO numbers with '/' like PROD/MO/30739 or IDs like 14
-    const urlParam = req.params[0] || req.params.manufacturing_id;
-    const { manufacturing_id, sku, sku_name, target_qty, done_qty, leader_name, finished_at } = req.body;
+    // This handles MO numbers with '/' like PROD/MO/30739
+    const manufacturing_id = req.params[0] || req.params.manufacturing_id;
+    const { sku, sku_name, target_qty, done_qty, leader_name, finished_at } = req.body;
     
-    // Decode the URL parameter if it was encoded
-    const decodedUrlParam = decodeURIComponent(urlParam);
+    // Decode the manufacturing_id if it was encoded
+    const decodedManufacturingId = decodeURIComponent(manufacturing_id);
     
     console.log(`\n📥 [Receiver] ==========================================`);
     console.log(`📥 [Receiver] PUT /manufacturing/:manufacturing_id`);
-    console.log(`📥 [Receiver] URL Parameter: ${decodedUrlParam}`);
+    console.log(`📥 [Receiver] Raw Manufacturing ID: ${manufacturing_id}`);
+    console.log(`📥 [Receiver] Decoded Manufacturing ID: ${decodedManufacturingId}`);
     console.log(`📥 [Receiver] Request Body:`, JSON.stringify(req.body, null, 2));
     console.log(`📥 [Receiver] ==========================================\n`);
     
-    // Use manufacturing_id from request body if available, otherwise use URL parameter
-    // This ensures we use MO number (from body) not ID (from URL) for database
-    const moNumberForDb = manufacturing_id || decodedUrlParam;
-    
     // Validate required fields
-    if (!moNumberForDb) {
+    if (!decodedManufacturingId) {
       return res.status(400).json({
         success: false,
-        error: 'manufacturing_id is required (in URL parameter or request body)'
+        error: 'manufacturing_id is required in URL parameter'
       });
     }
     
@@ -385,73 +381,98 @@ router.put('/manufacturing/:manufacturing_id(*)', (req, res) => {
     const ipAddress = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'] || 'unknown';
     const userAgent = req.headers['user-agent'] || 'unknown';
     
-    console.log(`📝 [Receiver] Using manufacturing_id for database: ${moNumberForDb} (from ${manufacturing_id ? 'body' : 'URL parameter'})`);
+    // Check if URL parameter is numeric ID or manufacturing_id (MO number)
+    const isNumericId = /^\d+$/.test(decodedManufacturingId);
     
-    // Check if record with same manufacturing_id and status 'completed' exists
-    // Also check if there's an 'active' record that should be updated
-    db.get(
-      `SELECT id, status FROM manufacturing_identity 
-       WHERE manufacturing_id = $1 AND status IN ('completed', 'active')
-       ORDER BY CASE WHEN status = 'completed' THEN 1 ELSE 2 END, created_at DESC
-       LIMIT 1`,
-      [moNumberForDb],
-      (checkErr, existingRow) => {
-        if (checkErr) {
-          console.error('❌ [Receiver] Error checking existing record:', checkErr);
-          return res.status(500).json({
-            success: false,
-            error: 'Failed to check existing record: ' + checkErr.message
-          });
-        }
+    let findRecordQuery;
+    let findRecordParams;
+    
+    if (isNumericId) {
+      // URL parameter is numeric ID (e.g., "14")
+      // Find record by ID
+      console.log(`🔍 [Receiver] URL parameter is numeric ID: ${decodedManufacturingId}`);
+      findRecordQuery = `SELECT id, manufacturing_id, status FROM manufacturing_identity WHERE id = $1`;
+      findRecordParams = [parseInt(decodedManufacturingId)];
+    } else {
+      // URL parameter is manufacturing_id (MO number, e.g., "PROD/MO/30965")
+      // Find record by manufacturing_id
+      console.log(`🔍 [Receiver] URL parameter is manufacturing_id: ${decodedManufacturingId}`);
+      findRecordQuery = `SELECT id, manufacturing_id, status FROM manufacturing_identity 
+                         WHERE manufacturing_id = $1 AND status IN ('completed', 'active')
+                         ORDER BY CASE WHEN status = 'completed' THEN 1 ELSE 2 END, created_at DESC
+                         LIMIT 1`;
+      findRecordParams = [decodedManufacturingId];
+    }
+    
+    // Check if record exists
+    db.get(findRecordQuery, findRecordParams, (checkErr, existingRow) => {
+      if (checkErr) {
+        console.error('❌ [Receiver] Error checking existing record:', checkErr);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to check existing record: ' + checkErr.message
+        });
+      }
+      
+      if (existingRow) {
+        // Use the actual manufacturing_id from the found record
+        const actualManufacturingId = existingRow.manufacturing_id;
+        console.log(`✅ [Receiver] Found existing record (id: ${existingRow.id}, manufacturing_id: ${actualManufacturingId}, status: ${existingRow.status})`);
         
-        console.log(`🔍 [Receiver] Checking existing record for ${moNumberForDb}:`, existingRow ? `Found (id: ${existingRow.id}, status: ${existingRow.status})` : 'Not found');
-        
-        if (existingRow) {
-          // Update existing record (whether it's 'active' or 'completed')
-          // If it's 'active', we'll update it to 'completed'
-          // If it's 'completed', we'll just update the data
-          db.run(
-            `UPDATE manufacturing_identity SET
-             sku = $1,
-             sku_name = $2,
-             target_qty = $3,
-             done_qty = $4,
-             leader_name = $5,
-             finished_at = $6,
-             status = 'completed',
-             updated_at = CURRENT_TIMESTAMP
-             WHERE id = $7`,
-            [
-              sku,
-              sku_name,
-              target_qty || 0,
-              done_qty,
-              leader_name,
-              finished_at || null,
-              existingRow.id
-            ],
-            function(updateErr) {
-              if (updateErr) {
-                console.error('❌ [Receiver] Error updating manufacturing identity (completed):', updateErr);
-                return res.status(500).json({
-                  success: false,
-                  error: 'Failed to update manufacturing identity: ' + updateErr.message
-                });
-              }
-              
-              console.log(`✅ [Receiver] Updated existing record (id: ${existingRow.id}, was: ${existingRow.status}, now: completed)`);
-              handleSuccessResponse('completed', moNumberForDb, sku_name, target_qty, leader_name, ipAddress, userAgent, { ...req.body, manufacturing_id: moNumberForDb }, res, done_qty, finished_at);
+        // Update existing record (whether it's 'active' or 'completed')
+        // If it's 'active', we'll update it to 'completed'
+        // If it's 'completed', we'll just update the data
+        db.run(
+          `UPDATE manufacturing_identity SET
+           sku = $1,
+           sku_name = $2,
+           target_qty = $3,
+           done_qty = $4,
+           leader_name = $5,
+           finished_at = $6,
+           status = 'completed',
+           updated_at = CURRENT_TIMESTAMP
+           WHERE id = $7`,
+          [
+            sku,
+            sku_name,
+            target_qty || 0,
+            done_qty,
+            leader_name,
+            finished_at || null,
+            existingRow.id
+          ],
+          function(updateErr) {
+            if (updateErr) {
+              console.error('❌ [Receiver] Error updating manufacturing identity (completed):', updateErr);
+              return res.status(500).json({
+                success: false,
+                error: 'Failed to update manufacturing identity: ' + updateErr.message
+              });
             }
-          );
+            
+            console.log(`✅ [Receiver] Updated existing record (id: ${existingRow.id}, was: ${existingRow.status}, now: completed)`);
+            handleSuccessResponse('completed', actualManufacturingId, sku_name, target_qty, leader_name, ipAddress, userAgent, { ...req.body, manufacturing_id: actualManufacturingId }, res, done_qty, finished_at);
+          }
+        );
+      } else {
+        // Record not found
+        if (isNumericId) {
+          // If URL parameter was numeric ID but record not found, return error
+          console.error(`❌ [Receiver] Record with ID ${decodedManufacturingId} not found`);
+          return res.status(404).json({
+            success: false,
+            error: `Manufacturing identity with ID ${decodedManufacturingId} not found`
+          });
         } else {
-          // Insert new record (no existing record found)
-          console.log(`📝 [Receiver] No existing record found, inserting new record for ${moNumberForDb}`);
+          // URL parameter is manufacturing_id but record not found, insert new record
+          console.log(`📝 [Receiver] No existing record found for manufacturing_id ${decodedManufacturingId}, inserting new record`);
           db.run(
             `INSERT INTO manufacturing_identity 
              (manufacturing_id, sku, sku_name, target_qty, done_qty, leader_name, finished_at, status, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
             [
-              moNumberForDb,
+              decodedManufacturingId,
               sku,
               sku_name,
               target_qty || 0,
@@ -468,13 +489,13 @@ router.put('/manufacturing/:manufacturing_id(*)', (req, res) => {
                 });
               }
               
-              console.log(`✅ [Receiver] Inserted new record (id: ${this.lastID})`);
-              handleSuccessResponse('completed', moNumberForDb, sku_name, target_qty, leader_name, ipAddress, userAgent, { ...req.body, manufacturing_id: moNumberForDb }, res, done_qty, finished_at);
+              console.log(`✅ [Receiver] Inserted new record (id: ${this.lastID}, manufacturing_id: ${decodedManufacturingId})`);
+              handleSuccessResponse('completed', decodedManufacturingId, sku_name, target_qty, leader_name, ipAddress, userAgent, { ...req.body, manufacturing_id: decodedManufacturingId }, res, done_qty, finished_at);
             }
           );
         }
       }
-    );
+    });
   } catch (error) {
     console.error('❌ [Receiver] Error in PUT /manufacturing/:manufacturing_id:', error);
     res.status(500).json({
