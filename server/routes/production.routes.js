@@ -3,6 +3,7 @@ const router = express.Router();
 const { db } = require('../database');
 const { parseAuthenticityData, normalizeAuthenticityArray } = require('../utils/authenticity.utils');
 const { sendToExternalAPI, sendToExternalAPIWithUrl, getExternalAPIUrl } = require('../services/external-api.service');
+const { convertDBTimestampToJakarta } = require('../utils/timezone.utils');
 
 // Helper function to calculate done_qty from authenticity_data array (handle multiple rolls)
 function calculateDoneQty(authenticityDataArray) {
@@ -57,7 +58,8 @@ function formatManufacturingData(moNumber, skuName, targetQty, doneQty, leaderNa
     target_qty: targetQty || 0,
     done_qty: doneQty,
     leader_name: leaderName || '',
-    finished_at: finishedAt
+    finished_at: finishedAt ? convertDBTimestampToJakarta(finishedAt) : null,
+    started_at: null // Will be set if needed from created_at
   };
 }
 
@@ -544,10 +546,10 @@ router.put('/liquid/update-status/:id', (req, res) => {
                       db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [row.mo_number], (qtyErr, qtyRow) => {
                         const targetQty = (!qtyErr && qtyRow) ? (qtyRow.quantity || 0) : 0;
                         
-                        // Get max completed_at
+                        // Get max completed_at and convert to Jakarta timezone
                         const maxCompletedAt = completedRows.length > 0 && completedRows[0].completed_at 
-                          ? completedRows[0].completed_at 
-                          : new Date().toISOString();
+                          ? convertDBTimestampToJakarta(completedRows[0].completed_at)
+                          : convertDBTimestampToJakarta(new Date());
                         
                         // Get leader_name (from first record or current row)
                         const leaderName = completedRows.length > 0 && completedRows[0].leader_name 
@@ -744,10 +746,10 @@ router.put('/liquid/submit-mo-group', (req, res) => {
                   db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = $1', [mo_number], (qtyErr, qtyRow) => {
                     const targetQty = (!qtyErr && qtyRow) ? (qtyRow.quantity || 0) : 0;
                     
-                    // Get max completed_at
+                    // Get max completed_at and convert to Jakarta timezone
                     const maxCompletedAt = completedRows.length > 0 && completedRows[0].completed_at 
-                      ? completedRows[0].completed_at 
-                      : new Date().toISOString();
+                      ? convertDBTimestampToJakarta(completedRows[0].completed_at)
+                      : convertDBTimestampToJakarta(new Date());
                     
                     // Get leader_name and sku_name (from first record)
                     const leaderName = completedRows.length > 0 && completedRows[0].leader_name 
