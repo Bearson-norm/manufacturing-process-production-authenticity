@@ -361,10 +361,44 @@ async function initializeTables() {
         mo_number TEXT,
         sku_name TEXT,
         authenticity_data JSONB,
+        status TEXT DEFAULT 'active',
+        quantity REAL,
+        completed_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        synced_at TIMESTAMP,
         UNIQUE(production_type, session_id, mo_number, created_at)
       )
+    `);
+
+    // Add missing columns to production_results if table already exists
+    await client.query(`
+      DO $$ 
+      BEGIN
+        -- Add status column if not exists
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name='production_results' AND column_name='status') THEN
+          ALTER TABLE production_results ADD COLUMN status TEXT DEFAULT 'active';
+        END IF;
+        
+        -- Add quantity column if not exists
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name='production_results' AND column_name='quantity') THEN
+          ALTER TABLE production_results ADD COLUMN quantity REAL;
+        END IF;
+        
+        -- Add completed_at column if not exists
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name='production_results' AND column_name='completed_at') THEN
+          ALTER TABLE production_results ADD COLUMN completed_at TIMESTAMP;
+        END IF;
+        
+        -- Add synced_at column if not exists
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name='production_results' AND column_name='synced_at') THEN
+          ALTER TABLE production_results ADD COLUMN synced_at TIMESTAMP;
+        END IF;
+      END $$;
     `);
 
     // Odoo MO Cache table

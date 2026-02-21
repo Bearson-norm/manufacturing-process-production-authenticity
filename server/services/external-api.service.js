@@ -283,11 +283,219 @@ async function sendToExternalAPI(data) {
   });
 }
 
+// Helper function to GET Manufacturing Identity from external API by manufacturing_id (MO number)
+async function getManufacturingIdentityByMoNumber(moNumber, baseUrl) {
+  return new Promise((resolve, reject) => {
+    if (!baseUrl || baseUrl.trim() === '') {
+      return reject(new Error('External API base URL not provided'));
+    }
+    
+    if (!moNumber || moNumber.trim() === '') {
+      return reject(new Error('MO number not provided'));
+    }
+    
+    try {
+      const https = require('https');
+      const http = require('http');
+      const url = require('url');
+      
+      // Construct GET URL - try /manufacturing?manufacturing_id=xxx first, fallback to /manufacturing/:id
+      const trimmedUrl = baseUrl.trim().replace(/\/$/, '');
+      let getUrl;
+      
+      // Try query parameter approach first
+      const encodedMoNumber = encodeURIComponent(moNumber);
+      if (trimmedUrl.toLowerCase().endsWith('/manufacturing')) {
+        getUrl = `${trimmedUrl}?manufacturing_id=${encodedMoNumber}`;
+      } else {
+        getUrl = `${trimmedUrl}/manufacturing?manufacturing_id=${encodedMoNumber}`;
+      }
+      
+      const parsedUrl = url.parse(getUrl);
+      const isHttps = parsedUrl.protocol === 'https:';
+      const httpModule = isHttps ? https : http;
+      
+      console.log(`\n📥 [External API] ==========================================`);
+      console.log(`📥 [External API] GET Manufacturing Identity`);
+      console.log(`📥 [External API] URL: ${getUrl}`);
+      console.log(`📥 [External API] MO Number: ${moNumber}`);
+      console.log(`📥 [External API] ==========================================\n`);
+      
+      const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (isHttps ? 443 : 80),
+        path: parsedUrl.path,
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      };
+      
+      const req = httpModule.request(options, (res) => {
+        let responseData = '';
+        res.on('data', (chunk) => {
+          responseData += chunk;
+        });
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              const response = JSON.parse(responseData);
+              
+              // Handle different response formats
+              let manufacturingIdentity = null;
+              
+              if (Array.isArray(response)) {
+                // Response is array, find matching manufacturing_id
+                manufacturingIdentity = response.find(item => 
+                  item.manufacturing_id === moNumber || 
+                  item.id && item.manufacturing_id === moNumber
+                );
+              } else if (response.data && Array.isArray(response.data)) {
+                // Response has data array
+                manufacturingIdentity = response.data.find(item => 
+                  item.manufacturing_id === moNumber || 
+                  item.id && item.manufacturing_id === moNumber
+                );
+              } else if (response.manufacturing_id === moNumber || response.id) {
+                // Response is single object
+                manufacturingIdentity = response;
+              }
+              
+              if (manufacturingIdentity && manufacturingIdentity.id) {
+                console.log(`✅ [External API] Found Manufacturing Identity ID: ${manufacturingIdentity.id} for MO ${moNumber}`);
+                resolve({ success: true, id: manufacturingIdentity.id, data: manufacturingIdentity });
+              } else {
+                console.log(`⚠️  [External API] Manufacturing Identity not found for MO ${moNumber}`);
+                // Try alternative: GET /manufacturing/:id directly with MO number
+                tryGetById(moNumber, trimmedUrl, resolve, reject);
+              }
+            } catch (parseErr) {
+              console.error(`❌ [External API] Error parsing response:`, parseErr.message);
+              console.error(`   Response: ${responseData.substring(0, 200)}`);
+              // Try alternative: GET /manufacturing/:id directly
+              tryGetById(moNumber, trimmedUrl, resolve, reject);
+            }
+          } else {
+            console.log(`⚠️  [External API] GET returned status ${res.statusCode}, trying alternative method...`);
+            // Try alternative: GET /manufacturing/:id directly
+            tryGetById(moNumber, trimmedUrl, resolve, reject);
+          }
+        });
+      });
+      
+      req.on('error', (error) => {
+        console.error(`❌ [External API] GET request error:`, error.message);
+        // Try alternative: GET /manufacturing/:id directly
+        tryGetById(moNumber, trimmedUrl, resolve, reject);
+      });
+      
+      req.setTimeout(10000, () => {
+        req.destroy();
+        console.log(`⏱️  [External API] GET request timeout, trying alternative method...`);
+        // Try alternative: GET /manufacturing/:id directly
+        tryGetById(moNumber, trimmedUrl, resolve, reject);
+      });
+      
+      req.end();
+    } catch (error) {
+      console.error(`❌ [External API] Error in getManufacturingIdentityByMoNumber:`, error.message);
+      reject(error);
+    }
+  });
+}
+
+// Helper function to try GET by ID directly
+function tryGetById(moNumber, baseUrl, resolve, reject) {
+  try {
+    const https = require('https');
+    const http = require('http');
+    const url = require('url');
+    
+    const encodedMoNumber = encodeURIComponent(moNumber);
+    let getUrl;
+    
+    if (baseUrl.toLowerCase().endsWith('/manufacturing')) {
+      getUrl = `${baseUrl}/${encodedMoNumber}`;
+    } else {
+      getUrl = `${baseUrl}/manufacturing/${encodedMoNumber}`;
+    }
+    
+    const parsedUrl = url.parse(getUrl);
+    const isHttps = parsedUrl.protocol === 'https:';
+    const httpModule = isHttps ? https : http;
+    
+    console.log(`📥 [External API] Trying alternative: GET ${getUrl}`);
+    
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || (isHttps ? 443 : 80),
+      path: parsedUrl.path,
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    };
+    
+    const req = httpModule.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => {
+        responseData += chunk;
+      });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            const response = JSON.parse(responseData);
+            
+            // Handle different response formats
+            let manufacturingIdentity = null;
+            
+            if (response.manufacturing_id === moNumber || response.id) {
+              manufacturingIdentity = response;
+            } else if (response.data && (response.data.manufacturing_id === moNumber || response.data.id)) {
+              manufacturingIdentity = response.data;
+            }
+            
+            if (manufacturingIdentity && manufacturingIdentity.id) {
+              console.log(`✅ [External API] Found Manufacturing Identity ID: ${manufacturingIdentity.id} for MO ${moNumber} (alternative method)`);
+              resolve({ success: true, id: manufacturingIdentity.id, data: manufacturingIdentity });
+            } else {
+              console.log(`⚠️  [External API] Manufacturing Identity not found for MO ${moNumber} (alternative method)`);
+              resolve({ success: false, id: null, message: 'Manufacturing Identity not found' });
+            }
+          } catch (parseErr) {
+            console.error(`❌ [External API] Error parsing alternative response:`, parseErr.message);
+            resolve({ success: false, id: null, message: 'Failed to parse response' });
+          }
+        } else {
+          console.log(`⚠️  [External API] Alternative GET returned status ${res.statusCode}`);
+          resolve({ success: false, id: null, message: `GET returned status ${res.statusCode}` });
+        }
+      });
+    });
+    
+    req.on('error', (error) => {
+      console.error(`❌ [External API] Alternative GET request error:`, error.message);
+      resolve({ success: false, id: null, message: error.message });
+    });
+    
+    req.setTimeout(10000, () => {
+      req.destroy();
+      resolve({ success: false, id: null, message: 'Request timeout' });
+    });
+    
+    req.end();
+  } catch (error) {
+    console.error(`❌ [External API] Error in tryGetById:`, error.message);
+    resolve({ success: false, id: null, message: error.message });
+  }
+}
+
 module.exports = {
   getExternalAPIUrl,
   getFallbackUrl,
   sendToExternalAPI,
   sendToExternalAPIWithUrl,
+  getManufacturingIdentityByMoNumber,
   checkCircuitBreaker,
   recordCircuitBreakerSuccess,
   recordCircuitBreakerFailure,

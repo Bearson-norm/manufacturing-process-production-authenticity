@@ -561,10 +561,56 @@ router.post('/sync-production-data', async (req, res) => {
                   ? row.authenticity_data 
                   : JSON.stringify(row.authenticity_data || {});
 
+                // Calculate quantity from authenticity_data
+                // Import the function from index.js or define it here
+                let quantity = 0;
+                try {
+                  let authData = row.authenticity_data;
+                  if (typeof authData === 'string') {
+                    authData = JSON.parse(authData);
+                  }
+                  if (Array.isArray(authData)) {
+                    authData.forEach(auth => {
+                      if (auth && auth.firstAuthenticity && auth.lastAuthenticity) {
+                        const firstStr = String(auth.firstAuthenticity).trim();
+                        const lastStr = String(auth.lastAuthenticity).trim();
+                        const firstMatch = firstStr.match(/\d+/);
+                        const lastMatch = lastStr.match(/\d+/);
+                        if (firstMatch && lastMatch) {
+                          const first = parseInt(firstMatch[0], 10) || 0;
+                          const last = parseInt(lastMatch[0], 10) || 0;
+                          if (last >= first) {
+                            quantity += (last - first + 1);
+                          }
+                        }
+                      }
+                    });
+                  } else if (authData && authData.firstAuthenticity && authData.lastAuthenticity) {
+                    const firstStr = String(authData.firstAuthenticity).trim();
+                    const lastStr = String(authData.lastAuthenticity).trim();
+                    const firstMatch = firstStr.match(/\d+/);
+                    const lastMatch = lastStr.match(/\d+/);
+                    if (firstMatch && lastMatch) {
+                      const first = parseInt(firstMatch[0], 10) || 0;
+                      const last = parseInt(lastMatch[0], 10) || 0;
+                      if (last >= first) {
+                        quantity = (last - first + 1);
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.error('Error calculating quantity:', error);
+                }
+
+                // Set completed_at if status is 'completed'
+                const completedAt = (row.status === 'completed' && row.completed_at) 
+                  ? row.completed_at 
+                  : (row.status === 'completed' ? new Date().toISOString() : null);
+
                 db.run(
                   `INSERT INTO production_results 
-                   (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, created_at, updated_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                   (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status, quantity, completed_at, created_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                    ON CONFLICT DO NOTHING`,
                   [
                     table.type,
@@ -575,6 +621,9 @@ router.post('/sync-production-data', async (req, res) => {
                     row.mo_number || null,
                     row.sku_name || null,
                     authenticityData,
+                    row.status || 'active',
+                    quantity,
+                    completedAt,
                     row.created_at || new Date().toISOString(),
                     row.updated_at || new Date().toISOString()
                   ],
