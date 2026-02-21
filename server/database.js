@@ -29,6 +29,10 @@ pool.on('error', (err) => {
 
 // Helper function to convert PostgreSQL placeholders
 function convertPlaceholders(sql, params) {
+  // If query already uses PostgreSQL placeholders ($1, $2, etc), return as-is
+  if (/\$\d+/.test(sql)) {
+    return sql;
+  }
   // Convert ? placeholders to $1, $2, etc. for PostgreSQL
   let index = 0;
   const convertedSql = sql.replace(/\?/g, () => `$${++index}`);

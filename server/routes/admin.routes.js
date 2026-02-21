@@ -557,18 +557,23 @@ router.post('/sync-production-data', async (req, res) => {
             let synced = 0;
             const insertPromises = rows.map(row => {
               return new Promise((resolveInsert, rejectInsert) => {
-                const authenticityData = typeof row.authenticity_data === 'string' 
-                  ? row.authenticity_data 
-                  : JSON.stringify(row.authenticity_data || {});
+                // Prepare authenticity_data for JSONB
+                let authData = row.authenticity_data;
+                if (typeof authData === 'string') {
+                  try {
+                    authData = JSON.parse(authData);
+                  } catch (e) {
+                    authData = [];
+                  }
+                }
+                if (!authData || (typeof authData !== 'object')) {
+                  authData = [];
+                }
+                const authenticityData = JSON.stringify(authData);
 
                 // Calculate quantity from authenticity_data
-                // Import the function from index.js or define it here
                 let quantity = 0;
                 try {
-                  let authData = row.authenticity_data;
-                  if (typeof authData === 'string') {
-                    authData = JSON.parse(authData);
-                  }
                   if (Array.isArray(authData)) {
                     authData.forEach(auth => {
                       if (auth && auth.firstAuthenticity && auth.lastAuthenticity) {
@@ -610,7 +615,7 @@ router.post('/sync-production-data', async (req, res) => {
                 db.run(
                   `INSERT INTO production_results 
                    (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status, quantity, completed_at, created_at, updated_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13)
                    ON CONFLICT (production_type, session_id, mo_number, created_at) DO NOTHING`,
                   [
                     table.type,
