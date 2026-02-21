@@ -611,7 +611,7 @@ router.post('/sync-production-data', async (req, res) => {
                   `INSERT INTO production_results 
                    (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status, quantity, completed_at, created_at, updated_at)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                   ON CONFLICT DO NOTHING`,
+                   ON CONFLICT (production_type, session_id, mo_number, created_at) DO NOTHING`,
                   [
                     table.type,
                     row.session_id || null,

@@ -3481,7 +3481,7 @@ function syncProductionDataToResults() {
             return new Promise((resolveCheck, rejectCheck) => {
               db.get(
                 `SELECT id FROM production_results 
-                 WHERE production_type = ? AND session_id = ? AND mo_number = ? AND pic = ? AND created_at = ?`,
+                 WHERE production_type = $1 AND session_id = $2 AND mo_number = $3 AND pic = $4 AND created_at = $5`,
                 [row.production_type, row.session_id || '', row.mo_number || '', row.pic || '', row.created_at || ''],
                 (err4, existing) => {
                   if (err4) {
@@ -3518,7 +3518,7 @@ function syncProductionDataToResults() {
                     `INSERT INTO production_results 
                      (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, 
                       authenticity_data, status, quantity, completed_at, created_at, synced_at) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)`,
                     [
                       row.production_type || '',
                       row.session_id || '',
@@ -3610,7 +3610,7 @@ function updateProductionResults() {
             const sourceTable = `production_${row.production_type}`;
             db.get(
               `SELECT completed_at FROM ${sourceTable} 
-               WHERE session_id = ? AND mo_number = ? AND pic = ? AND created_at = ?
+               WHERE session_id = $1 AND mo_number = $2 AND pic = $3 AND created_at = $4
                ORDER BY completed_at DESC LIMIT 1`,
               [row.session_id, row.mo_number, row.pic, row.created_at],
               (sourceErr, sourceRow) => {
@@ -3625,8 +3625,8 @@ function updateProductionResults() {
                 if (newQuantity !== currentQuantity || newCompletedAt !== row.completed_at) {
                   db.run(
                     `UPDATE production_results 
-                     SET quantity = ?, completed_at = ?, updated_at = CURRENT_TIMESTAMP 
-                     WHERE id = ?`,
+                     SET quantity = $1, completed_at = $2, updated_at = CURRENT_TIMESTAMP 
+                     WHERE id = $3`,
                     [newQuantity, newCompletedAt, row.id],
                     function(updateErr) {
                       if (updateErr) {
