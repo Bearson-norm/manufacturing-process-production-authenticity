@@ -591,7 +591,7 @@ router.put('/liquid/update-status/:id', (req, res) => {
                               
                               // Step 2: Use the ID from GET response for PUT request
                               const manufacturingId = getResult.id;
-                              const baseUrl = externalApiUrl.replace(/\/$/, '');
+                          const baseUrl = externalApiUrl.replace(/\/$/, '');
                               let putUrl;
                               
                               // Construct PUT URL with ID
@@ -600,9 +600,9 @@ router.put('/liquid/update-status/:id', (req, res) => {
                               } else {
                                 putUrl = `${baseUrl}/manufacturing/${manufacturingId}`;
                               }
-                              
+                          
                               console.log(`📤 [External API] Sending completed status for MO ${row.mo_number} (ID: ${manufacturingId}) to: ${putUrl}`);
-                              
+                          
                               return sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT');
                             })
                             .then(result => {
@@ -613,7 +613,7 @@ router.put('/liquid/update-status/:id', (req, res) => {
                               }
                             })
                             .catch(apiErr => {
-                              console.error(`❌ [External API] Failed to send completed status for MO ${row.mo_number}:`, apiErr.message);
+                    console.error(`❌ [External API] Failed to send completed status for MO ${row.mo_number}:`, apiErr.message);
                             });
                           
                           res.json({ message: 'Status updated successfully', id: id, status: status });
@@ -823,20 +823,20 @@ router.put('/liquid/submit-mo-group', (req, res) => {
                           // Step 2: Use the ID from GET response for PUT request
                           const manufacturingId = getResult.id;
                           const trimmedUrl = externalApiUrl.trim().replace(/\/$/, '');
-                          let putUrl;
-                          
+                      let putUrl;
+                      
                           // Construct PUT URL with ID
-                          if (trimmedUrl.toLowerCase().endsWith('/manufacturing')) {
+                      if (trimmedUrl.toLowerCase().endsWith('/manufacturing')) {
                             putUrl = `${trimmedUrl}/${manufacturingId}`;
-                          } else {
+                      } else {
                             putUrl = `${trimmedUrl}/manufacturing/${manufacturingId}`;
-                          }
-                          
+                      }
+                      
                           console.log(`📤 [Submit MO] Sending completed status for MO ${mo_number} (ID: ${manufacturingId}) to: ${putUrl}`);
-                          console.log(`📤 [Submit MO] Base URL: ${trimmedUrl}`);
+                      console.log(`📤 [Submit MO] Base URL: ${trimmedUrl}`);
                           console.log(`📤 [Submit MO] Manufacturing ID: ${manufacturingId}`);
-                          console.log(`📤 [Submit MO] Data:`, JSON.stringify(formattedData, null, 2));
-                          
+                      console.log(`📤 [Submit MO] Data:`, JSON.stringify(formattedData, null, 2));
+                      
                           return sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT');
                         })
                         .then(result => {
