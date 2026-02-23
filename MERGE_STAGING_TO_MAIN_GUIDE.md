@@ -185,7 +185,7 @@ pm2 save
 
 ## ✅ Checklist Sebelum Push ke Main
 
-- [ ] Semua perubahan sudah di-test di staging
+- [ ] Semua perubahan sudah di-test di staging.
 - [ ] Staging deployment berhasil dan health check pass
 - [ ] Tidak ada breaking changes yang belum didokumentasikan
 - [ ] Database migration (jika ada) sudah di-test di staging
