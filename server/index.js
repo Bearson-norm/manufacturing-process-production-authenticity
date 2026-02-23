@@ -3485,7 +3485,7 @@ function syncProductionDataToResults() {
 
               if (allRows.length === 0) {
                 console.log('ℹ️  [Sync] No valid data to sync');
-                return resolve({ syncedCount: 0, totalCount: totalCount, message: 'No valid data to sync so yeah' });
+                return resolve({ syncedCount: 0, totalCount: totalCount, message: 'No valid data to sync so yeah it is' });
               }
 
               // Check which rows already exist in production_results
@@ -4575,30 +4575,7 @@ app.post('/api/production/combined/sync', (req, res) => {
   });
 });
 
-// Graceful shutdown handling
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  db.close((err) => {
-    if (err) {
-      console.error('Error closing database:', err);
-    } else {
-      console.log('Database connection closed');
-    }
-    process.exit(0);
-  });
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
-  db.close((err) => {
-    if (err) {
-      console.error('Error closing database:', err);
-    } else {
-      console.log('Database connection closed');
-    }
-    process.exit(0);
-  });
-});
+// Graceful shutdown handling (removed duplicate - see handlers at end of file)
 
 // Scheduler Functions
 // Function to update MO data from Odoo for all production types
@@ -4929,28 +4906,40 @@ server.keepAliveTimeout = 65000; // 65 seconds
 server.headersTimeout = 66000; // 66 seconds
 
 // Graceful shutdown handling
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  const { db } = require('./database');
-  db.close((err) => {
-    if (err) {
-      console.error('Error closing database:', err);
-    } else {
-      console.log('Database connection closed');
-    }
-    process.exit(0);
-  });
-});
+let isShuttingDown = false;
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
-  const { db } = require('./database');
-  db.close((err) => {
-    if (err) {
-      console.error('Error closing database:', err);
-    } else {
-      console.log('Database connection closed');
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) {
+    console.log(`⚠️  ${signal} received again, forcing exit...`);
+    process.exit(1);
+    return;
+  }
+  
+  isShuttingDown = true;
+  console.log(`${signal} signal received: starting graceful shutdown...`);
+  
+  try {
+    // Close HTTP server
+    if (server) {
+      await new Promise((resolve) => {
+        server.close(() => {
+          console.log('✅ HTTP server closed');
+          resolve();
+        });
+      });
     }
+    
+    // Close database connection
+    await db.close();
+    console.log('✅ Database connection closed');
+    
+    console.log('✅ Graceful shutdown completed');
     process.exit(0);
-  });
-});
+  } catch (error) {
+    console.error('❌ Error during graceful shutdown:', error);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
