@@ -3433,161 +3433,294 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
 // Function to sync production data to production_results table
 function syncProductionDataToResults() {
   return new Promise((resolve, reject) => {
-  let totalCount = 0;
+    try {
+      console.log('🔄 [Sync] Starting sync of production data to production_results...');
+      let totalCount = 0;
 
-  // Sync from production_liquid
-  db.all('SELECT * FROM production_liquid', (err, liquidRows) => {
-    if (err) {
-      console.error('Error fetching production_liquid:', err);
-        return reject(err);
-    }
-
-    totalCount += liquidRows ? liquidRows.length : 0;
-
-    // Sync from production_device
-    db.all('SELECT * FROM production_device', (err2, deviceRows) => {
-      if (err2) {
-        console.error('Error fetching production_device:', err2);
-          return reject(err2);
-      }
-
-      totalCount += deviceRows ? deviceRows.length : 0;
-
-      // Sync from production_cartridge
-      db.all('SELECT * FROM production_cartridge', (err3, cartridgeRows) => {
-        if (err3) {
-          console.error('Error fetching production_cartridge:', err3);
-            return reject(err3);
+      // Sync from production_liquid
+      db.all('SELECT * FROM production_liquid', (err, liquidRows) => {
+        if (err) {
+          console.error('❌ [Sync] Error fetching production_liquid:', err);
+          console.error('❌ [Sync] Error stack:', err.stack);
+          return reject(err);
         }
 
-        totalCount += cartridgeRows ? cartridgeRows.length : 0;
+        totalCount += liquidRows ? liquidRows.length : 0;
+        console.log(`📊 [Sync] Fetched ${liquidRows ? liquidRows.length : 0} records from production_liquid`);
 
-        // Combine all rows and filter out rows with missing required fields
-        const allRows = [
-          ...(liquidRows || []).map(r => ({ ...r, production_type: 'liquid' })),
-          ...(deviceRows || []).map(r => ({ ...r, production_type: 'device' })),
-          ...(cartridgeRows || []).map(r => ({ ...r, production_type: 'cartridge' }))
-        ].filter(row => {
-          // Filter out rows with missing required fields
-          return row.session_id && row.mo_number && row.pic && row.created_at;
-        });
+        // Sync from production_device
+        db.all('SELECT * FROM production_device', (err2, deviceRows) => {
+          if (err2) {
+            console.error('❌ [Sync] Error fetching production_device:', err2);
+            console.error('❌ [Sync] Error stack:', err2.stack);
+            return reject(err2);
+          }
 
-        if (allRows.length === 0) {
-            return resolve({ syncedCount: 0, totalCount: totalCount, message: 'No valid data to sync' });
-        }
+          totalCount += deviceRows ? deviceRows.length : 0;
+          console.log(`📊 [Sync] Fetched ${deviceRows ? deviceRows.length : 0} records from production_device`);
 
-        // Check which rows already exist in production_results
-        const checkPromises = allRows.map(row => {
-            return new Promise((resolveCheck, rejectCheck) => {
-            db.get(
-              `SELECT id FROM production_results 
-                 WHERE production_type = $1 AND session_id = $2 AND mo_number = $3 AND pic = $4 AND created_at = $5`,
-              [row.production_type, row.session_id || '', row.mo_number || '', row.pic || '', row.created_at || ''],
-              (err4, existing) => {
-                if (err4) {
-                  console.error('Error checking existing row:', err4);
-                    rejectCheck(err4);
-                } else {
-                    resolveCheck({ row, exists: !!existing });
-                }
-              }
-            );
-          });
-        });
-
-        Promise.all(checkPromises)
-          .then(results => {
-            const newRows = results.filter(r => !r.exists).map(r => r.row);
-
-            if (newRows.length === 0) {
-                return resolve({ syncedCount: 0, totalCount: totalCount, message: 'All data already synced' });
+          // Sync from production_cartridge
+          db.all('SELECT * FROM production_cartridge', (err3, cartridgeRows) => {
+            if (err3) {
+              console.error('❌ [Sync] Error fetching production_cartridge:', err3);
+              console.error('❌ [Sync] Error stack:', err3.stack);
+              return reject(err3);
             }
 
-            // Insert new rows
-            const insertPromises = newRows.map((row) => {
-                return new Promise((resolveInsert, rejectInsert) => {
-                  // Calculate quantity from authenticity_data
-                  const quantity = calculateQuantityFromAuthenticity(row.authenticity_data);
-                  
-                  // Set completed_at if status is 'completed'
-                  const completedAt = (row.status === 'completed' && row.completed_at) 
-                    ? row.completed_at 
-                    : (row.status === 'completed' ? new Date().toISOString() : null);
-                  
-                  // Prepare authenticity_data for JSONB
-                  let authData = row.authenticity_data;
-                  if (typeof authData === 'string') {
-                    try {
-                      authData = JSON.parse(authData);
-                    } catch (e) {
-                      authData = [];
-                    }
-                  }
-                  if (!authData || (typeof authData !== 'object')) {
-                    authData = [];
-                  }
-                  
-                  db.run(
-                    `INSERT INTO production_results 
-                     (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, 
-                      authenticity_data, status, quantity, completed_at, created_at, synced_at) 
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, CURRENT_TIMESTAMP)
-                     RETURNING id`,
-                    [
-                      row.production_type || '',
-                      row.session_id || '',
-                      row.leader_name || '',
-                      row.shift_number || '',
-                      row.pic || '',
-                      row.mo_number || '',
-                      row.sku_name || '',
-                      JSON.stringify(authData),
-                      row.status || 'active',
-                      quantity,
-                      completedAt,
-                      row.created_at || new Date().toISOString()
-                    ],
-                  function(err5) {
-                    if (err5) {
-                      console.error('Error inserting row:', err5);
-                        console.error('Error details:', JSON.stringify(err5, null, 2));
-                        rejectInsert(err5);
-                    } else {
-                        // For PostgreSQL, lastID is set from RETURNING id
-                        resolveInsert(this.lastID || null);
-                    }
-                  }
-                );
-              });
-            });
+            totalCount += cartridgeRows ? cartridgeRows.length : 0;
+            console.log(`📊 [Sync] Fetched ${cartridgeRows ? cartridgeRows.length : 0} records from production_cartridge`);
 
-            Promise.all(insertPromises)
-              .then(() => {
-                  resolve({ syncedCount: newRows.length, totalCount: totalCount, message: `Synced ${newRows.length} records successfully` });
-              })
-              .catch((err6) => {
-                console.error('Error inserting rows:', err6);
-                  reject(err6);
+            try {
+              // Combine all rows and filter out rows with missing required fields
+              const allRows = [
+                ...(liquidRows || []).map(r => ({ ...r, production_type: 'liquid' })),
+                ...(deviceRows || []).map(r => ({ ...r, production_type: 'device' })),
+                ...(cartridgeRows || []).map(r => ({ ...r, production_type: 'cartridge' }))
+              ].filter(row => {
+                // Filter out rows with missing required fields
+                return row.session_id && row.mo_number && row.pic && row.created_at;
               });
-          })
-          .catch((checkErr) => {
-            console.error('Error checking existing rows:', checkErr);
-              reject(checkErr);
+
+              console.log(`📊 [Sync] Total valid rows to process: ${allRows.length} out of ${totalCount}`);
+
+              if (allRows.length === 0) {
+                console.log('ℹ️  [Sync] No valid data to sync');
+                return resolve({ syncedCount: 0, totalCount: totalCount, message: 'No valid data to sync so yeah' });
+              }
+
+              // Check which rows already exist in production_results
+              // Use exact match on UNIQUE constraint columns: (production_type, session_id, mo_number, created_at)
+              const checkPromises = allRows.map(row => {
+                return new Promise((resolveCheck, rejectCheck) => {
+                  try {
+                    // Normalize created_at to ensure consistent format
+                    let createdAt = row.created_at;
+                    if (createdAt) {
+                      // Convert to ISO string if not already
+                      if (typeof createdAt === 'string' && !createdAt.includes('T')) {
+                        createdAt = createdAt.replace(' ', 'T');
+                        if (!createdAt.includes('Z') && !createdAt.includes('+') && !createdAt.includes('-', 10)) {
+                          createdAt += 'Z';
+                        }
+                      }
+                      // Ensure it's a valid date
+                      const dateObj = new Date(createdAt);
+                      if (isNaN(dateObj.getTime())) {
+                        createdAt = new Date().toISOString();
+                      } else {
+                        createdAt = dateObj.toISOString();
+                      }
+                    } else {
+                      createdAt = new Date().toISOString();
+                    }
+                    
+                    db.get(
+                      `SELECT id FROM production_results 
+                       WHERE production_type = $1 
+                       AND session_id = $2 
+                       AND mo_number = $3 
+                       AND created_at = $4::timestamp`,
+                      [
+                        row.production_type || '',
+                        row.session_id || '',
+                        row.mo_number || '',
+                        createdAt
+                      ],
+                      (err4, existing) => {
+                        if (err4) {
+                          console.error('❌ [Sync] Error checking existing row:', err4);
+                          console.error('❌ [Sync] Error message:', err4.message);
+                          console.error('❌ [Sync] Row data:', {
+                            production_type: row.production_type,
+                            session_id: row.session_id,
+                            mo_number: row.mo_number,
+                            created_at: createdAt
+                          });
+                          // Don't reject on individual check errors, just mark as not existing
+                          resolveCheck({ row, exists: false });
+                        } else {
+                          resolveCheck({ row, exists: !!existing });
+                        }
+                      }
+                    );
+                  } catch (checkErr) {
+                    console.error('❌ [Sync] Error in check promise:', checkErr);
+                    resolveCheck({ row, exists: false });
+                  }
+                });
+              });
+
+              Promise.all(checkPromises)
+                .then(results => {
+                  try {
+                    const newRows = results.filter(r => !r.exists).map(r => r.row);
+                    const existingCount = results.filter(r => r.exists).length;
+
+                    console.log(`📊 [Sync] Found ${existingCount} existing records, ${newRows.length} new records to insert`);
+
+                    if (newRows.length === 0) {
+                      console.log('ℹ️  [Sync] All data already synced');
+                      return resolve({ syncedCount: 0, totalCount: totalCount, message: 'All data already synced' });
+                    }
+
+                    // Insert new rows
+                    const insertPromises = newRows.map((row, index) => {
+                      return new Promise((resolveInsert, rejectInsert) => {
+                        try {
+                          // Calculate quantity from authenticity_data
+                          const quantity = calculateQuantityFromAuthenticity(row.authenticity_data);
+                          
+                          // Set completed_at if status is 'completed'
+                          const completedAt = (row.status === 'completed' && row.completed_at) 
+                            ? row.completed_at 
+                            : (row.status === 'completed' ? new Date().toISOString() : null);
+                          
+                          // Prepare authenticity_data for JSONB
+                          let authData = row.authenticity_data;
+                          if (typeof authData === 'string') {
+                            try {
+                              authData = JSON.parse(authData);
+                            } catch (e) {
+                              console.warn(`⚠️  [Sync] Failed to parse authenticity_data for row ${index + 1}, using empty array`);
+                              authData = [];
+                            }
+                          }
+                          if (!authData || (typeof authData !== 'object')) {
+                            authData = [];
+                          }
+                          
+                          // Ensure created_at is a valid timestamp (normalize to match check query)
+                          let createdAt = row.created_at;
+                          if (createdAt) {
+                            // Convert to ISO string if not already
+                            if (typeof createdAt === 'string' && !createdAt.includes('T')) {
+                              createdAt = createdAt.replace(' ', 'T');
+                              if (!createdAt.includes('Z') && !createdAt.includes('+') && !createdAt.includes('-', 10)) {
+                                createdAt += 'Z';
+                              }
+                            }
+                            // Ensure it's a valid date
+                            const dateObj = new Date(createdAt);
+                            if (isNaN(dateObj.getTime())) {
+                              createdAt = new Date().toISOString();
+                            } else {
+                              createdAt = dateObj.toISOString();
+                            }
+                          } else {
+                            createdAt = new Date().toISOString();
+                          }
+                          
+                          db.run(
+                            `INSERT INTO production_results 
+                             (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, 
+                              authenticity_data, status, quantity, completed_at, created_at, synced_at) 
+                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, CURRENT_TIMESTAMP)
+                             ON CONFLICT (production_type, session_id, mo_number, created_at) DO NOTHING
+                             RETURNING id`,
+                            [
+                              row.production_type || '',
+                              row.session_id || '',
+                              row.leader_name || '',
+                              row.shift_number || '',
+                              row.pic || '',
+                              row.mo_number || '',
+                              row.sku_name || '',
+                              JSON.stringify(authData),
+                              row.status || 'active',
+                              quantity,
+                              completedAt,
+                              createdAt
+                            ],
+                            function(err5) {
+                              if (err5) {
+                                console.error(`❌ [Sync] Error inserting row ${index + 1}:`, err5);
+                                console.error('❌ [Sync] Error message:', err5.message);
+                                console.error('❌ [Sync] Error code:', err5.code);
+                                console.error('❌ [Sync] Row data:', {
+                                  production_type: row.production_type,
+                                  session_id: row.session_id,
+                                  mo_number: row.mo_number,
+                                  pic: row.pic,
+                                  created_at: createdAt
+                                });
+                                // Don't reject on individual insert errors, just log them
+                                resolveInsert(null);
+                              } else {
+                                if (this.changes > 0) {
+                                  resolveInsert(this.lastID || null);
+                                } else {
+                                  // Row was skipped due to conflict
+                                  resolveInsert(null);
+                                }
+                              }
+                            }
+                          );
+                        } catch (insertErr) {
+                          console.error(`❌ [Sync] Error preparing row ${index + 1} for insert:`, insertErr);
+                          resolveInsert(null);
+                        }
+                      });
+                    });
+
+                    Promise.all(insertPromises)
+                      .then((insertResults) => {
+                        const successfulInserts = insertResults.filter(r => r !== null).length;
+                        console.log(`✅ [Sync] Successfully synced ${successfulInserts} records`);
+                        resolve({ 
+                          syncedCount: successfulInserts, 
+                          totalCount: totalCount, 
+                          message: `Synced ${successfulInserts} records successfully` 
+                        });
+                      })
+                      .catch((err6) => {
+                        console.error('❌ [Sync] Error in insert promises:', err6);
+                        console.error('❌ [Sync] Error stack:', err6.stack);
+                        reject(err6);
+                      });
+                  } catch (processErr) {
+                    console.error('❌ [Sync] Error processing results:', processErr);
+                    console.error('❌ [Sync] Error stack:', processErr.stack);
+                    reject(processErr);
+                  }
+                })
+                .catch((checkErr) => {
+                  console.error('❌ [Sync] Error checking existing rows:', checkErr);
+                  console.error('❌ [Sync] Error stack:', checkErr.stack);
+                  reject(checkErr);
+                });
+            } catch (processErr) {
+              console.error('❌ [Sync] Error processing rows:', processErr);
+              console.error('❌ [Sync] Error stack:', processErr.stack);
+              reject(processErr);
+            }
           });
+        });
       });
-    });
-    });
+    } catch (syncErr) {
+      console.error('❌ [Sync] Fatal error in sync function:', syncErr);
+      console.error('❌ [Sync] Error stack:', syncErr.stack);
+      reject(syncErr);
+    }
   });
 }
 
 // Sync production data to production_results table (HTTP endpoint)
 app.post('/api/admin/sync-production-data', (req, res) => {
+  console.log('📥 [Sync Endpoint] Received sync request');
   syncProductionDataToResults()
     .then((result) => {
+      console.log('✅ [Sync Endpoint] Sync completed successfully:', result);
       res.json({ success: true, ...result });
     })
     .catch((error) => {
-      res.status(500).json({ success: false, error: error.message });
+      console.error('❌ [Sync Endpoint] Sync failed:', error);
+      console.error('❌ [Sync Endpoint] Error message:', error.message);
+      console.error('❌ [Sync Endpoint] Error stack:', error.stack);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || 'Internal server error during sync',
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
     });
 });
 
