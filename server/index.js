@@ -3797,8 +3797,8 @@ function updateProductionResults() {
             if (newQuantity !== currentQuantity) {
               db.run(
                 `UPDATE production_results 
-                 SET quantity = ?, updated_at = CURRENT_TIMESTAMP 
-                 WHERE id = ?`,
+                 SET quantity = $1, updated_at = CURRENT_TIMESTAMP 
+                 WHERE id = $2`,
                 [newQuantity, row.id],
                 function(updateErr) {
                   if (updateErr) {
@@ -3839,118 +3839,6 @@ app.post('/api/admin/update-production-results', (req, res) => {
     .catch((error) => {
       res.status(500).json({ success: false, error: error.message });
     });
-});
-app.post('/api/admin/update-production-results', (req, res) => {
-  console.log('🔄 [Update] Starting to update production_results with quantity and completed_at...');
-  
-  // Get all rows from production_results
-  db.all('SELECT * FROM production_results', (err, rows) => {
-    if (err) {
-      console.error('Error fetching production_results:', err);
-      return res.status(500).json({ success: false, error: err.message });
-    }
-
-    if (rows.length === 0) {
-      return res.json({
-        success: true,
-        updatedCount: 0,
-        message: 'No records to update'
-      });
-    }
-
-    let updatedCount = 0;
-    let errorCount = 0;
-    const updatePromises = rows.map((row) => {
-      return new Promise((resolve) => {
-        // Calculate quantity if null
-        const currentQuantity = row.quantity;
-        let newQuantity = currentQuantity;
-        
-        if (currentQuantity === null || currentQuantity === undefined) {
-          newQuantity = calculateQuantityFromAuthenticity(row.authenticity_data);
-        }
-
-        // Set completed_at if status is 'completed' and completed_at is null
-        let newCompletedAt = row.completed_at;
-        if (row.status === 'completed' && (!newCompletedAt || newCompletedAt === null)) {
-          // Try to get completed_at from source table
-          const sourceTable = `production_${row.production_type}`;
-          db.get(
-            `SELECT completed_at FROM ${sourceTable} 
-             WHERE session_id = ? AND mo_number = ? AND pic = ? AND created_at = ?
-             ORDER BY completed_at DESC LIMIT 1`,
-            [row.session_id, row.mo_number, row.pic, row.created_at],
-            (sourceErr, sourceRow) => {
-              if (!sourceErr && sourceRow && sourceRow.completed_at) {
-                newCompletedAt = sourceRow.completed_at;
-              } else {
-                // Use current timestamp if not found in source
-                newCompletedAt = new Date().toISOString();
-              }
-
-              // Update if needed
-              if (newQuantity !== currentQuantity || newCompletedAt !== row.completed_at) {
-                db.run(
-                  `UPDATE production_results 
-                   SET quantity = ?, completed_at = ?, updated_at = CURRENT_TIMESTAMP 
-                   WHERE id = ?`,
-                  [newQuantity, newCompletedAt, row.id],
-                  function(updateErr) {
-                    if (updateErr) {
-                      console.error(`Error updating row ${row.id}:`, updateErr);
-                      errorCount++;
-                    } else if (this.changes > 0) {
-                      updatedCount++;
-                    }
-                    resolve();
-                  }
-                );
-              } else {
-                resolve();
-              }
-            }
-          );
-        } else {
-          // Only update quantity if needed
-          if (newQuantity !== currentQuantity) {
-            db.run(
-              `UPDATE production_results 
-               SET quantity = ?, updated_at = CURRENT_TIMESTAMP 
-               WHERE id = ?`,
-              [newQuantity, row.id],
-              function(updateErr) {
-                if (updateErr) {
-                  console.error(`Error updating row ${row.id}:`, updateErr);
-                  errorCount++;
-                } else if (this.changes > 0) {
-                  updatedCount++;
-                }
-                resolve();
-              }
-            );
-          } else {
-            resolve();
-          }
-        }
-      });
-    });
-
-    Promise.all(updatePromises)
-      .then(() => {
-        console.log(`✅ [Update] Updated ${updatedCount} records, ${errorCount} errors`);
-        res.json({
-          success: true,
-          updatedCount: updatedCount,
-          errorCount: errorCount,
-          totalCount: rows.length,
-          message: `Updated ${updatedCount} records successfully`
-        });
-      })
-      .catch((updateErr) => {
-        console.error('Error in update process:', updateErr);
-        res.status(500).json({ success: false, error: updateErr.message });
-      });
-  });
 });
 
 // Odoo API Integration - Get MO data filtered by production type from cache
