@@ -21,7 +21,7 @@ initializeTables().then(() => {
 // Import scheduler functions (keep schedulers in index.js for now)
 // TODO: Move to services/scheduler.service.js in future refactoring
 const { getAdminConfig } = require('./routes/admin.routes');
-const { db } = require('./database');
+const { db, pool } = require('./database');
 const { sendToExternalAPIWithUrl, sendToExternalAPI, getExternalAPIUrl } = require('./services/external-api.service');
 const { apiKeyAuth } = require('./middleware/auth.middleware');
 
@@ -3430,415 +3430,296 @@ app.post('/api/admin/cleanup-mo', async (req, res) => {
   });
 });
 
-// Function to sync production data to production_results table
-function syncProductionDataToResults() {
-  return new Promise((resolve, reject) => {
+// ============================================================================
+// PRODUCTION RESULTS SYNC FUNCTIONS (async/await with PostgreSQL pool)
+// ============================================================================
+
+// Helper: Parse authenticity_data to ensure valid JSONB
+function parseAuthDataForSync(authenticityData) {
+  let authData = authenticityData;
+  if (typeof authData === 'string') {
     try {
-      console.log('🔄 [Sync] Starting sync of production data to production_results...');
-      let totalCount = 0;
-
-      // Sync from production_liquid
-      db.all('SELECT * FROM production_liquid', (err, liquidRows) => {
-        if (err) {
-          console.error('❌ [Sync] Error fetching production_liquid:', err);
-          console.error('❌ [Sync] Error stack:', err.stack);
-          return reject(err);
-        }
-
-        totalCount += liquidRows ? liquidRows.length : 0;
-        console.log(`📊 [Sync] Fetched ${liquidRows ? liquidRows.length : 0} records from production_liquid`);
-
-        // Sync from production_device
-        db.all('SELECT * FROM production_device', (err2, deviceRows) => {
-          if (err2) {
-            console.error('❌ [Sync] Error fetching production_device:', err2);
-            console.error('❌ [Sync] Error stack:', err2.stack);
-            return reject(err2);
-          }
-
-          totalCount += deviceRows ? deviceRows.length : 0;
-          console.log(`📊 [Sync] Fetched ${deviceRows ? deviceRows.length : 0} records from production_device`);
-
-          // Sync from production_cartridge
-          db.all('SELECT * FROM production_cartridge', (err3, cartridgeRows) => {
-            if (err3) {
-              console.error('❌ [Sync] Error fetching production_cartridge:', err3);
-              console.error('❌ [Sync] Error stack:', err3.stack);
-              return reject(err3);
-            }
-
-            totalCount += cartridgeRows ? cartridgeRows.length : 0;
-            console.log(`📊 [Sync] Fetched ${cartridgeRows ? cartridgeRows.length : 0} records from production_cartridge`);
-
-            try {
-              // Combine all rows and filter out rows with missing required fields
-              const allRows = [
-                ...(liquidRows || []).map(r => ({ ...r, production_type: 'liquid' })),
-                ...(deviceRows || []).map(r => ({ ...r, production_type: 'device' })),
-                ...(cartridgeRows || []).map(r => ({ ...r, production_type: 'cartridge' }))
-              ].filter(row => {
-                // Filter out rows with missing required fields
-                return row.session_id && row.mo_number && row.pic && row.created_at;
-              });
-
-              console.log(`📊 [Sync] Total valid rows to process: ${allRows.length} out of ${totalCount}`);
-
-              if (allRows.length === 0) {
-                console.log('ℹ️  [Sync] No valid data to sync');
-                return resolve({ syncedCount: 0, totalCount: totalCount, message: 'No valid data to sync so yeah it is' });
-              }
-
-              // Check which rows already exist in production_results
-              // Use exact match on UNIQUE constraint columns: (production_type, session_id, mo_number, created_at)
-              const checkPromises = allRows.map(row => {
-                return new Promise((resolveCheck, rejectCheck) => {
-                  try {
-                    // Normalize created_at to ensure consistent format
-                    let createdAt = row.created_at;
-                    if (createdAt) {
-                      // Convert to ISO string if not already
-                      if (typeof createdAt === 'string' && !createdAt.includes('T')) {
-                        createdAt = createdAt.replace(' ', 'T');
-                        if (!createdAt.includes('Z') && !createdAt.includes('+') && !createdAt.includes('-', 10)) {
-                          createdAt += 'Z';
-                        }
-                      }
-                      // Ensure it's a valid date
-                      const dateObj = new Date(createdAt);
-                      if (isNaN(dateObj.getTime())) {
-                        createdAt = new Date().toISOString();
-                      } else {
-                        createdAt = dateObj.toISOString();
-                      }
-                    } else {
-                      createdAt = new Date().toISOString();
-                    }
-                    
-                    db.get(
-                      `SELECT id FROM production_results 
-                       WHERE production_type = $1 
-                       AND session_id = $2 
-                       AND mo_number = $3 
-                       AND created_at = $4::timestamp`,
-                      [
-                        row.production_type || '',
-                        row.session_id || '',
-                        row.mo_number || '',
-                        createdAt
-                      ],
-                      (err4, existing) => {
-                        if (err4) {
-                          console.error('❌ [Sync] Error checking existing row:', err4);
-                          console.error('❌ [Sync] Error message:', err4.message);
-                          console.error('❌ [Sync] Row data:', {
-                            production_type: row.production_type,
-                            session_id: row.session_id,
-                            mo_number: row.mo_number,
-                            created_at: createdAt
-                          });
-                          // Don't reject on individual check errors, just mark as not existing
-                          resolveCheck({ row, exists: false });
-                        } else {
-                          resolveCheck({ row, exists: !!existing });
-                        }
-                      }
-                    );
-                  } catch (checkErr) {
-                    console.error('❌ [Sync] Error in check promise:', checkErr);
-                    resolveCheck({ row, exists: false });
-                  }
-                });
-              });
-
-              Promise.all(checkPromises)
-                .then(results => {
-                  try {
-                    const newRows = results.filter(r => !r.exists).map(r => r.row);
-                    const existingCount = results.filter(r => r.exists).length;
-
-                    console.log(`📊 [Sync] Found ${existingCount} existing records, ${newRows.length} new records to insert`);
-
-                    if (newRows.length === 0) {
-                      console.log('ℹ️  [Sync] All data already synced');
-                      return resolve({ syncedCount: 0, totalCount: totalCount, message: 'All data already synced' });
-                    }
-
-                    // Insert new rows
-                    const insertPromises = newRows.map((row, index) => {
-                      return new Promise((resolveInsert, rejectInsert) => {
-                        try {
-                          // Calculate quantity from authenticity_data
-                          const quantity = calculateQuantityFromAuthenticity(row.authenticity_data);
-                          
-                          // Set completed_at if status is 'completed'
-                          const completedAt = (row.status === 'completed' && row.completed_at) 
-                            ? row.completed_at 
-                            : (row.status === 'completed' ? new Date().toISOString() : null);
-                          
-                          // Prepare authenticity_data for JSONB
-                          let authData = row.authenticity_data;
-                          if (typeof authData === 'string') {
-                            try {
-                              authData = JSON.parse(authData);
-                            } catch (e) {
-                              console.warn(`⚠️  [Sync] Failed to parse authenticity_data for row ${index + 1}, using empty array`);
-                              authData = [];
-                            }
-                          }
-                          if (!authData || (typeof authData !== 'object')) {
-                            authData = [];
-                          }
-                          
-                          // Ensure created_at is a valid timestamp (normalize to match check query)
-                          let createdAt = row.created_at;
-                          if (createdAt) {
-                            // Convert to ISO string if not already
-                            if (typeof createdAt === 'string' && !createdAt.includes('T')) {
-                              createdAt = createdAt.replace(' ', 'T');
-                              if (!createdAt.includes('Z') && !createdAt.includes('+') && !createdAt.includes('-', 10)) {
-                                createdAt += 'Z';
-                              }
-                            }
-                            // Ensure it's a valid date
-                            const dateObj = new Date(createdAt);
-                            if (isNaN(dateObj.getTime())) {
-                              createdAt = new Date().toISOString();
-                            } else {
-                              createdAt = dateObj.toISOString();
-                            }
-                          } else {
-                            createdAt = new Date().toISOString();
-                          }
-                          
-                          db.run(
-                            `INSERT INTO production_results 
-                             (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, 
-                              authenticity_data, status, quantity, completed_at, created_at, synced_at) 
-                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, CURRENT_TIMESTAMP)
-                             ON CONFLICT (production_type, session_id, mo_number, created_at) DO NOTHING
-                             RETURNING id`,
-                            [
-                              row.production_type || '',
-                              row.session_id || '',
-                              row.leader_name || '',
-                              row.shift_number || '',
-                              row.pic || '',
-                              row.mo_number || '',
-                              row.sku_name || '',
-                              JSON.stringify(authData),
-                              row.status || 'active',
-                              quantity,
-                              completedAt,
-                              createdAt
-                            ],
-                            function(err5) {
-                              if (err5) {
-                                console.error(`❌ [Sync] Error inserting row ${index + 1}:`, err5);
-                                console.error('❌ [Sync] Error message:', err5.message);
-                                console.error('❌ [Sync] Error code:', err5.code);
-                                console.error('❌ [Sync] Row data:', {
-                                  production_type: row.production_type,
-                                  session_id: row.session_id,
-                                  mo_number: row.mo_number,
-                                  pic: row.pic,
-                                  created_at: createdAt
-                                });
-                                // Don't reject on individual insert errors, just log them
-                                resolveInsert(null);
-                              } else {
-                                if (this.changes > 0) {
-                                  resolveInsert(this.lastID || null);
-                                } else {
-                                  // Row was skipped due to conflict
-                                  resolveInsert(null);
-                                }
-                              }
-                            }
-                          );
-                        } catch (insertErr) {
-                          console.error(`❌ [Sync] Error preparing row ${index + 1} for insert:`, insertErr);
-                          resolveInsert(null);
-                        }
-                      });
-                    });
-
-                    Promise.all(insertPromises)
-                      .then((insertResults) => {
-                        const successfulInserts = insertResults.filter(r => r !== null).length;
-                        console.log(`✅ [Sync] Successfully synced ${successfulInserts} records`);
-                        resolve({ 
-                          syncedCount: successfulInserts, 
-                          totalCount: totalCount, 
-                          message: `Synced ${successfulInserts} records successfully` 
-                        });
-                      })
-                      .catch((err6) => {
-                        console.error('❌ [Sync] Error in insert promises:', err6);
-                        console.error('❌ [Sync] Error stack:', err6.stack);
-                        reject(err6);
-                      });
-                  } catch (processErr) {
-                    console.error('❌ [Sync] Error processing results:', processErr);
-                    console.error('❌ [Sync] Error stack:', processErr.stack);
-                    reject(processErr);
-                  }
-                })
-                .catch((checkErr) => {
-                  console.error('❌ [Sync] Error checking existing rows:', checkErr);
-                  console.error('❌ [Sync] Error stack:', checkErr.stack);
-                  reject(checkErr);
-                });
-            } catch (processErr) {
-              console.error('❌ [Sync] Error processing rows:', processErr);
-              console.error('❌ [Sync] Error stack:', processErr.stack);
-              reject(processErr);
-            }
-          });
-        });
-      });
-    } catch (syncErr) {
-      console.error('❌ [Sync] Fatal error in sync function:', syncErr);
-      console.error('❌ [Sync] Error stack:', syncErr.stack);
-      reject(syncErr);
+      authData = JSON.parse(authData);
+    } catch (e) {
+      authData = [];
     }
-  });
+  }
+  if (!authData || typeof authData !== 'object') {
+    authData = [];
+  }
+  return authData;
 }
 
-// Sync production data to production_results table (HTTP endpoint)
-app.post('/api/admin/sync-production-data', (req, res) => {
-  console.log('📥 [Sync Endpoint] Received sync request');
-  syncProductionDataToResults()
-    .then((result) => {
-      console.log('✅ [Sync Endpoint] Sync completed successfully:', result);
-      res.json({ success: true, ...result });
-    })
-    .catch((error) => {
-      console.error('❌ [Sync Endpoint] Sync failed:', error);
-      console.error('❌ [Sync Endpoint] Error message:', error.message);
-      console.error('❌ [Sync Endpoint] Error stack:', error.stack);
-      res.status(500).json({ 
-        success: false, 
-        error: error.message || 'Internal server error during sync',
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      });
-    });
-});
+// Function to sync ONLY NEW production data (not yet in production_results) from source tables
+async function syncProductionDataToResults() {
+  const client = await pool.connect();
+  try {
+    console.log('🔄 [Sync] Starting incremental sync of production data to production_results...');
 
-// Function to update existing production_results rows with null quantity or completed_at
-function updateProductionResults() {
-  return new Promise((resolve, reject) => {
-    console.log('🔄 [Update] Starting to update production_results with quantity and completed_at...');
-    
-    // Get all rows from production_results
-    db.all('SELECT * FROM production_results', (err, rows) => {
-      if (err) {
-        console.error('Error fetching production_results:', err);
-        return reject(err);
+    const sourceTables = [
+      { name: 'production_liquid', type: 'liquid' },
+      { name: 'production_device', type: 'device' },
+      { name: 'production_cartridge', type: 'cartridge' }
+    ];
+
+    let totalNew = 0;
+    let syncedCount = 0;
+    let errorCount = 0;
+
+    for (const table of sourceTables) {
+      // Only fetch rows from source that do NOT yet exist in production_results
+      // Uses LEFT JOIN + IS NULL to find missing rows — no full-table scan on production_results
+      const newRowsResult = await client.query(
+        `SELECT s.* 
+         FROM ${table.name} s
+         LEFT JOIN production_results pr
+           ON pr.production_type = $1
+           AND pr.session_id = s.session_id
+           AND pr.mo_number = s.mo_number
+           AND pr.created_at = s.created_at
+         WHERE pr.id IS NULL
+           AND s.session_id IS NOT NULL
+           AND s.mo_number IS NOT NULL
+           AND s.pic IS NOT NULL
+           AND s.created_at IS NOT NULL`,
+        [table.type]
+      );
+
+      const newRows = newRowsResult.rows || [];
+      totalNew += newRows.length;
+
+      if (newRows.length > 0) {
+        console.log(`📊 [Sync] Found ${newRows.length} new records from ${table.name}`);
       }
 
-      if (rows.length === 0) {
-        return resolve({ updatedCount: 0, errorCount: 0, totalCount: 0, message: 'No records to update' });
+      for (const row of newRows) {
+        try {
+          const authData = parseAuthDataForSync(row.authenticity_data);
+          const quantity = calculateQuantityFromAuthenticity(row.authenticity_data);
+          const completedAt = (row.status === 'completed' && row.completed_at)
+            ? row.completed_at
+            : (row.status === 'completed' ? new Date().toISOString() : null);
+
+          await client.query(
+            `INSERT INTO production_results 
+             (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name,
+              authenticity_data, status, quantity, completed_at, created_at, synced_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, CURRENT_TIMESTAMP)
+             ON CONFLICT (production_type, session_id, mo_number, created_at) DO NOTHING`,
+            [
+              table.type,
+              row.session_id || '',
+              row.leader_name || '',
+              row.shift_number || '',
+              row.pic || '',
+              row.mo_number || '',
+              row.sku_name || '',
+              JSON.stringify(authData),
+              row.status || 'active',
+              quantity,
+              completedAt,
+              row.created_at
+            ]
+          );
+          syncedCount++;
+        } catch (rowErr) {
+          errorCount++;
+          console.error(`❌ [Sync] Error inserting row from ${table.name} (MO: ${row.mo_number}, PIC: ${row.pic}):`, rowErr.message);
+        }
       }
+    }
 
-      let updatedCount = 0;
-      let errorCount = 0;
-      const updatePromises = rows.map((row) => {
-        return new Promise((resolveRow) => {
-          // Calculate quantity if null
-          const currentQuantity = row.quantity;
-          let newQuantity = currentQuantity;
-          
-          if (currentQuantity === null || currentQuantity === undefined) {
-            newQuantity = calculateQuantityFromAuthenticity(row.authenticity_data);
-          }
+    const message = totalNew === 0
+      ? 'No new data to sync — production_results is up to date'
+      : `Sync completed: ${syncedCount} new records inserted, ${errorCount} errors`;
+    console.log(`✅ [Sync] ${message}`);
+    return { syncedCount, totalNew, errorCount, message };
 
-          // Set completed_at if status is 'completed' and completed_at is null
-          let newCompletedAt = row.completed_at;
-          if (row.status === 'completed' && (!newCompletedAt || newCompletedAt === null)) {
-            // Try to get completed_at from source table
-            const sourceTable = `production_${row.production_type}`;
-            db.get(
-              `SELECT completed_at FROM ${sourceTable} 
-               WHERE session_id = $1 AND mo_number = $2 AND pic = $3 AND created_at = $4
-               ORDER BY completed_at DESC LIMIT 1`,
-              [row.session_id, row.mo_number, row.pic, row.created_at],
-              (sourceErr, sourceRow) => {
-                if (!sourceErr && sourceRow && sourceRow.completed_at) {
-                  newCompletedAt = sourceRow.completed_at;
-                } else {
-                  // Use current timestamp if not found in source
-                  newCompletedAt = new Date().toISOString();
-                }
-
-                // Update if needed
-                if (newQuantity !== currentQuantity || newCompletedAt !== row.completed_at) {
-                  db.run(
-                    `UPDATE production_results 
-                     SET quantity = $1, completed_at = $2, updated_at = CURRENT_TIMESTAMP 
-                     WHERE id = $3`,
-                    [newQuantity, newCompletedAt, row.id],
-                    function(updateErr) {
-                      if (updateErr) {
-                        console.error(`Error updating row ${row.id}:`, updateErr);
-                        errorCount++;
-                      } else if (this.changes > 0) {
-                        updatedCount++;
-                      }
-                      resolveRow();
-                    }
-                  );
-                } else {
-                  resolveRow();
-                }
-              }
-            );
-          } else {
-            // Only update quantity if needed
-            if (newQuantity !== currentQuantity) {
-              db.run(
-                `UPDATE production_results 
-                 SET quantity = $1, updated_at = CURRENT_TIMESTAMP 
-                 WHERE id = $2`,
-                [newQuantity, row.id],
-                function(updateErr) {
-                  if (updateErr) {
-                    console.error(`Error updating row ${row.id}:`, updateErr);
-                    errorCount++;
-                  } else if (this.changes > 0) {
-                    updatedCount++;
-                  }
-                  resolveRow();
-                }
-              );
-            } else {
-              resolveRow();
-            }
-          }
-        });
-      });
-
-      Promise.all(updatePromises)
-        .then(() => {
-          console.log(`✅ [Update] Updated ${updatedCount} records, ${errorCount} errors`);
-          resolve({ updatedCount, errorCount, totalCount: rows.length, message: `Updated ${updatedCount} records successfully` });
-        })
-        .catch((updateErr) => {
-          console.error('Error in update process:', updateErr);
-          reject(updateErr);
-        });
-    });
-  });
+  } catch (err) {
+    console.error('❌ [Sync] Fatal error:', err.message);
+    console.error('❌ [Sync] Stack:', err.stack);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-// Update existing production_results rows with null quantity or completed_at (HTTP endpoint)
-app.post('/api/admin/update-production-results', (req, res) => {
-  updateProductionResults()
-    .then((result) => {
-      res.json({ success: true, ...result });
-    })
-    .catch((error) => {
-      res.status(500).json({ success: false, error: error.message });
-    });
+// Function to sync status & data changes from source tables to production_results
+// Only touches rows where source and production_results actually differ
+async function syncStatusAndDataChanges() {
+  const client = await pool.connect();
+  try {
+    console.log('🔄 [DeltaSync] Checking for status & data changes...');
+
+    const sourceTables = [
+      { name: 'production_liquid', type: 'liquid' },
+      { name: 'production_device', type: 'device' },
+      { name: 'production_cartridge', type: 'cartridge' }
+    ];
+
+    let statusUpdated = 0;
+    let dataUpdated = 0;
+
+    for (const table of sourceTables) {
+      // 1) Status mismatch: source is 'completed' but production_results is NOT 'completed'
+      const statusResult = await client.query(
+        `SELECT s.authenticity_data AS source_auth_data,
+                s.status AS source_status,
+                s.completed_at AS source_completed_at,
+                pr.id AS pr_id
+         FROM ${table.name} s
+         INNER JOIN production_results pr
+           ON pr.production_type = $1
+           AND pr.session_id = s.session_id
+           AND pr.mo_number = s.mo_number
+           AND pr.pic = s.pic
+         WHERE s.status = 'completed' AND pr.status != 'completed'`,
+        [table.type]
+      );
+
+      for (const row of statusResult.rows) {
+        try {
+          const authData = parseAuthDataForSync(row.source_auth_data);
+          const quantity = calculateQuantityFromAuthenticity(row.source_auth_data);
+          await client.query(
+            `UPDATE production_results
+             SET status = 'completed',
+                 completed_at = $1,
+                 quantity = $2,
+                 authenticity_data = $3::jsonb,
+                 updated_at = CURRENT_TIMESTAMP,
+                 synced_at = CURRENT_TIMESTAMP
+             WHERE id = $4`,
+            [
+              row.source_completed_at || new Date().toISOString(),
+              quantity,
+              JSON.stringify(authData),
+              row.pr_id
+            ]
+          );
+          statusUpdated++;
+        } catch (rowErr) {
+          console.error(`❌ [DeltaSync] Status update error (PR id ${row.pr_id}):`, rowErr.message);
+        }
+      }
+
+      if (statusResult.rows.length > 0) {
+        console.log(`📊 [DeltaSync] Fixed ${statusResult.rows.length} status mismatches from ${table.name}`);
+      }
+
+      // 2) Quantity mismatch: production_results has NULL quantity but source has data
+      const qtyResult = await client.query(
+        `SELECT s.authenticity_data AS source_auth_data,
+                s.status AS source_status,
+                s.completed_at AS source_completed_at,
+                pr.id AS pr_id
+         FROM ${table.name} s
+         INNER JOIN production_results pr
+           ON pr.production_type = $1
+           AND pr.session_id = s.session_id
+           AND pr.mo_number = s.mo_number
+           AND pr.pic = s.pic
+         WHERE pr.quantity IS NULL
+           OR (pr.status = 'completed' AND pr.completed_at IS NULL)`,
+        [table.type]
+      );
+
+      for (const row of qtyResult.rows) {
+        try {
+          const authData = parseAuthDataForSync(row.source_auth_data);
+          const quantity = calculateQuantityFromAuthenticity(row.source_auth_data);
+          const completedAt = (row.source_status === 'completed')
+            ? (row.source_completed_at || new Date().toISOString())
+            : null;
+
+          await client.query(
+            `UPDATE production_results
+             SET quantity = $1,
+                 completed_at = COALESCE(completed_at, $2),
+                 authenticity_data = $3::jsonb,
+                 status = $4,
+                 updated_at = CURRENT_TIMESTAMP,
+                 synced_at = CURRENT_TIMESTAMP
+             WHERE id = $5`,
+            [
+              quantity,
+              completedAt,
+              JSON.stringify(authData),
+              row.source_status || 'active',
+              row.pr_id
+            ]
+          );
+          dataUpdated++;
+        } catch (rowErr) {
+          console.error(`❌ [DeltaSync] Data update error (PR id ${row.pr_id}):`, rowErr.message);
+        }
+      }
+
+      if (qtyResult.rows.length > 0) {
+        console.log(`📊 [DeltaSync] Fixed ${qtyResult.rows.length} quantity/completed_at gaps from ${table.name}`);
+      }
+    }
+
+    const total = statusUpdated + dataUpdated;
+    const message = total > 0
+      ? `Delta sync: ${statusUpdated} status fixes, ${dataUpdated} data fixes`
+      : 'Delta sync: everything up to date';
+    console.log(`✅ [DeltaSync] ${message}`);
+    return { statusUpdated, dataUpdated, message };
+
+  } catch (err) {
+    console.error('❌ [DeltaSync] Fatal error:', err.message);
+    console.error('❌ [DeltaSync] Stack:', err.stack);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Master function that runs all sync steps in sequence
+async function runFullProductionSync() {
+  const startTime = Date.now();
+  console.log('\n' + '='.repeat(60));
+  console.log('🔄 [FullSync] Starting production_results sync...');
+  console.log('='.repeat(60));
+
+  const results = {
+    sync: null,
+    delta: null,
+    error: null,
+    duration: 0
+  };
+
+  try {
+    // Step 1: Insert rows that don't exist yet in production_results
+    results.sync = await syncProductionDataToResults();
+
+    // Step 2: Fix status mismatches + null quantity/completed_at
+    results.delta = await syncStatusAndDataChanges();
+
+  } catch (err) {
+    console.error('❌ [FullSync] Error during sync pipeline:', err.message);
+    results.error = err.message;
+  }
+
+  results.duration = Date.now() - startTime;
+  console.log(`✅ [FullSync] Completed in ${results.duration}ms`);
+  console.log('='.repeat(60) + '\n');
+
+  return results;
+}
+
+// NOTE: sync-production-data endpoint is handled by admin.routes.js (mounted at /api/admin)
+// runFullProductionSync() is used by the scheduler only
+
+// Update existing production_results rows (HTTP endpoint) — lightweight, only fixes gaps
+app.post('/api/admin/update-production-results', async (req, res) => {
+  try {
+    const result = await syncStatusAndDataChanges();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Odoo API Integration - Get MO data filtered by production type from cache
@@ -4720,46 +4601,47 @@ cron.schedule('10 */6 * * *', () => {
   sendMoListToExternalAPI();
 });
 
-// Sync and update production_results every hour
-// This ensures quantity and completed_at are always up to date
-cron.schedule('0 * * * *', () => {
-  console.log('⏰ [Scheduler] Triggered: Sync and update production_results');
-  
-  // First sync new data from source tables
-  syncProductionDataToResults()
-    .then((result) => {
-      console.log(`✅ [Scheduler] Production results sync completed: ${result.message}`);
-      
-      // Then update existing rows with null values
-      return updateProductionResults();
-    })
-    .then((result) => {
-      console.log(`✅ [Scheduler] Production results update completed: ${result.message}`);
+// Sync and update production_results every 15 minutes
+// This ensures production_results is always up to date with source tables
+cron.schedule('*/15 * * * *', () => {
+  console.log('⏰ [Scheduler] Triggered: Full production_results sync');
+  runFullProductionSync()
+    .then((results) => {
+      console.log(`✅ [Scheduler] Full sync completed in ${results.duration}ms`);
     })
     .catch((error) => {
-      console.error('❌ [Scheduler] Error in production_results sync/update:', error.message);
+      console.error('❌ [Scheduler] Error in full production sync:', error.message);
     });
 });
 
 console.log('📅 [Scheduler] Cron jobs configured:');
 console.log('   - Update MO data from Odoo: Every 6 hours (cron: 0 */6 * * *)');
 console.log('   - Send MO list to external API: Every 6 hours (cron: 10 */6 * * *)');
-console.log('   - Sync and update production_results: Every hour (cron: 0 * * * *)');
+console.log('   - Full production_results sync: Every 15 minutes (cron: */15 * * * *)');
 
-// Initial MO sync on server startup (after 5 seconds delay to ensure DB is ready)
+// Initial sync on server startup (after 5 seconds delay to ensure DB is ready)
 const runInitialSync = () => {
-  console.log('\n🔄 [Initial Sync] Starting initial MO sync from Odoo...');
-  console.log('   This will run once on server startup to populate MO cache');
+  console.log('\n🔄 [Initial Sync] Starting initial sync on server startup...');
+  console.log('   This will sync MO data from Odoo AND production_results');
   
-  setTimeout(() => {
-    updateMoDataFromOdoo()
-      .then(() => {
-        console.log('✅ [Initial Sync] Initial MO sync completed');
-      })
-      .catch((err) => {
-        console.error('❌ [Initial Sync] Initial MO sync failed:', err.message);
-        console.error('   You can manually trigger sync using: POST /api/admin/sync-mo');
-      });
+  setTimeout(async () => {
+    // Sync MO data from Odoo
+    try {
+      await updateMoDataFromOdoo();
+      console.log('✅ [Initial Sync] MO data sync completed');
+    } catch (err) {
+      console.error('❌ [Initial Sync] MO data sync failed:', err.message);
+      console.error('   You can manually trigger sync using: POST /api/admin/sync-mo');
+    }
+
+    // Sync production_results
+    try {
+      const result = await runFullProductionSync();
+      console.log(`✅ [Initial Sync] Production results sync completed in ${result.duration}ms`);
+    } catch (err) {
+      console.error('❌ [Initial Sync] Production results sync failed:', err.message);
+      console.error('   You can manually trigger sync using: POST /api/admin/sync-production-data');
+    }
   }, 5000); // Wait 5 seconds for database to be fully ready
 };
 

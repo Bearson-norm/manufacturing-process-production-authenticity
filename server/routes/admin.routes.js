@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const { db } = require('../database');
+const { db, pool } = require('../database');
 
 // Helper function to get admin config
 function getAdminConfig(callback) {
@@ -487,186 +487,191 @@ router.post('/cleanup-mo', async (req, res) => {
 });
 
 // POST /api/admin/sync-production-data
+// Incremental sync: only inserts new rows + updates changed rows
 router.post('/sync-production-data', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const tables = [
+    console.log('📥 [Sync Endpoint] Received sync request from admin panel');
+
+    const sourceTables = [
       { name: 'production_liquid', type: 'liquid' },
       { name: 'production_device', type: 'device' },
       { name: 'production_cartridge', type: 'cartridge' }
     ];
 
-    let totalSynced = 0;
-    let totalCount = 0;
+    let totalNew = 0;
+    let syncedCount = 0;
+    let updatedCount = 0;
+    let errorCount = 0;
 
-    // Check if production_results table exists
-    db.get(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name='production_results'",
-      [],
-      async (tableErr, tableRow) => {
-        if (tableErr) {
-          return res.status(500).json({ success: false, error: tableErr.message });
+    // Helper: parse authenticity_data for JSONB
+    function parseAuthData(authenticityData) {
+      let authData = authenticityData;
+      if (typeof authData === 'string') {
+        try { authData = JSON.parse(authData); } catch (e) { authData = []; }
+      }
+      if (!authData || typeof authData !== 'object') authData = [];
+      return authData;
+    }
+
+    // Helper: calculate quantity from authenticity_data
+    function calcQuantity(authenticityData) {
+      try {
+        let quantity = 0;
+        let authData = authenticityData;
+        if (typeof authData === 'string') {
+          try { authData = JSON.parse(authData); } catch (e) { return 0; }
         }
-
-        if (!tableRow) {
-          // Create production_results table if it doesn't exist
-          db.run(`
-            CREATE TABLE IF NOT EXISTS production_results (
-              id SERIAL PRIMARY KEY,
-              production_type TEXT NOT NULL,
-              session_id TEXT,
-              leader_name TEXT,
-              shift_number TEXT,
-              pic TEXT,
-              mo_number TEXT,
-              sku_name TEXT,
-              authenticity_data JSONB,
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-              UNIQUE(production_type, session_id, mo_number, created_at)
-            )
-          `, (createErr) => {
-            if (createErr) {
-              return res.status(500).json({ success: false, error: createErr.message });
+        if (Array.isArray(authData)) {
+          authData.forEach(auth => {
+            if (auth && auth.firstAuthenticity && auth.lastAuthenticity) {
+              const firstMatch = String(auth.firstAuthenticity).trim().match(/\d+/);
+              const lastMatch = String(auth.lastAuthenticity).trim().match(/\d+/);
+              if (firstMatch && lastMatch) {
+                const first = parseInt(firstMatch[0], 10) || 0;
+                const last = parseInt(lastMatch[0], 10) || 0;
+                if (last >= first) quantity += (last - first + 1);
+              }
             }
-            syncData();
           });
-        } else {
-          syncData();
+        } else if (authData && authData.firstAuthenticity && authData.lastAuthenticity) {
+          const firstMatch = String(authData.firstAuthenticity).trim().match(/\d+/);
+          const lastMatch = String(authData.lastAuthenticity).trim().match(/\d+/);
+          if (firstMatch && lastMatch) {
+            const first = parseInt(firstMatch[0], 10) || 0;
+            const last = parseInt(lastMatch[0], 10) || 0;
+            if (last >= first) quantity = (last - first + 1);
+          }
+        }
+        return quantity;
+      } catch (e) { return 0; }
+    }
+
+    // ── STEP 1: Insert new rows ──
+    for (const table of sourceTables) {
+      const newRowsResult = await client.query(
+        `SELECT s.*
+         FROM ${table.name} s
+         LEFT JOIN production_results pr
+           ON pr.production_type = $1
+           AND pr.session_id = s.session_id
+           AND pr.mo_number = s.mo_number
+           AND pr.created_at = s.created_at
+         WHERE pr.id IS NULL
+           AND s.session_id IS NOT NULL
+           AND s.mo_number IS NOT NULL
+           AND s.pic IS NOT NULL
+           AND s.created_at IS NOT NULL`,
+        [table.type]
+      );
+
+      const newRows = newRowsResult.rows || [];
+      totalNew += newRows.length;
+
+      if (newRows.length > 0) {
+        console.log(`📊 [Sync] Found ${newRows.length} new records from ${table.name}`);
+      }
+
+      for (const row of newRows) {
+        try {
+          const authData = parseAuthData(row.authenticity_data);
+          const quantity = calcQuantity(row.authenticity_data);
+          const completedAt = (row.status === 'completed' && row.completed_at)
+            ? row.completed_at
+            : (row.status === 'completed' ? new Date().toISOString() : null);
+
+          await client.query(
+            `INSERT INTO production_results
+             (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name,
+              authenticity_data, status, quantity, completed_at, created_at, synced_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, CURRENT_TIMESTAMP)
+             ON CONFLICT (production_type, session_id, mo_number, created_at) DO NOTHING`,
+            [
+              table.type,
+              row.session_id || '',
+              row.leader_name || '',
+              row.shift_number || '',
+              row.pic || '',
+              row.mo_number || '',
+              row.sku_name || '',
+              JSON.stringify(authData),
+              row.status || 'active',
+              quantity,
+              completedAt,
+              row.created_at
+            ]
+          );
+          syncedCount++;
+        } catch (rowErr) {
+          errorCount++;
+          console.error(`❌ [Sync] Insert error from ${table.name} (MO: ${row.mo_number}):`, rowErr.message);
         }
       }
-    );
-
-    function syncData() {
-      const syncPromises = tables.map(table => {
-        return new Promise((resolve, reject) => {
-          // Get all data from the source table
-          db.all(`SELECT * FROM ${table.name}`, [], (err, rows) => {
-            if (err) {
-              reject(err);
-              return;
-            }
-
-            totalCount += rows.length;
-
-            if (rows.length === 0) {
-              resolve({ synced: 0, total: 0 });
-              return;
-            }
-
-            // Insert into production_results (skip duplicates)
-            let synced = 0;
-            const insertPromises = rows.map(row => {
-              return new Promise((resolveInsert, rejectInsert) => {
-                // Prepare authenticity_data for JSONB
-                let authData = row.authenticity_data;
-                if (typeof authData === 'string') {
-                  try {
-                    authData = JSON.parse(authData);
-                  } catch (e) {
-                    authData = [];
-                  }
-                }
-                if (!authData || (typeof authData !== 'object')) {
-                  authData = [];
-                }
-                const authenticityData = JSON.stringify(authData);
-
-                // Calculate quantity from authenticity_data
-                let quantity = 0;
-                try {
-                  if (Array.isArray(authData)) {
-                    authData.forEach(auth => {
-                      if (auth && auth.firstAuthenticity && auth.lastAuthenticity) {
-                        const firstStr = String(auth.firstAuthenticity).trim();
-                        const lastStr = String(auth.lastAuthenticity).trim();
-                        const firstMatch = firstStr.match(/\d+/);
-                        const lastMatch = lastStr.match(/\d+/);
-                        if (firstMatch && lastMatch) {
-                          const first = parseInt(firstMatch[0], 10) || 0;
-                          const last = parseInt(lastMatch[0], 10) || 0;
-                          if (last >= first) {
-                            quantity += (last - first + 1);
-                          }
-                        }
-                      }
-                    });
-                  } else if (authData && authData.firstAuthenticity && authData.lastAuthenticity) {
-                    const firstStr = String(authData.firstAuthenticity).trim();
-                    const lastStr = String(authData.lastAuthenticity).trim();
-                    const firstMatch = firstStr.match(/\d+/);
-                    const lastMatch = lastStr.match(/\d+/);
-                    if (firstMatch && lastMatch) {
-                      const first = parseInt(firstMatch[0], 10) || 0;
-                      const last = parseInt(lastMatch[0], 10) || 0;
-                      if (last >= first) {
-                        quantity = (last - first + 1);
-                      }
-                    }
-                  }
-                } catch (error) {
-                  console.error('Error calculating quantity:', error);
-                }
-
-                // Set completed_at if status is 'completed'
-                const completedAt = (row.status === 'completed' && row.completed_at) 
-                  ? row.completed_at 
-                  : (row.status === 'completed' ? new Date().toISOString() : null);
-
-                db.run(
-                  `INSERT INTO production_results 
-                   (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status, quantity, completed_at, created_at, updated_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13)
-                   ON CONFLICT (production_type, session_id, mo_number, created_at) DO NOTHING`,
-                  [
-                    table.type,
-                    row.session_id || null,
-                    row.leader_name || null,
-                    row.shift_number || null,
-                    row.pic || null,
-                    row.mo_number || null,
-                    row.sku_name || null,
-                    authenticityData,
-                    row.status || 'active',
-                    quantity,
-                    completedAt,
-                    row.created_at || new Date().toISOString(),
-                    row.updated_at || new Date().toISOString()
-                  ],
-                  function(insertErr) {
-                    if (insertErr) {
-                      rejectInsert(insertErr);
-                    } else {
-                      if (this.changes > 0) synced++;
-                      resolveInsert();
-                    }
-                  }
-                );
-              });
-            });
-
-            Promise.all(insertPromises)
-              .then(() => resolve({ synced, total: rows.length }))
-              .catch(reject);
-          });
-        });
-      });
-
-      Promise.all(syncPromises)
-        .then(results => {
-          const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
-          res.json({
-            success: true,
-            syncedCount: totalSynced,
-            totalCount: totalCount,
-            message: `Synced ${totalSynced} records from ${totalCount} total records`
-          });
-        })
-        .catch(error => {
-          res.status(500).json({ success: false, error: error.message });
-        });
     }
+
+    // ── STEP 2: Update existing rows where source data has changed ──
+    for (const table of sourceTables) {
+      try {
+        const deltaResult = await client.query(
+          `SELECT s.session_id, s.mo_number, s.created_at,
+                  s.authenticity_data AS source_auth, s.status AS source_status,
+                  s.completed_at AS source_completed_at,
+                  pr.id AS pr_id, pr.status AS pr_status
+           FROM ${table.name} s
+           INNER JOIN production_results pr
+             ON pr.production_type = $1
+             AND pr.session_id = s.session_id
+             AND pr.mo_number = s.mo_number
+             AND pr.created_at = s.created_at
+           WHERE pr.status IS DISTINCT FROM s.status
+              OR pr.quantity IS NULL
+              OR pr.completed_at IS NULL AND s.status = 'completed'`,
+          [table.type]
+        );
+
+        for (const row of deltaResult.rows) {
+          try {
+            const authData = parseAuthData(row.source_auth);
+            const quantity = calcQuantity(row.source_auth);
+            const completedAt = row.source_completed_at ||
+              (row.source_status === 'completed' ? new Date().toISOString() : null);
+
+            await client.query(
+              `UPDATE production_results
+               SET status = $1, quantity = $2, completed_at = $3,
+                   authenticity_data = $4::jsonb, updated_at = CURRENT_TIMESTAMP, synced_at = CURRENT_TIMESTAMP
+               WHERE id = $5`,
+              [row.source_status || 'active', quantity, completedAt, JSON.stringify(authData), row.pr_id]
+            );
+            updatedCount++;
+          } catch (updErr) {
+            errorCount++;
+            console.error(`❌ [Sync] Update error PR id ${row.pr_id}:`, updErr.message);
+          }
+        }
+      } catch (deltaErr) {
+        console.error(`❌ [Sync] Delta query error for ${table.name}:`, deltaErr.message);
+      }
+    }
+
+    const message = totalNew === 0 && updatedCount === 0
+      ? 'Production results already up to date'
+      : `Synced ${syncedCount} new + ${updatedCount} updated records`;
+    console.log(`✅ [Sync] ${message}`);
+
+    res.json({
+      success: true,
+      syncedCount,
+      updatedCount,
+      totalNew,
+      errorCount,
+      message
+    });
   } catch (error) {
+    console.error('❌ [Sync Endpoint] Fatal error:', error.message, error.stack);
     res.status(500).json({ success: false, error: error.message });
+  } finally {
+    client.release();
   }
 });
 
