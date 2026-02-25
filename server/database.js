@@ -402,40 +402,8 @@ async function initializeTables() {
                        WHERE table_name='production_results' AND column_name='synced_at') THEN
           ALTER TABLE production_results ADD COLUMN synced_at TIMESTAMP;
         END IF;
-
       END $$;
     `);
-
-    // Ensure UNIQUE constraint exists on production_results for ON CONFLICT to work
-    // First remove duplicates if any, then create the index
-    try {
-      await client.query(`
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_production_results_unique_sync
-        ON production_results (production_type, session_id, mo_number, created_at)
-      `);
-      console.log('  ✅ production_results unique index verified');
-    } catch (idxErr) {
-      // If it fails due to duplicates, clean them up first then retry
-      if (idxErr.message.includes('could not create unique index') || idxErr.code === '23505') {
-        console.log('  ⚠️  Duplicates found in production_results, cleaning up...');
-        await client.query(`
-          DELETE FROM production_results a
-          USING production_results b
-          WHERE a.id < b.id
-            AND a.production_type = b.production_type
-            AND a.session_id = b.session_id
-            AND a.mo_number = b.mo_number
-            AND a.created_at = b.created_at
-        `);
-        await client.query(`
-          CREATE UNIQUE INDEX IF NOT EXISTS idx_production_results_unique_sync
-          ON production_results (production_type, session_id, mo_number, created_at)
-        `);
-        console.log('  ✅ production_results duplicates cleaned & unique index created');
-      } else {
-        console.warn('  ⚠️  Could not create unique index on production_results:', idxErr.message);
-      }
-    }
 
     // Odoo MO Cache table
     await client.query(`

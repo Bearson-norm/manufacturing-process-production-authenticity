@@ -3560,112 +3560,85 @@ async function syncStatusAndDataChanges() {
     let statusUpdated = 0;
     let dataUpdated = 0;
 
+    let activeUpdated = 0;
+
     for (const table of sourceTables) {
-      // 1) Status mismatch: source is 'completed' but production_results is NOT 'completed'
-      const statusResult = await client.query(
+      // 1) Always refresh rows where production_results status is 'active'
+      //    + rows where status mismatch or quantity/completed_at is missing
+      const deltaResult = await client.query(
         `SELECT s.authenticity_data AS source_auth_data,
                 s.status AS source_status,
                 s.completed_at AS source_completed_at,
-                pr.id AS pr_id
+                s.leader_name AS source_leader, s.shift_number AS source_shift,
+                s.pic AS source_pic, s.sku_name AS source_sku,
+                pr.id AS pr_id, pr.status AS pr_status
          FROM ${table.name} s
          INNER JOIN production_results pr
            ON pr.production_type = $1
            AND pr.session_id = s.session_id
            AND pr.mo_number = s.mo_number
-           AND pr.pic = s.pic
-         WHERE s.status = 'completed' AND pr.status != 'completed'`,
+           AND pr.created_at = s.created_at
+         WHERE pr.status = 'active'
+            OR pr.status IS DISTINCT FROM s.status
+            OR pr.quantity IS NULL
+            OR (pr.completed_at IS NULL AND s.status = 'completed')`,
         [table.type]
       );
 
-      for (const row of statusResult.rows) {
+      for (const row of deltaResult.rows) {
         try {
           const authData = parseAuthDataForSync(row.source_auth_data);
           const quantity = calculateQuantityFromAuthenticity(row.source_auth_data);
+          const completedAt = row.source_completed_at ||
+            (row.source_status === 'completed' ? new Date().toISOString() : null);
+
           await client.query(
             `UPDATE production_results
-             SET status = 'completed',
-                 completed_at = $1,
+             SET status = $1,
                  quantity = $2,
-                 authenticity_data = $3::jsonb,
+                 completed_at = $3,
+                 authenticity_data = $4::jsonb,
+                 leader_name = $5,
+                 shift_number = $6,
+                 pic = $7,
+                 sku_name = $8,
                  updated_at = CURRENT_TIMESTAMP,
                  synced_at = CURRENT_TIMESTAMP
-             WHERE id = $4`,
+             WHERE id = $9`,
             [
-              row.source_completed_at || new Date().toISOString(),
-              quantity,
-              JSON.stringify(authData),
-              row.pr_id
-            ]
-          );
-          statusUpdated++;
-        } catch (rowErr) {
-          console.error(`❌ [DeltaSync] Status update error (PR id ${row.pr_id}):`, rowErr.message);
-        }
-      }
-
-      if (statusResult.rows.length > 0) {
-        console.log(`📊 [DeltaSync] Fixed ${statusResult.rows.length} status mismatches from ${table.name}`);
-      }
-
-      // 2) Quantity mismatch: production_results has NULL quantity but source has data
-      const qtyResult = await client.query(
-        `SELECT s.authenticity_data AS source_auth_data,
-                s.status AS source_status,
-                s.completed_at AS source_completed_at,
-                pr.id AS pr_id
-         FROM ${table.name} s
-         INNER JOIN production_results pr
-           ON pr.production_type = $1
-           AND pr.session_id = s.session_id
-           AND pr.mo_number = s.mo_number
-           AND pr.pic = s.pic
-         WHERE pr.quantity IS NULL
-           OR (pr.status = 'completed' AND pr.completed_at IS NULL)`,
-        [table.type]
-      );
-
-      for (const row of qtyResult.rows) {
-        try {
-          const authData = parseAuthDataForSync(row.source_auth_data);
-          const quantity = calculateQuantityFromAuthenticity(row.source_auth_data);
-          const completedAt = (row.source_status === 'completed')
-            ? (row.source_completed_at || new Date().toISOString())
-            : null;
-
-          await client.query(
-            `UPDATE production_results
-             SET quantity = $1,
-                 completed_at = COALESCE(completed_at, $2),
-                 authenticity_data = $3::jsonb,
-                 status = $4,
-                 updated_at = CURRENT_TIMESTAMP,
-                 synced_at = CURRENT_TIMESTAMP
-             WHERE id = $5`,
-            [
+              row.source_status || 'active',
               quantity,
               completedAt,
               JSON.stringify(authData),
-              row.source_status || 'active',
+              row.source_leader || '',
+              row.source_shift || '',
+              row.source_pic || '',
+              row.source_sku || '',
               row.pr_id
             ]
           );
+
+          if (row.pr_status === 'active') {
+            activeUpdated++;
+          } else {
+            statusUpdated++;
+          }
           dataUpdated++;
         } catch (rowErr) {
-          console.error(`❌ [DeltaSync] Data update error (PR id ${row.pr_id}):`, rowErr.message);
+          console.error(`❌ [DeltaSync] Update error (PR id ${row.pr_id}):`, rowErr.message);
         }
       }
 
-      if (qtyResult.rows.length > 0) {
-        console.log(`📊 [DeltaSync] Fixed ${qtyResult.rows.length} quantity/completed_at gaps from ${table.name}`);
+      if (deltaResult.rows.length > 0) {
+        console.log(`📊 [DeltaSync] Updated ${deltaResult.rows.length} records from ${table.name} (${activeUpdated} active refreshed)`);
       }
     }
 
-    const total = statusUpdated + dataUpdated;
-    const message = total > 0
-      ? `Delta sync: ${statusUpdated} status fixes, ${dataUpdated} data fixes`
+    const message = dataUpdated > 0
+      ? `Delta sync: ${dataUpdated} total updates (${activeUpdated} active refreshed, ${statusUpdated} status fixes)`
       : 'Delta sync: everything up to date';
     console.log(`✅ [DeltaSync] ${message}`);
-    return { statusUpdated, dataUpdated, message };
+    return { statusUpdated, dataUpdated, activeUpdated, message };
 
   } catch (err) {
     console.error('❌ [DeltaSync] Fatal error:', err.message);
@@ -4601,9 +4574,9 @@ cron.schedule('10 */6 * * *', () => {
   sendMoListToExternalAPI();
 });
 
-// Sync and update production_results every 15 minutes
+// Sync and update production_results every 1 hour
 // This ensures production_results is always up to date with source tables
-cron.schedule('*/15 * * * *', () => {
+cron.schedule('0 * * * *', () => {
   console.log('⏰ [Scheduler] Triggered: Full production_results sync');
   runFullProductionSync()
     .then((results) => {
@@ -4617,7 +4590,7 @@ cron.schedule('*/15 * * * *', () => {
 console.log('📅 [Scheduler] Cron jobs configured:');
 console.log('   - Update MO data from Odoo: Every 6 hours (cron: 0 */6 * * *)');
 console.log('   - Send MO list to external API: Every 6 hours (cron: 10 */6 * * *)');
-console.log('   - Full production_results sync: Every 15 minutes (cron: */15 * * * *)');
+console.log('   - Full production_results sync: Every 1 hour (cron: 0 * * * *)');
 
 // Initial sync on server startup (after 5 seconds delay to ensure DB is ready)
 const runInitialSync = () => {

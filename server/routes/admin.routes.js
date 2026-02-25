@@ -609,13 +609,16 @@ router.post('/sync-production-data', async (req, res) => {
       }
     }
 
-    // ── STEP 2: Update existing rows where source data has changed ──
+    // ── STEP 2: Update existing rows where source data has changed OR status is 'active' ──
+    // Active rows are always refreshed so ongoing production data stays current
     for (const table of sourceTables) {
       try {
         const deltaResult = await client.query(
           `SELECT s.session_id, s.mo_number, s.created_at,
                   s.authenticity_data AS source_auth, s.status AS source_status,
                   s.completed_at AS source_completed_at,
+                  s.leader_name AS source_leader, s.shift_number AS source_shift,
+                  s.pic AS source_pic, s.sku_name AS source_sku,
                   pr.id AS pr_id, pr.status AS pr_status
            FROM ${table.name} s
            INNER JOIN production_results pr
@@ -623,11 +626,16 @@ router.post('/sync-production-data', async (req, res) => {
              AND pr.session_id = s.session_id
              AND pr.mo_number = s.mo_number
              AND pr.created_at = s.created_at
-           WHERE pr.status IS DISTINCT FROM s.status
+           WHERE pr.status = 'active'
+              OR pr.status IS DISTINCT FROM s.status
               OR pr.quantity IS NULL
-              OR pr.completed_at IS NULL AND s.status = 'completed'`,
+              OR (pr.completed_at IS NULL AND s.status = 'completed')`,
           [table.type]
         );
+
+        if (deltaResult.rows.length > 0) {
+          console.log(`📊 [Sync] Found ${deltaResult.rows.length} records to update from ${table.name} (including active)`);
+        }
 
         for (const row of deltaResult.rows) {
           try {
@@ -639,9 +647,21 @@ router.post('/sync-production-data', async (req, res) => {
             await client.query(
               `UPDATE production_results
                SET status = $1, quantity = $2, completed_at = $3,
-                   authenticity_data = $4::jsonb, updated_at = CURRENT_TIMESTAMP, synced_at = CURRENT_TIMESTAMP
-               WHERE id = $5`,
-              [row.source_status || 'active', quantity, completedAt, JSON.stringify(authData), row.pr_id]
+                   authenticity_data = $4::jsonb,
+                   leader_name = $5, shift_number = $6, pic = $7, sku_name = $8,
+                   updated_at = CURRENT_TIMESTAMP, synced_at = CURRENT_TIMESTAMP
+               WHERE id = $9`,
+              [
+                row.source_status || 'active',
+                quantity,
+                completedAt,
+                JSON.stringify(authData),
+                row.source_leader || '',
+                row.source_shift || '',
+                row.source_pic || '',
+                row.source_sku || '',
+                row.pr_id
+              ]
             );
             updatedCount++;
           } catch (updErr) {
