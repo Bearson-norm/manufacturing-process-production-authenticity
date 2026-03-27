@@ -29,8 +29,8 @@ router.get('/mo-list', async (req, res) => {
         query += ` AND (note ILIKE $${params.length + 1})`;
         params.push('%device%');
       } else if (typeLower === 'cartridge') {
-        query += ` AND (note ILIKE $${params.length + 1} OR note ILIKE $${params.length + 2} OR note ILIKE $${params.length + 3})`;
-        params.push('%cartridge%', '%cartirdge%', '%cartrige%');
+        query += ` AND (note ILIKE $${params.length + 1} OR note ILIKE $${params.length + 2} OR note ILIKE $${params.length + 3} OR note ILIKE $${params.length + 4})`;
+        params.push('%cartridge%', '%cartirdge%', '%cartrige%', '%cartrdige%');
       }
       // If productionType is 'all' or not specified, return all
     }

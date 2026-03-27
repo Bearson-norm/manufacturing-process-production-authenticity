@@ -3721,7 +3721,7 @@ app.get('/api/odoo/mo-list', async (req, res) => {
     
     // Add OR conditions for variations
     if (noteFilter === 'cartridge') {
-      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3)`;
+      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4)`;
     } else if (noteFilter === 'liquid') {
       query += ` OR LOWER(note) LIKE LOWER($2)`;
     }
@@ -3738,8 +3738,8 @@ app.get('/api/odoo/mo-list', async (req, res) => {
     // Additional patterns for variations
     let queryParams = [searchPattern];
     if (noteFilter === 'cartridge') {
-      queryParams.push('%cartirdge%', '%cartrige%');
-      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: cartridge, cartirdge, cartrige`);
+      queryParams.push('%cartirdge%', '%cartrige%', '%cartrdige%');
+      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: cartridge, cartirdge, cartrige, cartrdige (e.g. CARTRDIGE)`);
     } else if (noteFilter === 'liquid') {
       queryParams.push('%TEAM LIQUID%');
       console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TEAM LIQUID, liquid`);
@@ -3848,7 +3848,7 @@ app.get('/api/odoo/debug/mo-sync', async (req, res) => {
           FROM (
             SELECT 
               CASE 
-                WHEN LOWER(note) LIKE '%cartridge%' THEN 'cartridge'
+                WHEN LOWER(note) LIKE '%cartridge%' OR LOWER(note) LIKE '%cartirdge%' OR LOWER(note) LIKE '%cartrige%' OR LOWER(note) LIKE '%cartrdige%' THEN 'cartridge'
                 WHEN LOWER(note) LIKE '%liquid%' THEN 'liquid'
                 WHEN LOWER(note) LIKE '%device%' THEN 'device'
                 ELSE 'unknown'
@@ -4054,9 +4054,10 @@ app.get('/api/odoo/debug/query-mo', async (req, res) => {
         
         // Check for cartridge with typo tolerance
         const noteText = (mo.note || '').toLowerCase();
-        const hasCartridge = noteText.includes('cartridge') || 
-                           noteText.includes('cartirdge') || // Common typo
-                           noteText.includes('cartrige');    // Another common typo
+        const hasCartridge = noteText.includes('cartridge') ||
+                           noteText.includes('cartirdge') ||
+                           noteText.includes('cartrige') ||
+                           noteText.includes('cartrdige'); // e.g. TEAM CARTRDIGE
         
         moData.analysis = {
           create_date_parsed: createDate.toISOString(),
@@ -4341,10 +4342,11 @@ async function updateMoDataFromOdoo() {
         let domainFilter;
         
         if (noteFilter === 'cartridge') {
-          domainFilter = ['|', '|', 
+          domainFilter = ['|', '|', '|',
             ['note', 'ilike', 'cartridge'],
             ['note', 'ilike', 'cartirdge'],
-            ['note', 'ilike', 'cartrige']
+            ['note', 'ilike', 'cartrige'],
+            ['note', 'ilike', 'cartrdige']
           ];
         } else if (noteFilter === 'liquid') {
           // Use OR condition to catch "TEAM LIQUID" and "liquid" variations
@@ -4368,10 +4370,11 @@ async function updateMoDataFromOdoo() {
         if (noteFilter === 'cartridge') {
           combinedDomain = [
             '&',
-            '|', '|',
+            '|', '|', '|',
             ['note', 'ilike', 'cartridge'],
             ['note', 'ilike', 'cartirdge'],
             ['note', 'ilike', 'cartrige'],
+            ['note', 'ilike', 'cartrdige'],
             ["create_date", ">=", startDateStr]
           ];
         } else if (noteFilter === 'liquid') {

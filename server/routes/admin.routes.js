@@ -727,10 +727,11 @@ router.post('/sync-mo', async (req, res) => {
           let domainFilter;
           
           if (noteFilter === 'cartridge') {
-            domainFilter = ['|', '|', 
+            domainFilter = ['|', '|', '|',
               ['note', 'ilike', 'cartridge'],
               ['note', 'ilike', 'cartirdge'],
-              ['note', 'ilike', 'cartrige']
+              ['note', 'ilike', 'cartrige'],
+              ['note', 'ilike', 'cartrdige']
             ];
           } else if (noteFilter === 'liquid') {
             domainFilter = ['note', 'ilike', 'liquid'];
@@ -749,10 +750,11 @@ router.post('/sync-mo', async (req, res) => {
           if (noteFilter === 'cartridge') {
             combinedDomain = [
               '&',
-              '|', '|',
+              '|', '|', '|',
               ['note', 'ilike', 'cartridge'],
               ['note', 'ilike', 'cartirdge'],
               ['note', 'ilike', 'cartrige'],
+              ['note', 'ilike', 'cartrdige'],
               ["create_date", ">=", startDateStr]
             ];
           } else {

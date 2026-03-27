@@ -19,15 +19,15 @@ db.get(
     
     // Check all recent MOs with "cartridge" in note (with typo tolerance)
     console.log('\n2. Checking all cartridge MOs in cache (last 30 days)...');
-    console.log('   (Including common typos: cartridge, cartirdge, cartrige)');
+    console.log('   (Including common typos: cartridge, cartirdge, cartrige, cartrdige/CARTRDIGE)');
     db.all(
       `SELECT mo_number, sku_name, note, create_date, fetched_at, last_updated 
        FROM odoo_mo_cache 
-       WHERE (LOWER(note) LIKE LOWER($1) OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3))
+       WHERE (LOWER(note) LIKE LOWER($1) OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4))
          AND create_date::TIMESTAMP >= NOW() - INTERVAL '30 days'
        ORDER BY create_date DESC
        LIMIT 20`,
-      ['%cartridge%', '%cartirdge%', '%cartrige%'],
+      ['%cartridge%', '%cartirdge%', '%cartrige%', '%cartrdige%'],
       (err2, rows) => {
         if (err2) {
           console.error('❌ Error querying cartridge MOs:', err2);
