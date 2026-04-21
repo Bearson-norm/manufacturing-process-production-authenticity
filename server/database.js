@@ -402,6 +402,12 @@ async function initializeTables() {
                        WHERE table_name='production_results' AND column_name='synced_at') THEN
           ALTER TABLE production_results ADD COLUMN synced_at TIMESTAMP;
         END IF;
+
+        -- Add updated_at (DeltaSync / full sync UPDATE uses this; older DBs may lack it)
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_schema = 'public' AND table_name='production_results' AND column_name='updated_at') THEN
+          ALTER TABLE production_results ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+        END IF;
       END $$;
     `);
 

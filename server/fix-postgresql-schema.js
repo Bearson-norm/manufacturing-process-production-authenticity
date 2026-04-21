@@ -102,6 +102,13 @@ async function fixSchema() {
       console.log('   ➕ Adding quantity column');
       await client.query(`ALTER TABLE production_results ADD COLUMN quantity REAL`);
     }
+
+    if (!prodResultsColumns.includes('updated_at')) {
+      console.log('   ➕ Adding updated_at column');
+      await client.query(
+        `ALTER TABLE production_results ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
+      );
+    }
     
     // 5. Verify indexes
     console.log('\n3. Checking indexes...');
