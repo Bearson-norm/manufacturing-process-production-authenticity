@@ -95,69 +95,52 @@ jobs:
         key: ${{ secrets.VPS_SSH_KEY }}
         port: ${{ secrets.VPS_PORT || 22 }}
         script: |
-          cd /home/${{ secrets.VPS_USER }}/deployments
+          set -e
+          DEPLOY_ROOT="/home/${{ secrets.VPS_USER }}/deployments"
+          cd "$DEPLOY_ROOT"
           tar -xzf deploy.tar.gz
           
-          # Backup existing deployment
+          # Optional: fixed path on VPS if you ever deploy without a prior manufacturing-app (first machine).
+          ENV_CANONICAL="$DEPLOY_ROOT/.manufacturing-app.env"
+          
+          BACKUP_NAME=""
           if [ -d "manufacturing-app" ]; then
-            mv manufacturing-app manufacturing-app-backup-$(date +%Y%m%d-%H%M%S)
+            BACKUP_NAME="manufacturing-app-backup-$(date +%Y%m%d-%H%M%S)"
+            mv manufacturing-app "$BACKUP_NAME"
           fi
           
-          # Create new deployment directory
           mkdir -p manufacturing-app
           mv deploy/* manufacturing-app/
+          mkdir -p manufacturing-app/server
           
-          # Install/update dependencies
+          # Restore VPS .env from the directory we just rotated off (always latest live config)
+          if [ -n "$BACKUP_NAME" ] && [ -f "$BACKUP_NAME/server/.env" ]; then
+            echo "📋 Restoring server/.env from previous live release: $BACKUP_NAME"
+            cp -f "$BACKUP_NAME/server/.env" manufacturing-app/server/.env
+            chmod 600 manufacturing-app/server/.env || true
+          elif [ -f "$ENV_CANONICAL" ]; then
+            echo "📋 Using canonical VPS env file (first deploy / no backup): $ENV_CANONICAL"
+            cp -f "$ENV_CANONICAL" manufacturing-app/server/.env
+            chmod 600 manufacturing-app/server/.env || true
+          elif [ -f manufacturing-app/server/.env ]; then
+            echo "📋 Using server/.env from deployment package"
+          else
+            echo "❌ No production server/.env found."
+            echo "   One-time on VPS: place your env at $ENV_CANONICAL, or run one successful deploy so manufacturing-app/server/.env exists (it is copied from the rotated backup next time)."
+            echo "   Include DB_*, PORT, NODE_ENV, and optional EXTERNAL_API_BASE_URL / EXTERNAL_API_BEARER_TOKEN."
+            exit 1
+          fi
+          
+          # Never print .env values in CI logs
+          echo "📝 Verifying server/.env (names only, no values)..."
+          if [ -f manufacturing-app/server/.env ]; then
+            echo "   Lines: $(wc -l < manufacturing-app/server/.env)"
+            grep -E '^[A-Za-z_][A-Za-z0-9_]*=' manufacturing-app/server/.env | cut -d= -f1 | sort -u | head -50 || true
+          fi
+          
           cd manufacturing-app/server
           npm install --production
           
-          # Create production .env if it doesn't exist
-          if [ ! -f .env ]; then
-            echo "📝 Creating production .env file..."
-            echo "NODE_ENV=production" > .env
-            echo "PORT=1234" >> .env
-            echo "DB_HOST=localhost" >> .env
-            echo "DB_PORT=5433" >> .env
-            echo "DB_NAME=manufacturing_db" >> .env
-            echo "DB_USER=admin" >> .env
-            echo "DB_PASSWORD=Admin123" >> .env
-          else
-            # Ensure PORT is set to production port
-            if grep -q "^PORT=" .env; then
-              sed -i "s/^PORT=.*/PORT=1234/" .env
-            else
-              echo "PORT=1234" >> .env
-            fi
-            # Ensure NODE_ENV is production
-            if grep -q "^NODE_ENV=" .env; then
-              sed -i "s/^NODE_ENV=.*/NODE_ENV=production/" .env
-            else
-              echo "NODE_ENV=production" >> .env
-            fi
-            # Ensure DB_USER is admin
-            if grep -q "^DB_USER=" .env; then
-              sed -i "s/^DB_USER=.*/DB_USER=admin/" .env
-            else
-              echo "DB_USER=admin" >> .env
-            fi
-            # Ensure DB_PASSWORD is set
-            if ! grep -q "^DB_PASSWORD=" .env; then
-              echo "DB_PASSWORD=Admin123" >> .env
-            fi
-            # Ensure DB_PORT is 5433
-            if grep -q "^DB_PORT=" .env; then
-              sed -i "s/^DB_PORT=.*/DB_PORT=5433/" .env
-            else
-              echo "DB_PORT=5433" >> .env
-            fi
-          fi
-          
-          # Verify .env file
-          echo "📝 Verifying production .env file..."
-          cat .env
-          
-          # Restart application with PM2
-          cd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
           mkdir -p logs
           
           # Delete existing process if exists
@@ -197,9 +180,12 @@ jobs:
           # Wait a bit for app to start
           sleep 5
           
-          # Health check - REQUIRED for production
+          # Health check - REQUIRED for production (PORT from VPS .env)
           echo "🏥 Performing PRODUCTION health check..."
-          PROD_PORT=1234
+          ENV_FILE="$DEPLOY_ROOT/manufacturing-app/server/.env"
+          PROD_PORT=$(grep -E '^[[:space:]]*PORT=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+          PROD_PORT=${PROD_PORT:-1234}
+          echo "   Using PORT=$PROD_PORT (from .env or default 1234)"
           MAX_RETRIES=5
           RETRY_COUNT=0
           HEALTH_CHECK_PASSED=false

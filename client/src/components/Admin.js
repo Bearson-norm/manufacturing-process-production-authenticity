@@ -7,9 +7,9 @@ function Admin() {
   const navigate = useNavigate();
   const [sessionId, setSessionId] = useState('');
   const [odooBaseUrl, setOdooBaseUrl] = useState('');
-  const [externalApiUrl, setExternalApiUrl] = useState('');
-  const [externalApiUrlActive, setExternalApiUrlActive] = useState('');
-  const [externalApiUrlCompleted, setExternalApiUrlCompleted] = useState('');
+  const [externalApiBaseUrl, setExternalApiBaseUrl] = useState('');
+  const [externalApiBearerTokenInput, setExternalApiBearerTokenInput] = useState('');
+  const [externalApiBearerConfigured, setExternalApiBearerConfigured] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [generatedApiKey, setGeneratedApiKey] = useState('');
@@ -35,9 +35,9 @@ function Admin() {
       if (response.data.success) {
         setSessionId(response.data.config.sessionId || '');
         setOdooBaseUrl(response.data.config.odooBaseUrl || '');
-        setExternalApiUrl(response.data.config.externalApiUrl || 'https://foom-dash.vercel.app/API');
-        setExternalApiUrlActive(response.data.config.externalApiUrlActive || response.data.config.externalApiUrl || 'https://foom-dash.vercel.app/API');
-        setExternalApiUrlCompleted(response.data.config.externalApiUrlCompleted || response.data.config.externalApiUrl || 'https://foom-dash.vercel.app/API');
+        setExternalApiBaseUrl(response.data.config.externalApiBaseUrl || '');
+        setExternalApiBearerTokenInput('');
+        setExternalApiBearerConfigured(!!response.data.config.externalApiBearerTokenConfigured);
         setApiKey(response.data.config.apiKey || '');
         setApiKeyConfigured(response.data.config.apiKeyConfigured || false);
       }
@@ -169,18 +169,21 @@ function Admin() {
     setMessage({ type: '', text: '' });
 
     try {
-      const response = await axios.put('/api/admin/config', {
+      const payload = {
         sessionId: sessionId.trim(),
         odooBaseUrl: odooBaseUrl.trim() || 'https://foomx.odoo.com',
-        externalApiUrl: externalApiUrl.trim() || 'https://foom-dash.vercel.app/API',
-        externalApiUrlActive: externalApiUrlActive.trim() || 'https://foom-dash.vercel.app/API',
-        externalApiUrlCompleted: externalApiUrlCompleted.trim() || 'https://foom-dash.vercel.app/API',
+        externalApiBaseUrl: externalApiBaseUrl.trim(),
         apiKey: apiKey.trim() || undefined
-      });
+      };
+      if (externalApiBearerTokenInput.trim() !== '') {
+        payload.externalApiBearerToken = externalApiBearerTokenInput.trim();
+      }
+      const response = await axios.put('/api/admin/config', payload);
 
       if (response.data.success) {
         setMessage({ type: 'success', text: 'Configuration saved successfully!' });
-        // Test the connection
+        setExternalApiBearerTokenInput('');
+        await fetchConfig();
         await testConnection();
       } else {
         setMessage({ type: 'error', text: response.data.error || 'Failed to save configuration' });
@@ -309,45 +312,38 @@ function Admin() {
             </small>
           </div>
           <div className="form-group">
-            <label>External API URL (Fallback/General)</label>
+            <label>External manufacturing API — Base URL (produksi liquid)</label>
             <input
               type="text"
-              value={externalApiUrl}
-              onChange={(e) => setExternalApiUrl(e.target.value)}
-              placeholder="https://foom-dash.vercel.app/API"
+              value={externalApiBaseUrl}
+              onChange={(e) => setExternalApiBaseUrl(e.target.value)}
+              placeholder="http://127.0.0.1:8083"
               style={{ width: '100%', padding: '8px', fontSize: '14px' }}
             />
             <small style={{ color: '#94a3b8', fontSize: '12px' }}>
-              URL fallback untuk API eksternal (digunakan jika URL spesifik tidak dikonfigurasi). Default: https://foom-dash.vercel.app/API
+              Server menambahkan path tetap <code>/api/v1/manufacturing</code> untuk POST/PUT sinkron MO liquid (confirm input &amp; submit MO). Device/cartridge tidak memakai konfigurasi ini.
             </small>
           </div>
           <div className="form-group">
-            <label>External API URL - Active Status</label>
+            <label>Bearer token (API eksternal)</label>
+            {externalApiBearerConfigured && (
+              <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '8px' }}>
+                Token tersimpan (ditampilkan termasking di server). Isi field di bawah hanya jika ingin mengganti token.
+              </p>
+            )}
             <input
-              type="text"
-              value={externalApiUrlActive}
-              onChange={(e) => setExternalApiUrlActive(e.target.value)}
-              placeholder="https://foom-dash.vercel.app/API"
+              type="password"
+              value={externalApiBearerTokenInput}
+              onChange={(e) => setExternalApiBearerTokenInput(e.target.value)}
+              placeholder={externalApiBearerConfigured ? '•••••••• (kosongkan jika tidak diubah)' : 'Bearer token'}
+              autoComplete="off"
               style={{ width: '100%', padding: '8px', fontSize: '14px' }}
             />
             <small style={{ color: '#94a3b8', fontSize: '12px' }}>
-              URL untuk mengirim data saat Input Authenticity Label Process (status: active). Default: https://foom-dash.vercel.app/API
+              Authorization: Bearer … untuk <code>POST/GET/PUT /api/v1/manufacturing</code>.
             </small>
           </div>
-          <div className="form-group">
-            <label>External API URL - Completed Status</label>
-            <input
-              type="text"
-              value={externalApiUrlCompleted}
-              onChange={(e) => setExternalApiUrlCompleted(e.target.value)}
-              placeholder="https://foom-dash.vercel.app/API"
-              style={{ width: '100%', padding: '8px', fontSize: '14px' }}
-            />
-            <small style={{ color: '#94a3b8', fontSize: '12px' }}>
-              URL untuk mengirim data saat MO disubmit (status: completed). Default: https://foom-dash.vercel.app/API
-            </small>
-          </div>
-          
+
           {/* API Key Configuration */}
           <div className="form-group" style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #334155' }}>
             <label style={{ fontSize: '16px', fontWeight: '600', color: '#e2e8f0', marginBottom: '12px' }}>

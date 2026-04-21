@@ -22,7 +22,7 @@ initializeTables().then(() => {
 // TODO: Move to services/scheduler.service.js in future refactoring
 const { getAdminConfig } = require('./routes/admin.routes');
 const { db, pool } = require('./database');
-const { sendToExternalAPIWithUrl, sendToExternalAPI, getExternalAPIUrl } = require('./services/external-api.service');
+const { sendToExternalAPIWithUrl, sendToExternalAPI } = require('./services/external-api.service');
 const { apiKeyAuth } = require('./middleware/auth.middleware');
 
 // Helper function to parse authenticity data
@@ -4509,72 +4509,11 @@ async function updateMoDataFromOdoo() {
   });
 }
 
-// Function to send MO list to external API
-async function sendMoListToExternalAPI() {
-  console.log('📤 [Scheduler] Starting to send MO list for liquid production to external API...');
-  
-  db.all('SELECT mo_number, sku_name, quantity, uom, note FROM odoo_mo_cache ORDER BY mo_number ASC', [], async (err, rows) => {
-      if (err) {
-      console.error('❌ [Scheduler] Error fetching MO list:', err);
-        return;
-      }
-      
-    if (rows.length === 0) {
-      console.log('ℹ️  [Scheduler] No MO data to send');
-        return;
-      }
-      
-      const moList = rows.map(row => ({
-      mo_number: row.mo_number,
-      sku_name: row.sku_name,
-      quantity: row.quantity,
-      uom: row.uom,
-      note: row.note
-    }));
-
-    try {
-      db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url'], (err2, row2) => {
-        if (err2) {
-          console.error('❌ [Scheduler] Error fetching external_api_url config:', err2);
-          return;
-        }
-        
-        const externalApiUrl = row2 ? row2.config_value : (process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
-        
-        if (!externalApiUrl || externalApiUrl.trim() === '') {
-          console.log('⚠️  [Scheduler] External API URL not configured, skipping send');
-          return;
-        }
-        
-        sendToExternalAPIWithUrl({ mo_list: moList }, externalApiUrl)
-          .then((result) => {
-                if (result.success) {
-              console.log(`✅ [Scheduler] Successfully sent MO list (${moList.length} items) to external API`);
-                } else {
-              console.log(`⚠️  [Scheduler] MO list send skipped: ${result.message}`);
-            }
-          })
-          .catch((error) => {
-            console.error(`❌ [Scheduler] Error sending MO list to external API:`, error.message);
-          });
-    });
-  } catch (error) {
-      console.error('❌ [Scheduler] Error preparing MO list for external API:', error);
-  }
-  });
-}
-
 // Setup cron jobs
 // Update MO data from Odoo every 6 hours
 cron.schedule('0 */6 * * *', () => {
   console.log('⏰ [Scheduler] Triggered: Update MO data from Odoo');
   updateMoDataFromOdoo();
-});
-
-// Send MO list to external API every 6 hours (after MO data update)
-cron.schedule('10 */6 * * *', () => {
-  console.log('⏰ [Scheduler] Triggered: Send MO list to external API');
-  sendMoListToExternalAPI();
 });
 
 // Sync and update production_results every 1 hour
@@ -4592,7 +4531,6 @@ cron.schedule('0 * * * *', () => {
 
 console.log('📅 [Scheduler] Cron jobs configured:');
 console.log('   - Update MO data from Odoo: Every 6 hours (cron: 0 */6 * * *)');
-console.log('   - Send MO list to external API: Every 6 hours (cron: 10 */6 * * *)');
 console.log('   - Full production_results sync: Every 1 hour (cron: 0 * * * *)');
 
 // Initial sync on server startup (after 5 seconds delay to ensure DB is ready)

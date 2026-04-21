@@ -2,8 +2,36 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../database');
 const { parseAuthenticityData, normalizeAuthenticityArray } = require('../utils/authenticity.utils');
-const { sendToExternalAPI, sendToExternalAPIWithUrl, getExternalAPIUrl, getManufacturingIdentityByMoNumber } = require('../services/external-api.service');
+const {
+  sendToExternalAPIWithUrl,
+  getExternalManufacturingConfig,
+  buildManufacturingCollectionUrl,
+  buildManufacturingItemUrl,
+  getManufacturingIdentityByMoNumber,
+  parseExternalManufacturingId
+} = require('../services/external-api.service');
 const { convertDBTimestampToJakarta } = require('../utils/timezone.utils');
+
+const LIQUID_PRODUCTION_TYPE = 'liquid';
+
+function upsertExternalManufacturingMap(moNumber, externalId, callback) {
+  db.run(
+    `INSERT INTO external_manufacturing_map (mo_number, production_type, external_resource_id, created_at, updated_at)
+     VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT (mo_number, production_type)
+     DO UPDATE SET external_resource_id = EXCLUDED.external_resource_id, updated_at = CURRENT_TIMESTAMP`,
+    [moNumber, LIQUID_PRODUCTION_TYPE, String(externalId)],
+    callback
+  );
+}
+
+function getExternalManufacturingMapRow(moNumber, callback) {
+  db.get(
+    'SELECT external_resource_id FROM external_manufacturing_map WHERE mo_number = $1 AND production_type = $2',
+    [moNumber, LIQUID_PRODUCTION_TYPE],
+    callback
+  );
+}
 
 // Helper function to calculate done_qty from authenticity_data array (handle multiple rolls)
 function calculateDoneQty(authenticityDataArray) {
@@ -49,18 +77,128 @@ function calculateDoneQty(authenticityDataArray) {
   return totalDoneQty;
 }
 
-// Helper function to format manufacturing data for external API
-function formatManufacturingData(moNumber, skuName, targetQty, doneQty, leaderName, finishedAt) {
+/**
+ * Payload aligned with newapi.txt Create manufacturing order (no started_at).
+ * @param {'confirm'|'submit'} phase — confirm = started; submit = finished MO
+ */
+function formatManufacturingData(moNumber, skuName, targetQty, doneQty, leaderName, finishedAt, phase) {
+  const name = String(skuName || '').trim() || 'Unknown';
+  const isSubmit = phase === 'submit';
   return {
     manufacturing_id: moNumber,
-    sku: skuName,
-    sku_name: `Product ${skuName}`,
-    target_qty: targetQty || 0,
-    done_qty: doneQty,
-    leader_name: leaderName || '',
-    finished_at: finishedAt ? convertDBTimestampToJakarta(finishedAt) : null,
-    started_at: null // Will be set if needed from created_at
+    sku: name,
+    sku_name: name,
+    target_qty: Number(targetQty) || 0,
+    done_qty: doneQty == null || doneQty === '' ? 0 : Number(doneQty),
+    status: isSubmit ? 'finished' : 'started',
+    manual_finished_qty: 0,
+    leader_name: String(leaderName || '').trim(),
+    finished_at: finishedAt ? convertDBTimestampToJakarta(finishedAt) : null
   };
+}
+
+function sendLiquidManufacturingToExternalV1(moNumber, formattedData, callback) {
+  getExternalManufacturingConfig((cfgErr, cfg) => {
+    if (cfgErr) {
+      console.error(`❌ [External API] Config error for MO ${moNumber}:`, cfgErr.message);
+      return callback();
+    }
+    if (!cfg.baseUrl) {
+      console.log(`⚠️  [External API] external_api_base_url not set, skipping for MO ${moNumber}`);
+      return callback();
+    }
+
+    const createUrl = buildManufacturingCollectionUrl(cfg.baseUrl);
+    getExternalManufacturingMapRow(moNumber, (mapErr, mapRow) => {
+      if (mapErr) {
+        console.error(`❌ [External API] Map read error for MO ${moNumber}:`, mapErr.message);
+        return callback();
+      }
+      if (mapRow && mapRow.external_resource_id) {
+        const putUrl = buildManufacturingItemUrl(cfg.baseUrl, mapRow.external_resource_id);
+        console.log(`📤 [External API] PUT existing external row for MO ${moNumber}: ${putUrl}`);
+        sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT', cfg.bearerToken)
+          .then(() => callback())
+          .catch((e) => {
+            console.error(`❌ [External API] PUT failed for MO ${moNumber}:`, e.message);
+            callback();
+          });
+        return;
+      }
+
+      console.log(`📤 [External API] POST create manufacturing for MO ${moNumber}: ${createUrl}`);
+      sendToExternalAPIWithUrl(formattedData, createUrl, 'POST', cfg.bearerToken)
+        .then((result) => {
+          if (!result.success) {
+            return callback();
+          }
+          const id = result.parsedId || parseExternalManufacturingId(result.data || '');
+          if (id) {
+            upsertExternalManufacturingMap(moNumber, id, (upErr) => {
+              if (upErr) {
+                console.error(`❌ [External API] Failed to save external id map for MO ${moNumber}:`, upErr.message);
+              } else {
+                console.log(`✅ [External API] Stored external id for MO ${moNumber}: ${id}`);
+              }
+              callback();
+            });
+          } else {
+            console.warn(`⚠️  [External API] POST succeeded but no id in response for MO ${moNumber}`);
+            callback();
+          }
+        })
+        .catch((e) => {
+          console.error(`❌ [External API] POST failed for MO ${moNumber}:`, e.message);
+          callback();
+        });
+    });
+  });
+}
+
+function putLiquidManufacturingCompleted(moNumber, formattedData, callback) {
+  getExternalManufacturingConfig((cfgErr, cfg) => {
+    if (cfgErr || !cfg.baseUrl) {
+      if (cfgErr) console.error(`❌ [External API] Config error for MO ${moNumber}:`, cfgErr.message);
+      return callback();
+    }
+
+    const doPut = (externalId) => {
+      const putUrl = buildManufacturingItemUrl(cfg.baseUrl, externalId);
+      sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT', cfg.bearerToken)
+        .then(() => {
+          console.log(`✅ [External API] PUT completed for MO ${moNumber}`);
+          callback();
+        })
+        .catch((e) => {
+          console.error(`❌ [External API] PUT failed for MO ${moNumber}:`, e.message);
+          callback();
+        });
+    };
+
+    getExternalManufacturingMapRow(moNumber, (mapErr, mapRow) => {
+      if (mapErr) {
+        console.error(`❌ [External API] Map read error:`, mapErr.message);
+        return callback();
+      }
+      if (mapRow && mapRow.external_resource_id) {
+        return doPut(mapRow.external_resource_id);
+      }
+
+      getManufacturingIdentityByMoNumber(moNumber, cfg.baseUrl, cfg.bearerToken)
+        .then((getResult) => {
+          if (!getResult.success || !getResult.id) {
+            console.error(`❌ [External API] No external id for MO ${moNumber} (map empty and list lookup failed)`);
+            return callback();
+          }
+          upsertExternalManufacturingMap(moNumber, getResult.id, () => {});
+          doPut(getResult.id);
+        })
+        .catch((e) => {
+          console.error(`❌ [External API] Lookup failed for MO ${moNumber}:`, e.message);
+          callback();
+        });
+    });
+  });
 }
 
 // Helper function to group production data by session
@@ -256,42 +394,17 @@ router.post('/liquid', (req, res) => {
     
     Promise.all(insertPromises)
       .then((results) => {
-        // Send to external API with new format
-        getExternalAPIUrl('active', (err, externalApiUrl) => {
-          if (err) {
-            console.error(`❌ [External API] Error getting external API URL for active status:`, err);
-            return;
-          }
-          
-          if (!externalApiUrl || externalApiUrl.trim() === '') {
-            console.log(`⚠️  [External API] External API URL for active status not configured, skipping send for MO ${mo_number}`);
-            return;
-          }
-          
-          const formattedData = formatManufacturingData(
-            mo_number,
-            sku_name,
-            targetQty,
-            null, // done_qty is null for active status
-            leader_name,
-            null  // finished_at is null for active status
-          );
-          
-          console.log(`📤 [External API] Sending active status for MO ${mo_number} to: ${externalApiUrl}`);
-          
-          sendToExternalAPIWithUrl(formattedData, externalApiUrl, 'POST')
-            .then(result => {
-              if (result.success) {
-                console.log(`✅ [External API] Successfully sent active status for MO ${mo_number}`);
-              } else {
-                console.log(`⚠️  [External API] Active status send skipped for MO ${mo_number}: ${result.message}`);
-              }
-            })
-            .catch(apiErr => {
-          console.error(`❌ [External API] Failed to send active status for MO ${mo_number}:`, apiErr.message);
-            });
-        });
-        
+        const formattedData = formatManufacturingData(
+          mo_number,
+          sku_name,
+          targetQty,
+          0,
+          leader_name,
+          null,
+          'confirm'
+        );
+        sendLiquidManufacturingToExternalV1(mo_number, formattedData, () => {});
+
         res.json({ 
           message: 'Data saved successfully',
           saved_count: results.length,
@@ -546,81 +659,30 @@ router.put('/liquid/update-status/:id', (req, res) => {
                       db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [row.mo_number], (qtyErr, qtyRow) => {
                         const targetQty = (!qtyErr && qtyRow) ? (qtyRow.quantity || 0) : 0;
                         
-                        // Get max completed_at and convert to Jakarta timezone
-                        const maxCompletedAt = completedRows.length > 0 && completedRows[0].completed_at 
-                          ? convertDBTimestampToJakarta(completedRows[0].completed_at)
-                          : convertDBTimestampToJakarta(new Date());
-                        
-                        // Get leader_name (from first record or current row)
-                        const leaderName = completedRows.length > 0 && completedRows[0].leader_name 
-                          ? completedRows[0].leader_name 
+                        const finishedSource =
+                          completedRows.length > 0 && completedRows[0].completed_at
+                            ? completedRows[0].completed_at
+                            : new Date();
+
+                        const leaderName = completedRows.length > 0 && completedRows[0].leader_name
+                          ? completedRows[0].leader_name
                           : row.leader_name;
-                        
-                        // Format data for external API
+
                         const formattedData = formatManufacturingData(
                           row.mo_number,
                           row.sku_name,
                           targetQty,
                           doneQty,
                           leaderName,
-                          maxCompletedAt
+                          finishedSource,
+                          'submit'
                         );
-                        
-                        // Get external API URL for completed status
-                        getExternalAPIUrl('completed', (urlErr, externalApiUrl) => {
-                          if (urlErr) {
-                            console.error(`❌ [External API] Error getting external API URL for MO ${row.mo_number}:`, urlErr.message);
-                            return res.json({ message: 'Status updated successfully', id: id, status: status });
-                          }
-                          
-                          if (!externalApiUrl || externalApiUrl.trim() === '') {
-                            console.log(`⚠️  [External API] External API URL for completed status not configured, skipping send for MO ${row.mo_number}`);
-                            return res.json({ message: 'Status updated successfully', id: id, status: status });
-                          }
-                          
-                          // Step 1: GET Manufacturing Identity from external API to get ID
-                          console.log(`📥 [External API] Getting Manufacturing Identity ID for MO ${row.mo_number}...`);
-                          getManufacturingIdentityByMoNumber(row.mo_number, externalApiUrl)
-                            .then(getResult => {
-                              if (!getResult.success || !getResult.id) {
-                                console.error(`❌ [External API] Could not find Manufacturing Identity ID for MO ${row.mo_number}`);
-                                console.error(`   Cannot send PUT request without ID. Please ensure MO ${row.mo_number} exists in external API.`);
-                                // Skip PUT request if ID not found (endpoint requires ID, not MO number)
-                                return { success: false, skipped: true, message: 'Manufacturing Identity ID not found' };
-                              }
-                              
-                              // Step 2: Use the ID from GET response for PUT request
-                              const manufacturingId = getResult.id;
-                          const baseUrl = externalApiUrl.replace(/\/$/, '');
-                              let putUrl;
-                              
-                              // Construct PUT URL with ID
-                              if (baseUrl.toLowerCase().endsWith('/manufacturing')) {
-                                putUrl = `${baseUrl}/${manufacturingId}`;
-                              } else {
-                                putUrl = `${baseUrl}/manufacturing/${manufacturingId}`;
-                              }
-                          
-                              console.log(`📤 [External API] Sending completed status for MO ${row.mo_number} (ID: ${manufacturingId}) to: ${putUrl}`);
-                          
-                              return sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT');
-                            })
-                            .then(result => {
-                              if (result && result.success) {
-                                console.log(`✅ [External API] Successfully sent completed status for MO ${row.mo_number}`);
-                              } else if (result) {
-                                console.log(`⚠️  [External API] Completed status send skipped for MO ${row.mo_number}: ${result.message}`);
-                              }
-                            })
-                            .catch(apiErr => {
-                    console.error(`❌ [External API] Failed to send completed status for MO ${row.mo_number}:`, apiErr.message);
-                            });
-                          
-                          res.json({ message: 'Status updated successfully', id: id, status: status });
-                        });
-                  });
-                    }
-                  );
+
+                        putLiquidManufacturingCompleted(row.mo_number, formattedData, () => {});
+
+                        res.json({ message: 'Status updated successfully', id: id, status: status });
+                      });
+                    });
                 } else {
                   res.json({ message: 'Status updated successfully', id: id, status: status });
                 }
@@ -764,104 +826,39 @@ router.put('/liquid/submit-mo-group', (req, res) => {
                   db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = $1', [mo_number], (qtyErr, qtyRow) => {
                     const targetQty = (!qtyErr && qtyRow) ? (qtyRow.quantity || 0) : 0;
                     
-                    // Get max completed_at and convert to Jakarta timezone
-                    const maxCompletedAt = completedRows.length > 0 && completedRows[0].completed_at 
-                      ? convertDBTimestampToJakarta(completedRows[0].completed_at)
-                      : convertDBTimestampToJakarta(new Date());
-                    
-                    // Get leader_name and sku_name (from first record)
-                    const leaderName = completedRows.length > 0 && completedRows[0].leader_name 
-                      ? completedRows[0].leader_name 
+                    const finishedSource =
+                      completedRows.length > 0 && completedRows[0].completed_at
+                        ? completedRows[0].completed_at
+                        : new Date();
+
+                    const leaderName = completedRows.length > 0 && completedRows[0].leader_name
+                      ? completedRows[0].leader_name
                       : 'Unknown';
-                    const skuName = completedRows.length > 0 && completedRows[0].sku_name 
-                      ? completedRows[0].sku_name 
+                    const skuName = completedRows.length > 0 && completedRows[0].sku_name
+                      ? completedRows[0].sku_name
                       : 'Unknown';
-                    
-                    // Format data for external API
+
                     const formattedData = formatManufacturingData(
                       mo_number,
                       skuName,
                       targetQty,
                       doneQty,
                       leaderName,
-                      maxCompletedAt
+                      finishedSource,
+                      'submit'
                     );
-                    
-                    // Get external API URL for completed status
-                    getExternalAPIUrl('completed', (urlErr, externalApiUrl) => {
-                      if (urlErr) {
-                        console.error(`❌ [Submit MO] Error getting external API URL for MO ${mo_number}:`, urlErr.message);
-                        return res.json({ 
-                          message: 'MO submitted successfully', 
-                          mo_number: mo_number,
-                          updated_count: updatedCount,
-                          warning: 'Could not send to external API'
-                        });
-                      }
-                      
-                      if (!externalApiUrl || externalApiUrl.trim() === '') {
-                        console.log(`⚠️  [Submit MO] External API URL for completed status not configured, skipping send for MO ${mo_number}`);
-                        return res.json({ 
-                          message: 'MO submitted successfully', 
-                          mo_number: mo_number,
-                          updated_count: updatedCount,
-                          warning: 'External API URL not configured'
-                        });
-                      }
-                      
-                      // Step 1: GET Manufacturing Identity from external API to get ID
-                      console.log(`📥 [Submit MO] Getting Manufacturing Identity ID for MO ${mo_number}...`);
-                      getManufacturingIdentityByMoNumber(mo_number, externalApiUrl)
-                        .then(getResult => {
-                          if (!getResult.success || !getResult.id) {
-                            console.error(`❌ [Submit MO] Could not find Manufacturing Identity ID for MO ${mo_number}`);
-                            console.error(`   Cannot send PUT request without ID. Please ensure MO ${mo_number} exists in external API.`);
-                            // Skip PUT request if ID not found (endpoint requires ID, not MO number)
-                            return { success: false, skipped: true, message: 'Manufacturing Identity ID not found' };
-                          }
-                          
-                          // Step 2: Use the ID from GET response for PUT request
-                          const manufacturingId = getResult.id;
-                          const trimmedUrl = externalApiUrl.trim().replace(/\/$/, '');
-                      let putUrl;
-                      
-                          // Construct PUT URL with ID
-                      if (trimmedUrl.toLowerCase().endsWith('/manufacturing')) {
-                            putUrl = `${trimmedUrl}/${manufacturingId}`;
-                      } else {
-                            putUrl = `${trimmedUrl}/manufacturing/${manufacturingId}`;
-                      }
-                      
-                          console.log(`📤 [Submit MO] Sending completed status for MO ${mo_number} (ID: ${manufacturingId}) to: ${putUrl}`);
-                      console.log(`📤 [Submit MO] Base URL: ${trimmedUrl}`);
-                          console.log(`📤 [Submit MO] Manufacturing ID: ${manufacturingId}`);
-                      console.log(`📤 [Submit MO] Data:`, JSON.stringify(formattedData, null, 2));
-                      
-                          return sendToExternalAPIWithUrl(formattedData, putUrl, 'PUT');
-                        })
-                        .then(result => {
-                          if (result && result.success) {
-                            console.log(`✅ [Submit MO] Successfully sent completed status for MO ${mo_number}`);
-                          } else if (result) {
-                            console.log(`⚠️  [Submit MO] Completed status send skipped for MO ${mo_number}: ${result.message}`);
-                          }
-                        })
-                        .catch(apiErr => {
-                          console.error(`❌ [Submit MO] Failed to send completed status for MO ${mo_number}:`, apiErr.message);
-                        });
-                      
-                      res.json({ 
-                        message: 'MO submitted successfully', 
-                        mo_number: mo_number,
-                        updated_count: updatedCount,
-                        external_api_sent: true
-                      });
+
+                    putLiquidManufacturingCompleted(mo_number, formattedData, () => {});
+
+                    res.json({
+                      message: 'MO submitted successfully',
+                      mo_number: mo_number,
+                      updated_count: updatedCount,
+                      external_api_sent: true
                     });
                   });
-                }
-              );
-            }
-          );
+                });
+            });
         }
       );
     }

@@ -1,67 +1,67 @@
 #!/bin/bash
 
-# Deployment script yang dijalankan di VPS
-# Script ini dipanggil oleh GitHub Actions
+# Deployment script dijalankan di VPS (manual atau dipanggil workflow).
+# Menyalin server/.env dari release sebelumnya agar tidak perlu set ulang di terminal.
 
 set -e
 
 DEPLOY_DIR="/home/$USER/deployments"
 APP_DIR="$DEPLOY_DIR/manufacturing-app"
+ENV_CANONICAL="$DEPLOY_DIR/.manufacturing-app.env"
 BACKUP_DIR="$DEPLOY_DIR/manufacturing-app-backup-$(date +%Y%m%d-%H%M%S)"
 
 echo "🚀 Starting deployment..."
 
-# Backup existing deployment
+cd "$DEPLOY_DIR"
 if [ -d "$APP_DIR" ]; then
-    echo "📦 Creating backup..."
-    mv "$APP_DIR" "$BACKUP_DIR"
+  echo "📦 Creating backup..."
+  mv "$APP_DIR" "$BACKUP_DIR"
 fi
 
-# Extract new deployment
 echo "📦 Extracting deployment package..."
-cd "$DEPLOY_DIR"
 tar -xzf deploy.tar.gz
 
-# Move to app directory
 mkdir -p "$APP_DIR"
 mv deploy/* "$APP_DIR/"
+mkdir -p "$APP_DIR/server"
 
-# Install server dependencies
+if [ -d "$BACKUP_DIR" ] && [ -f "$BACKUP_DIR/server/.env" ]; then
+  echo "📋 Restoring server/.env from $BACKUP_DIR"
+  cp -f "$BACKUP_DIR/server/.env" "$APP_DIR/server/.env"
+  chmod 600 "$APP_DIR/server/.env" || true
+elif [ -f "$ENV_CANONICAL" ]; then
+  echo "📋 Using $ENV_CANONICAL"
+  cp -f "$ENV_CANONICAL" "$APP_DIR/server/.env"
+  chmod 600 "$APP_DIR/server/.env" || true
+elif [ -f "$APP_DIR/server/.env" ]; then
+  echo "📋 Using packaged server/.env"
+else
+  echo "❌ No server/.env — place one at $ENV_CANONICAL or keep a manufacturing-app-backup-*/server/.env"
+  exit 1
+fi
+
 echo "📦 Installing server dependencies..."
 cd "$APP_DIR/server"
 npm install --production
 
-# Restart application with PM2 using ecosystem config
-echo "🔄 Restarting application with PM2 cluster mode..."
-cd "$APP_DIR/server"
-
-# Create logs directory
 mkdir -p logs
-
-# Delete old PM2 process
 pm2 delete manufacturing-app || true
 
-# Start with ecosystem config for cluster mode
+echo "🔄 Restarting application with PM2..."
 if [ -f ecosystem.config.js ]; then
-    # Use --only to start only production app (not staging)
-    pm2 start ecosystem.config.js --only manufacturing-app
+  pm2 start ecosystem.config.js --only manufacturing-app
 else
-    # Fallback to direct start with cluster mode
-    pm2 start index.js --name manufacturing-app --instances max --exec-mode cluster --cwd "$APP_DIR/server" --env production
+  pm2 start index.js --name manufacturing-app --instances max --exec-mode cluster --cwd "$APP_DIR/server" --env production
 fi
 
 pm2 save
 
-# Cleanup old backups (keep last 5)
 echo "🧹 Cleaning up old backups..."
 cd "$DEPLOY_DIR"
 ls -dt manufacturing-app-backup-* 2>/dev/null | tail -n +6 | xargs rm -rf || true
 
-# Cleanup deployment files
 rm -f deploy.tar.gz
 rm -rf deploy
 
 echo "✅ Deployment completed successfully!"
-echo "📍 Application running at: http://$(hostname -I | awk '{print $1}')"
 pm2 status
-

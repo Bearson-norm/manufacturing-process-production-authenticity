@@ -2,7 +2,7 @@ const { db } = require('../database');
 
 // Circuit breaker state for External API
 const externalApiCircuitBreaker = {
-  state: 'CLOSED', // CLOSED, OPEN, HALF_OPEN
+  state: 'CLOSED',
   failureCount: 0,
   lastFailureTime: null,
   successCount: 0,
@@ -12,40 +12,125 @@ const externalApiCircuitBreaker = {
   }
 };
 
-// Circuit breaker configuration
 const CIRCUIT_BREAKER_CONFIG = {
-  failureThreshold: 10, // Open circuit after 10 consecutive failures
-  resetTimeout: 300000, // 5 minutes in milliseconds
-  halfOpenMaxAttempts: 3 // Try 3 times in half-open state
+  failureThreshold: 10,
+  resetTimeout: 300000,
+  halfOpenMaxAttempts: 3
 };
 
-// Helper function to get external API URL from config based on status
-function getExternalAPIUrl(status, callback) {
-  // Determine which config key to use based on status
+function normalizeExternalApiBaseUrl(base) {
+  if (!base || typeof base !== 'string') return '';
+  return base.trim().replace(/\/+$/, '');
+}
+
+function buildManufacturingCollectionUrl(baseUrl) {
+  const b = normalizeExternalApiBaseUrl(baseUrl);
+  if (!b) return '';
+  return `${b}/api/v1/manufacturing`;
+}
+
+function buildManufacturingItemUrl(baseUrl, externalId) {
+  const b = normalizeExternalApiBaseUrl(baseUrl);
+  if (!b || !externalId) return '';
+  return `${b}/api/v1/manufacturing/${encodeURIComponent(String(externalId))}`;
+}
+
+/** Parse resource id from POST create response (supports common shapes). */
+function parseExternalManufacturingId(responseBodyString) {
+  if (!responseBodyString || typeof responseBodyString !== 'string') return null;
+  try {
+    const json = JSON.parse(responseBodyString);
+    if (json && json.id) return String(json.id);
+    if (json && json.data && json.data.id) return String(json.data.id);
+    if (json && json.data && typeof json.data === 'object' && json.data.manufacturing_id) {
+      if (json.data.id) return String(json.data.id);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+const EXTERNAL_API_RESPONSE_LOG_DEFAULT_MAX = 8192;
+const EXTERNAL_API_RESPONSE_LOG_GET_MAX = 4096;
+
+/**
+ * Pretty-print JSON when possible; truncate very long bodies for logs.
+ * @param {string} responseData
+ * @param {number} [maxLen]
+ */
+function formatResponseBodyForLog(responseData, maxLen = EXTERNAL_API_RESPONSE_LOG_DEFAULT_MAX) {
+  if (responseData == null || responseData === '') return '(empty)';
+  const raw = typeof responseData === 'string' ? responseData : String(responseData);
+  const trimmed = raw.trim();
+  if (trimmed.length > maxLen) {
+    return `${trimmed.slice(0, maxLen)}… [truncated, total ${trimmed.length} chars]`;
+  }
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return trimmed;
+  }
+}
+
+/**
+ * Log successful outbound HTTP to external manufacturing API (POST/PUT/GET).
+ * @param {{ method: string, url: string, statusCode: number, body: string, parsedId?: string|null, bodyMaxLen?: number }} opts
+ */
+function logExternalApiHttpSuccess(opts) {
+  const method = (opts.method || 'GET').toUpperCase();
+  const maxLen = opts.bodyMaxLen != null ? opts.bodyMaxLen : EXTERNAL_API_RESPONSE_LOG_DEFAULT_MAX;
+  console.log(`\n✅ [External API] ==========================================`);
+  console.log(`✅ [External API] ${method} succeeded — HTTP ${opts.statusCode}`);
+  console.log(`✅ [External API] URL: ${opts.url}`);
+  if (opts.parsedId) {
+    console.log(`✅ [External API] Parsed external resource id (from POST/PUT body): ${opts.parsedId}`);
+  }
+  console.log(`✅ [External API] Response body:\n${formatResponseBodyForLog(opts.body, maxLen)}`);
+  console.log(`✅ [External API] ==========================================\n`);
+}
+
+function getExternalManufacturingConfig(callback) {
+  db.get(
+    'SELECT config_value FROM admin_config WHERE config_key = $1',
+    ['external_api_base_url'],
+    (err, row) => {
+      const fromDb = row && row.config_value ? String(row.config_value).trim() : '';
+      const baseUrl = normalizeExternalApiBaseUrl(fromDb || (process.env.EXTERNAL_API_BASE_URL || '').trim());
+      db.get(
+        'SELECT config_value FROM admin_config WHERE config_key = $1',
+        ['external_api_bearer_token'],
+        (err2, row2) => {
+          const bearerToken = row2 && row2.config_value ? String(row2.config_value) : (process.env.EXTERNAL_API_BEARER_TOKEN || '');
+          callback(err || err2, { baseUrl, bearerToken: bearerToken || '' });
+        }
+      );
+    }
+  );
+}
+
+/** Legacy URL resolution (pre–base-url config) when external_api_base_url is not set. */
+function legacyGetExternalApiUrl(status, callback) {
   const configKey = status === 'active' ? 'external_api_url_active' : 'external_api_url_completed';
   const defaultUrl = process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
-  
+
   db.get('SELECT config_value FROM admin_config WHERE config_key = $1', [configKey], (err, row) => {
     if (err) {
       console.error(`❌ [External API] Error fetching ${configKey} config:`, err);
-      // Fallback to general external_api_url if specific one doesn't exist
-      return getFallbackUrl(callback, defaultUrl, status);
+      return legacyGetFallbackUrl(callback, defaultUrl, status);
     }
-    
+
     const apiUrl = row ? row.config_value : null;
-    // If specific URL is not set or empty, fallback to general external_api_url
-    if (!apiUrl || apiUrl.trim() === '') {
+    if (!apiUrl || String(apiUrl).trim() === '') {
       console.log(`⚠️  [External API] ${configKey} not configured, falling back to external_api_url`);
-      return getFallbackUrl(callback, defaultUrl, status);
-    } else {
-      console.log(`✅ [External API] Using ${configKey}: ${apiUrl}`);
-      callback(null, apiUrl);
+      return legacyGetFallbackUrl(callback, defaultUrl, status);
     }
+    console.log(`✅ [External API] Using ${configKey}: ${apiUrl}`);
+    callback(null, apiUrl);
   });
 }
 
-// Helper function to get fallback external API URL
-function getFallbackUrl(callback, defaultUrl, status) {
+function legacyGetFallbackUrl(callback, defaultUrl, status) {
   db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url'], (fallbackErr, fallbackRow) => {
     if (fallbackErr) {
       console.error('❌ [External API] Error fetching fallback external_api_url config:', fallbackErr);
@@ -53,60 +138,71 @@ function getFallbackUrl(callback, defaultUrl, status) {
       return callback(null, defaultUrl);
     }
     const fallbackUrl = fallbackRow && fallbackRow.config_value ? fallbackRow.config_value : defaultUrl;
-    
-    // If using fallback URL, try to construct proper endpoint URL
+
     let finalUrl = fallbackUrl;
     if (status === 'active') {
-      // For active status, we need POST endpoint: /api/receiver/manufacturing
-      // If fallback URL doesn't contain /manufacturing, try to add it
-      if (!fallbackUrl.includes('/manufacturing')) {
-        // Remove query parameters if any
-        const baseUrl = fallbackUrl.split('?')[0];
-        // Remove /test if present
+      if (!String(fallbackUrl).includes('/manufacturing')) {
+        const baseUrl = String(fallbackUrl).split('?')[0];
         const cleanUrl = baseUrl.replace(/\/test.*$/, '');
         finalUrl = `${cleanUrl}/manufacturing`;
         console.log(`⚠️  [External API] Constructed active URL from fallback: ${finalUrl}`);
       }
     } else if (status === 'completed') {
-      // For completed status, URL should be the base URL (can contain /manufacturing or not)
-      // The mo_number will be added in production.routes.js
-      // Don't remove /manufacturing here, let production.routes.js handle it
-      const baseUrl = fallbackUrl.split('?')[0];
-      const cleanUrl = baseUrl.replace(/\/test.*$/, '').replace(/\/$/, ''); // Remove trailing slash
+      const baseUrl = String(fallbackUrl).split('?')[0];
+      const cleanUrl = baseUrl.replace(/\/test.*$/, '').replace(/\/$/, '');
       finalUrl = cleanUrl;
       console.log(`⚠️  [External API] Constructed completed base URL from fallback: ${finalUrl}`);
     }
-    
+
     console.log(`⚠️  [External API] Using fallback URL for ${status} status: ${finalUrl}`);
     callback(null, finalUrl);
   });
 }
 
-// Helper function to check circuit breaker state
+/**
+ * Returns full URL for outbound calls.
+ * Prefer v1 collection URL when external_api_base_url is set; otherwise legacy per-status URL.
+ */
+function getExternalAPIUrl(status, callback) {
+  getExternalManufacturingConfig((err, cfg) => {
+    if (err) {
+      return callback(err);
+    }
+    if (cfg && cfg.baseUrl) {
+      const collection = buildManufacturingCollectionUrl(cfg.baseUrl);
+      console.log(`✅ [External API] Using v1 manufacturing collection URL: ${collection}`);
+      return callback(null, collection);
+    }
+    legacyGetExternalApiUrl(status, callback);
+  });
+}
+
+function getFallbackUrl(callback, defaultUrl, status) {
+  legacyGetFallbackUrl(callback, defaultUrl, status);
+}
+
 function checkCircuitBreaker() {
   const now = Date.now();
-  
-  // If circuit is OPEN, check if we should move to HALF_OPEN
+
   if (externalApiCircuitBreaker.state === 'OPEN') {
-    if (externalApiCircuitBreaker.lastFailureTime && 
-        (now - externalApiCircuitBreaker.lastFailureTime) >= CIRCUIT_BREAKER_CONFIG.resetTimeout) {
+    if (
+      externalApiCircuitBreaker.lastFailureTime &&
+      now - externalApiCircuitBreaker.lastFailureTime >= CIRCUIT_BREAKER_CONFIG.resetTimeout
+    ) {
       externalApiCircuitBreaker.state = 'HALF_OPEN';
       externalApiCircuitBreaker.successCount = 0;
-      return true; // Allow request
+      return true;
     }
-    return false; // Block request
+    return false;
   }
-  
-  // If circuit is HALF_OPEN, allow limited requests
+
   if (externalApiCircuitBreaker.state === 'HALF_OPEN') {
     return externalApiCircuitBreaker.successCount < CIRCUIT_BREAKER_CONFIG.halfOpenMaxAttempts;
   }
-  
-  // Circuit is CLOSED, allow all requests
+
   return true;
 }
 
-// Helper function to record success
 function recordCircuitBreakerSuccess() {
   if (externalApiCircuitBreaker.state === 'HALF_OPEN') {
     externalApiCircuitBreaker.successCount++;
@@ -120,88 +216,94 @@ function recordCircuitBreakerSuccess() {
   }
 }
 
-// Helper function to record failure
 function recordCircuitBreakerFailure(statusCode) {
   externalApiCircuitBreaker.failureCount++;
   externalApiCircuitBreaker.lastFailureTime = Date.now();
-  
-  // Track error by status code
+
   if (statusCode === 405) {
     externalApiCircuitBreaker.errorStats['405']++;
   } else {
     externalApiCircuitBreaker.errorStats['other']++;
   }
-  
-  // Open circuit if threshold exceeded
+
   if (externalApiCircuitBreaker.failureCount >= CIRCUIT_BREAKER_CONFIG.failureThreshold) {
     externalApiCircuitBreaker.state = 'OPEN';
   } else if (externalApiCircuitBreaker.state === 'HALF_OPEN') {
-    // If failure in half-open, go back to open
     externalApiCircuitBreaker.state = 'OPEN';
     externalApiCircuitBreaker.successCount = 0;
   }
 }
 
-// Helper function to send data to external API with specific URL and method
-async function sendToExternalAPIWithUrl(data, apiUrl, method = 'POST') {
+/**
+ * @param {object} data - JSON body
+ * @param {string} apiUrl - full URL
+ * @param {string} [method='POST']
+ * @param {string|null} [bearerToken] - optional Bearer token
+ */
+async function sendToExternalAPIWithUrl(data, apiUrl, method = 'POST', bearerToken = null) {
   return new Promise((resolve, reject) => {
-    // Skip if URL is empty or not configured
-    if (!apiUrl || apiUrl.trim() === '') {
+    if (!apiUrl || String(apiUrl).trim() === '') {
       console.log(`⚠️  [External API] External API URL not configured, skipping send`);
       return resolve({ success: true, skipped: true, message: 'External API URL not configured' });
     }
-    
-    // Log the request details
+
     console.log(`\n📤 [External API] ==========================================`);
     console.log(`📤 [External API] Sending ${method} request`);
     console.log(`📤 [External API] URL: ${apiUrl}`);
     console.log(`📤 [External API] Data:`, JSON.stringify(data, null, 2));
     console.log(`📤 [External API] ==========================================\n`);
-    
-    // Check circuit breaker
+
     if (!checkCircuitBreaker()) {
       const stats = externalApiCircuitBreaker.errorStats;
-      const totalErrors = stats['405'] + stats['other'];
-      // Only log once per minute to reduce spam
-      if (!externalApiCircuitBreaker.lastLogTime || 
-          (Date.now() - externalApiCircuitBreaker.lastLogTime) > 60000) {
-        console.log(`⚠️  [External API] Circuit breaker OPEN - skipping requests. ` +
-                   `Recent errors: 405 (${stats['405']}), Other (${stats['other']}). ` +
-                   `Will retry in ${Math.ceil((CIRCUIT_BREAKER_CONFIG.resetTimeout - (Date.now() - externalApiCircuitBreaker.lastFailureTime)) / 1000)}s`);
+      if (
+        !externalApiCircuitBreaker.lastLogTime ||
+        Date.now() - externalApiCircuitBreaker.lastLogTime > 60000
+      ) {
+        console.log(
+          `⚠️  [External API] Circuit breaker OPEN - skipping requests. ` +
+            `Recent errors: 405 (${stats['405']}), Other (${stats['other']}). ` +
+            `Will retry in ${Math.ceil(
+              (CIRCUIT_BREAKER_CONFIG.resetTimeout - (Date.now() - externalApiCircuitBreaker.lastFailureTime)) / 1000
+            )}s`
+        );
         externalApiCircuitBreaker.lastLogTime = Date.now();
       }
-      return resolve({ 
-        success: false, 
-        skipped: true, 
+      return resolve({
+        success: false,
+        skipped: true,
         message: 'Circuit breaker is OPEN - too many failures',
         circuitBreakerState: externalApiCircuitBreaker.state
       });
     }
-    
+
     try {
       const https = require('https');
       const http = require('http');
       const url = require('url');
-      
+
       const parsedUrl = url.parse(apiUrl);
       const requestData = JSON.stringify(data);
       const isHttps = parsedUrl.protocol === 'https:';
       const httpModule = isHttps ? https : http;
-      
-      // Validate method
-      const httpMethod = (method && typeof method === 'string') ? method.toUpperCase() : 'POST';
-      
+      const httpMethod = method && typeof method === 'string' ? method.toUpperCase() : 'POST';
+
+      const headers = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      };
+      if (bearerToken && String(bearerToken).length > 0) {
+        headers.Authorization = `Bearer ${bearerToken}`;
+      }
+      headers['Content-Length'] = Buffer.byteLength(requestData);
+
       const options = {
         hostname: parsedUrl.hostname,
         port: parsedUrl.port || (isHttps ? 443 : 80),
         path: parsedUrl.path,
         method: httpMethod,
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(requestData)
-        }
+        headers
       };
-      
+
       const req = httpModule.request(options, (res) => {
         let responseData = '';
         res.on('data', (chunk) => {
@@ -210,14 +312,20 @@ async function sendToExternalAPIWithUrl(data, apiUrl, method = 'POST') {
         res.on('end', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
             recordCircuitBreakerSuccess();
-            // Only log success if circuit was in half-open state (recovery)
             if (externalApiCircuitBreaker.state === 'HALF_OPEN') {
               console.log(`✅ [External API] Successfully sent data to ${apiUrl} (Circuit recovering)`);
             }
-            resolve({ success: true, statusCode: res.statusCode, data: responseData });
+            const parsedId = parseExternalManufacturingId(responseData);
+            logExternalApiHttpSuccess({
+              method: httpMethod,
+              url: apiUrl,
+              statusCode: res.statusCode,
+              body: responseData,
+              parsedId: httpMethod === 'POST' || httpMethod === 'PUT' ? parsedId : null
+            });
+            resolve({ success: true, statusCode: res.statusCode, data: responseData, parsedId });
           } else {
             recordCircuitBreakerFailure(res.statusCode);
-            // Only log non-405 errors or log 405 errors less frequently
             if (res.statusCode !== 405) {
               console.error(`❌ [External API] Error response: ${res.statusCode} - ${responseData.substring(0, 100)}`);
             }
@@ -225,31 +333,23 @@ async function sendToExternalAPIWithUrl(data, apiUrl, method = 'POST') {
           }
         });
       });
-      
+
       req.on('error', (error) => {
-        recordCircuitBreakerFailure(0); // 0 for network errors
-        console.error(`\n❌ [External API] ==========================================`);
-        console.error(`❌ [External API] Request error occurred`);
-        console.error(`❌ [External API] URL: ${apiUrl}`);
-        console.error(`❌ [External API] Method: ${httpMethod}`);
-        console.error(`❌ [External API] Error:`, error.message);
-        console.error(`❌ [External API] Error Code:`, error.code);
-        console.error(`❌ [External API] Options:`, JSON.stringify(options, null, 2));
-        console.error(`❌ [External API] ==========================================\n`);
+        recordCircuitBreakerFailure(0);
+        console.error(`❌ [External API] Request error:`, error.message);
         reject(error);
       });
-      
+
       req.setTimeout(30000, () => {
         req.destroy();
         recordCircuitBreakerFailure(0);
         reject(new Error('Request timeout'));
       });
-      
+
       req.write(requestData);
       req.end();
     } catch (error) {
       recordCircuitBreakerFailure(0);
-      // Only log errors occasionally
       if (externalApiCircuitBreaker.failureCount % 10 === 0) {
         console.error(`❌ [External API] Error sending data:`, error.message);
       }
@@ -258,79 +358,182 @@ async function sendToExternalAPIWithUrl(data, apiUrl, method = 'POST') {
   });
 }
 
-// Helper function to send data to external API (determines URL based on status)
 async function sendToExternalAPI(data) {
   return new Promise((resolve, reject) => {
-    // Determine status from data, default to 'active' if not specified
-    const status = data.status || 'active';
-    
-    getExternalAPIUrl(status, (err, EXTERNAL_API_URL) => {
+    const keys = Object.keys(data || {});
+    const onlyStatus = keys.length === 1 && keys[0] === 'status';
+
+    getExternalManufacturingConfig((err, cfg) => {
       if (err) {
         return reject(err);
       }
-      
-      // Skip if URL is empty or not configured
-      if (!EXTERNAL_API_URL || EXTERNAL_API_URL.trim() === '') {
-        console.log(`⚠️  [External API] External API URL for status "${status}" not configured, skipping send`);
-        return resolve({ success: true, skipped: true, message: `External API URL for status "${status}" not configured` });
+      if (cfg && cfg.baseUrl) {
+        if (onlyStatus) {
+          console.log(
+            `[External API] Skipping legacy sendToExternalAPI (payload is only { status }) — use production liquid routes for v1 API`
+          );
+          return resolve({ success: true, skipped: true, message: 'Skipped legacy status-only payload' });
+        }
+        const url = buildManufacturingCollectionUrl(cfg.baseUrl);
+        return sendToExternalAPIWithUrl(data, url, 'POST', cfg.bearerToken).then(resolve).catch(reject);
       }
-      
-      // Use the helper function with specific URL
-      sendToExternalAPIWithUrl(data, EXTERNAL_API_URL)
-        .then(resolve)
-        .catch(reject);
+
+      const status = data.status || 'active';
+      getExternalAPIUrl(status, (e2, EXTERNAL_API_URL) => {
+        if (e2) {
+          return reject(e2);
+        }
+        if (!EXTERNAL_API_URL || String(EXTERNAL_API_URL).trim() === '') {
+          console.log(`⚠️  [External API] URL not configured, skipping send`);
+          return resolve({ success: true, skipped: true, message: 'External API URL not configured' });
+        }
+        sendToExternalAPIWithUrl(data, EXTERNAL_API_URL).then(resolve).catch(reject);
+      });
     });
   });
 }
 
-// Helper function to GET Manufacturing Identity from external API by manufacturing_id (MO number)
-async function getManufacturingIdentityByMoNumber(moNumber, baseUrl) {
+/**
+ * Find manufacturing row id by MO (manufacturing_id) — GET /api/v1/manufacturing list, or legacy URLs.
+ * @param {string} moNumber
+ * @param {string} baseUrl - admin base URL (no path) or legacy base including /manufacturing
+ * @param {string} [bearerToken]
+ */
+async function getManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken = '') {
   return new Promise((resolve, reject) => {
-    if (!baseUrl || baseUrl.trim() === '') {
+    if (!baseUrl || String(baseUrl).trim() === '') {
       return reject(new Error('External API base URL not provided'));
     }
-    
-    if (!moNumber || moNumber.trim() === '') {
+    if (!moNumber || String(moNumber).trim() === '') {
       return reject(new Error('MO number not provided'));
     }
-    
+
+    const normalizedRoot = normalizeExternalApiBaseUrl(baseUrl);
+    const listUrl = buildManufacturingCollectionUrl(normalizedRoot);
+
+    if (listUrl) {
+      return fetchManufacturingListAndFind(moNumber, listUrl, bearerToken)
+        .then((found) => {
+          if (found && found.id) {
+            return resolve({ success: true, id: found.id, data: found });
+          }
+          console.log(`⚠️  [External API] Not found in v1 list for MO ${moNumber}, trying legacy lookup`);
+          return legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+        })
+        .catch((e) => {
+          console.log(`⚠️  [External API] v1 list GET failed (${e.message}), trying legacy lookup`);
+          legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+        });
+    }
+
+    legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+  });
+}
+
+function fetchManufacturingListAndFind(moNumber, fullListUrl, bearerToken) {
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    const http = require('http');
+    const url = require('url');
+    const parsedUrl = url.parse(fullListUrl);
+    const isHttps = parsedUrl.protocol === 'https:';
+    const httpModule = isHttps ? https : http;
+
+    const headers = { Accept: 'application/json' };
+    if (bearerToken && String(bearerToken).length > 0) {
+      headers.Authorization = `Bearer ${bearerToken}`;
+    }
+
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || (isHttps ? 443 : 80),
+      path: parsedUrl.path,
+      method: 'GET',
+      headers
+    };
+
+    const req = httpModule.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => {
+        responseData += chunk;
+      });
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`List GET ${res.statusCode}`));
+        }
+        logExternalApiHttpSuccess({
+          method: 'GET',
+          url: fullListUrl,
+          statusCode: res.statusCode,
+          body: responseData,
+          bodyMaxLen: EXTERNAL_API_RESPONSE_LOG_GET_MAX
+        });
+        try {
+          const response = JSON.parse(responseData);
+          let rows = [];
+          if (Array.isArray(response)) rows = response;
+          else if (response.data && Array.isArray(response.data)) rows = response.data;
+          const hit = rows.find(
+            (item) =>
+              item &&
+              (item.manufacturing_id === moNumber || String(item.manufacturing_id) === String(moNumber))
+          );
+          if (hit && hit.id) {
+            console.log(`✅ [External API] Found id from v1 list for MO ${moNumber}: ${hit.id}`);
+            resolve({ ...hit, id: String(hit.id) });
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(10000, () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+    req.end();
+  });
+}
+
+function legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken) {
+  return new Promise((resolve, reject) => {
     try {
       const https = require('https');
       const http = require('http');
       const url = require('url');
-      
-      // Construct GET URL - try /manufacturing?manufacturing_id=xxx first, fallback to /manufacturing/:id
-      const trimmedUrl = baseUrl.trim().replace(/\/$/, '');
-      let getUrl;
-      
-      // Try query parameter approach first
+
+      const trimmedUrl = String(baseUrl).trim().replace(/\/$/, '');
       const encodedMoNumber = encodeURIComponent(moNumber);
+      let getUrl;
       if (trimmedUrl.toLowerCase().endsWith('/manufacturing')) {
         getUrl = `${trimmedUrl}?manufacturing_id=${encodedMoNumber}`;
       } else {
         getUrl = `${trimmedUrl}/manufacturing?manufacturing_id=${encodedMoNumber}`;
       }
-      
+
       const parsedUrl = url.parse(getUrl);
       const isHttps = parsedUrl.protocol === 'https:';
       const httpModule = isHttps ? https : http;
-      
-      console.log(`\n📥 [External API] ==========================================`);
-      console.log(`📥 [External API] GET Manufacturing Identity`);
-      console.log(`📥 [External API] URL: ${getUrl}`);
-      console.log(`📥 [External API] MO Number: ${moNumber}`);
-      console.log(`📥 [External API] ==========================================\n`);
-      
+
+      const headers = { Accept: 'application/json' };
+      if (bearerToken && String(bearerToken).length > 0) {
+        headers.Authorization = `Bearer ${bearerToken}`;
+      }
+
+      console.log(`📥 [External API] Legacy GET: ${getUrl}`);
+
       const options = {
         hostname: parsedUrl.hostname,
         port: parsedUrl.port || (isHttps ? 443 : 80),
         path: parsedUrl.path,
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+        headers
       };
-      
+
       const req = httpModule.request(options, (res) => {
         let responseData = '';
         res.on('data', (chunk) => {
@@ -338,104 +541,87 @@ async function getManufacturingIdentityByMoNumber(moNumber, baseUrl) {
         });
         res.on('end', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
+            logExternalApiHttpSuccess({
+              method: 'GET',
+              url: getUrl,
+              statusCode: res.statusCode,
+              body: responseData,
+              bodyMaxLen: EXTERNAL_API_RESPONSE_LOG_GET_MAX
+            });
             try {
               const response = JSON.parse(responseData);
-              
-              // Handle different response formats
               let manufacturingIdentity = null;
-              
               if (Array.isArray(response)) {
-                // Response is array, find matching manufacturing_id
-                manufacturingIdentity = response.find(item => 
-                  item.manufacturing_id === moNumber || 
-                  item.id && item.manufacturing_id === moNumber
+                manufacturingIdentity = response.find(
+                  (item) =>
+                    item.manufacturing_id === moNumber || (item.id && item.manufacturing_id === moNumber)
                 );
               } else if (response.data && Array.isArray(response.data)) {
-                // Response has data array
-                manufacturingIdentity = response.data.find(item => 
-                  item.manufacturing_id === moNumber || 
-                  item.id && item.manufacturing_id === moNumber
+                manufacturingIdentity = response.data.find(
+                  (item) =>
+                    item.manufacturing_id === moNumber || (item.id && item.manufacturing_id === moNumber)
                 );
               } else if (response.manufacturing_id === moNumber || response.id) {
-                // Response is single object
                 manufacturingIdentity = response;
               }
-              
               if (manufacturingIdentity && manufacturingIdentity.id) {
-                console.log(`✅ [External API] Found Manufacturing Identity ID: ${manufacturingIdentity.id} for MO ${moNumber}`);
-                resolve({ success: true, id: manufacturingIdentity.id, data: manufacturingIdentity });
-              } else {
-                console.log(`⚠️  [External API] Manufacturing Identity not found for MO ${moNumber}`);
-                // Try alternative: GET /manufacturing/:id directly with MO number
-                tryGetById(moNumber, trimmedUrl, resolve, reject);
+                return resolve({ success: true, id: manufacturingIdentity.id, data: manufacturingIdentity });
               }
+              tryGetById(moNumber, trimmedUrl, bearerToken, resolve);
             } catch (parseErr) {
-              console.error(`❌ [External API] Error parsing response:`, parseErr.message);
-              console.error(`   Response: ${responseData.substring(0, 200)}`);
-              // Try alternative: GET /manufacturing/:id directly
-              tryGetById(moNumber, trimmedUrl, resolve, reject);
+              tryGetById(moNumber, trimmedUrl, bearerToken, resolve);
             }
           } else {
-            console.log(`⚠️  [External API] GET returned status ${res.statusCode}, trying alternative method...`);
-            // Try alternative: GET /manufacturing/:id directly
-            tryGetById(moNumber, trimmedUrl, resolve, reject);
+            tryGetById(moNumber, trimmedUrl, bearerToken, resolve);
           }
         });
       });
-      
-      req.on('error', (error) => {
-        console.error(`❌ [External API] GET request error:`, error.message);
-        // Try alternative: GET /manufacturing/:id directly
-        tryGetById(moNumber, trimmedUrl, resolve, reject);
-      });
-      
+
+      req.on('error', () => tryGetById(moNumber, trimmedUrl, bearerToken, resolve));
       req.setTimeout(10000, () => {
         req.destroy();
-        console.log(`⏱️  [External API] GET request timeout, trying alternative method...`);
-        // Try alternative: GET /manufacturing/:id directly
-        tryGetById(moNumber, trimmedUrl, resolve, reject);
+        tryGetById(moNumber, trimmedUrl, bearerToken, resolve);
       });
-      
       req.end();
     } catch (error) {
-      console.error(`❌ [External API] Error in getManufacturingIdentityByMoNumber:`, error.message);
       reject(error);
     }
   });
 }
 
-// Helper function to try GET by ID directly
-function tryGetById(moNumber, baseUrl, resolve, reject) {
+function tryGetById(moNumber, baseUrl, bearerToken, resolve) {
   try {
     const https = require('https');
     const http = require('http');
     const url = require('url');
-    
+
     const encodedMoNumber = encodeURIComponent(moNumber);
     let getUrl;
-    
     if (baseUrl.toLowerCase().endsWith('/manufacturing')) {
       getUrl = `${baseUrl}/${encodedMoNumber}`;
     } else {
       getUrl = `${baseUrl}/manufacturing/${encodedMoNumber}`;
     }
-    
+
     const parsedUrl = url.parse(getUrl);
     const isHttps = parsedUrl.protocol === 'https:';
     const httpModule = isHttps ? https : http;
-    
-    console.log(`📥 [External API] Trying alternative: GET ${getUrl}`);
-    
+
+    const headers = { Accept: 'application/json' };
+    if (bearerToken && String(bearerToken).length > 0) {
+      headers.Authorization = `Bearer ${bearerToken}`;
+    }
+
+    console.log(`📥 [External API] Trying alternative GET: ${getUrl}`);
+
     const options = {
       hostname: parsedUrl.hostname,
       port: parsedUrl.port || (isHttps ? 443 : 80),
       path: parsedUrl.path,
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      headers
     };
-    
+
     const req = httpModule.request(options, (res) => {
       let responseData = '';
       res.on('data', (chunk) => {
@@ -443,54 +629,49 @@ function tryGetById(moNumber, baseUrl, resolve, reject) {
       });
       res.on('end', () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
+          logExternalApiHttpSuccess({
+            method: 'GET',
+            url: getUrl,
+            statusCode: res.statusCode,
+            body: responseData,
+            bodyMaxLen: EXTERNAL_API_RESPONSE_LOG_GET_MAX
+          });
           try {
             const response = JSON.parse(responseData);
-            
-            // Handle different response formats
             let manufacturingIdentity = null;
-            
             if (response.manufacturing_id === moNumber || response.id) {
               manufacturingIdentity = response;
             } else if (response.data && (response.data.manufacturing_id === moNumber || response.data.id)) {
               manufacturingIdentity = response.data;
             }
-            
             if (manufacturingIdentity && manufacturingIdentity.id) {
-              console.log(`✅ [External API] Found Manufacturing Identity ID: ${manufacturingIdentity.id} for MO ${moNumber} (alternative method)`);
-              resolve({ success: true, id: manufacturingIdentity.id, data: manufacturingIdentity });
-            } else {
-              console.log(`⚠️  [External API] Manufacturing Identity not found for MO ${moNumber} (alternative method)`);
-              resolve({ success: false, id: null, message: 'Manufacturing Identity not found' });
+              return resolve({ success: true, id: manufacturingIdentity.id, data: manufacturingIdentity });
             }
-          } catch (parseErr) {
-            console.error(`❌ [External API] Error parsing alternative response:`, parseErr.message);
-            resolve({ success: false, id: null, message: 'Failed to parse response' });
+          } catch {
+            /* fall through */
           }
-        } else {
-          console.log(`⚠️  [External API] Alternative GET returned status ${res.statusCode}`);
-          resolve({ success: false, id: null, message: `GET returned status ${res.statusCode}` });
         }
+        resolve({ success: false, id: null, message: 'Manufacturing Identity not found' });
       });
     });
-    
-    req.on('error', (error) => {
-      console.error(`❌ [External API] Alternative GET request error:`, error.message);
-      resolve({ success: false, id: null, message: error.message });
-    });
-    
+
+    req.on('error', () => resolve({ success: false, id: null, message: 'Manufacturing Identity not found' }));
     req.setTimeout(10000, () => {
       req.destroy();
       resolve({ success: false, id: null, message: 'Request timeout' });
     });
-    
     req.end();
-  } catch (error) {
-    console.error(`❌ [External API] Error in tryGetById:`, error.message);
-    resolve({ success: false, id: null, message: error.message });
+  } catch {
+    resolve({ success: false, id: null, message: 'Manufacturing Identity not found' });
   }
 }
 
 module.exports = {
+  normalizeExternalApiBaseUrl,
+  buildManufacturingCollectionUrl,
+  buildManufacturingItemUrl,
+  parseExternalManufacturingId,
+  getExternalManufacturingConfig,
   getExternalAPIUrl,
   getFallbackUrl,
   sendToExternalAPI,

@@ -32,7 +32,10 @@ router.get('/config', (req, res) => {
         success: true,
         config: {
           sessionId: process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae',
-          odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com'
+          odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com',
+          externalApiBaseUrl: process.env.EXTERNAL_API_BASE_URL || '',
+          externalApiBearerToken: null,
+          externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN
         }
       });
     }
@@ -43,7 +46,10 @@ router.get('/config', (req, res) => {
           success: true,
           config: {
             sessionId: process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae',
-            odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com'
+            odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com',
+            externalApiBaseUrl: process.env.EXTERNAL_API_BASE_URL || '',
+            externalApiBearerToken: null,
+            externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN
           }
         });
       }
@@ -51,38 +57,63 @@ router.get('/config', (req, res) => {
       db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['odoo_session_id'], (err, row) => {
         const sessionId = row ? row.config_value : process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae';
         
-        db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['odoo_base_url'], (err2, row2) => {
+          db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['odoo_base_url'], (err2, row2) => {
           const odooBaseUrl = row2 ? row2.config_value : process.env.ODOO_API_URL || 'https://foomx.odoo.com';
-          
-          db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url_active'], (err3, row3) => {
-            const externalApiUrlActive = row3 ? row3.config_value : (process.env.EXTERNAL_API_URL_ACTIVE || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
-            
-            db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url_completed'], (err4, row4) => {
-              const externalApiUrlCompleted = row4 ? row4.config_value : (process.env.EXTERNAL_API_URL_COMPLETED || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
-              
-              db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url'], (err5, row5) => {
-                const externalApiUrl = row5 ? row5.config_value : (process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API');
-                
-                db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['api_key'], (err6, row6) => {
-                  const apiKey = row6 ? row6.config_value : null;
-                  let maskedApiKey = null;
-                  if (apiKey && typeof apiKey === 'string' && apiKey.length > 8) {
-                    maskedApiKey = apiKey.substring(0, apiKey.length - 8) + '********';
-                  } else if (apiKey && typeof apiKey === 'string') {
-                    maskedApiKey = '********';
-                  }
-                  
-                  res.json({
-                    success: true,
-                    config: {
-                      sessionId: sessionId,
-                      odooBaseUrl: odooBaseUrl,
-                      externalApiUrl: externalApiUrl,
-                      externalApiUrlActive: externalApiUrlActive,
-                      externalApiUrlCompleted: externalApiUrlCompleted,
-                      apiKey: maskedApiKey,
-                      apiKeyConfigured: !!apiKey
-                    }
+
+          db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_base_url'], (ebErr, ebRow) => {
+            const externalApiBaseUrl =
+              ebRow && ebRow.config_value ? String(ebRow.config_value).trim() : (process.env.EXTERNAL_API_BASE_URL || '').trim();
+
+            db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_bearer_token'], (btErr, btRow) => {
+              const bearerRaw =
+                btRow && btRow.config_value ? String(btRow.config_value) : process.env.EXTERNAL_API_BEARER_TOKEN || '';
+              let maskedBearer = null;
+              if (bearerRaw && bearerRaw.length > 8) {
+                maskedBearer = bearerRaw.substring(0, bearerRaw.length - 8) + '********';
+              } else if (bearerRaw) {
+                maskedBearer = '********';
+              }
+
+              db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url_active'], (err3, row3) => {
+                const externalApiUrlActive = row3
+                  ? row3.config_value
+                  : process.env.EXTERNAL_API_URL_ACTIVE || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
+
+                db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url_completed'], (err4, row4) => {
+                  const externalApiUrlCompleted = row4
+                    ? row4.config_value
+                    : process.env.EXTERNAL_API_URL_COMPLETED || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
+
+                  db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url'], (err5, row5) => {
+                    const externalApiUrl = row5
+                      ? row5.config_value
+                      : process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
+
+                    db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['api_key'], (err6, row6) => {
+                      const apiKey = row6 ? row6.config_value : null;
+                      let maskedApiKey = null;
+                      if (apiKey && typeof apiKey === 'string' && apiKey.length > 8) {
+                        maskedApiKey = apiKey.substring(0, apiKey.length - 8) + '********';
+                      } else if (apiKey && typeof apiKey === 'string') {
+                        maskedApiKey = '********';
+                      }
+
+                      res.json({
+                        success: true,
+                        config: {
+                          sessionId: sessionId,
+                          odooBaseUrl: odooBaseUrl,
+                          externalApiBaseUrl: externalApiBaseUrl,
+                          externalApiBearerToken: maskedBearer,
+                          externalApiBearerTokenConfigured: !!bearerRaw,
+                          externalApiUrl: externalApiUrl,
+                          externalApiUrlActive: externalApiUrlActive,
+                          externalApiUrlCompleted: externalApiUrlCompleted,
+                          apiKey: maskedApiKey,
+                          apiKeyConfigured: !!apiKey
+                        }
+                      });
+                    });
                   });
                 });
               });
@@ -102,7 +133,16 @@ router.get('/config', (req, res) => {
 
 // PUT /api/admin/config
 router.put('/config', (req, res) => {
-  const { sessionId, odooBaseUrl, externalApiUrl, externalApiUrlActive, externalApiUrlCompleted, apiKey } = req.body;
+  const {
+    sessionId,
+    odooBaseUrl,
+    externalApiBaseUrl,
+    externalApiBearerToken,
+    externalApiUrl,
+    externalApiUrlActive,
+    externalApiUrlCompleted,
+    apiKey
+  } = req.body;
   
   if (sessionId && sessionId.length < 20) {
     return res.status(400).json({ success: false, error: 'Session ID must be at least 20 characters' });
@@ -155,15 +195,54 @@ router.put('/config', (req, res) => {
             if (err2) {
               return res.status(500).json({ success: false, error: err2.message });
             }
-            saveExternalApiUrls();
+            saveExternalManufacturingV1();
           }
         );
       } else {
-        saveExternalApiUrls();
+        saveExternalManufacturingV1();
       }
     }
-    
-    function saveExternalApiUrls() {
+
+    function saveExternalManufacturingV1() {
+      if (externalApiBaseUrl !== undefined) {
+        db.run(
+          `INSERT INTO admin_config (config_key, config_value, updated_at) 
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+          ['external_api_base_url', String(externalApiBaseUrl || '').trim()],
+          function(errB) {
+            if (errB) {
+              return res.status(500).json({ success: false, error: errB.message });
+            }
+            saveExternalBearerToken();
+          }
+        );
+      } else {
+        saveExternalBearerToken();
+      }
+    }
+
+    function saveExternalBearerToken() {
+      if (externalApiBearerToken !== undefined) {
+        const tokenVal = externalApiBearerToken == null ? '' : String(externalApiBearerToken);
+        db.run(
+          `INSERT INTO admin_config (config_key, config_value, updated_at) 
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+          ['external_api_bearer_token', tokenVal],
+          function(errT) {
+            if (errT) {
+              return res.status(500).json({ success: false, error: errT.message });
+            }
+            saveLegacyExternalApiUrls();
+          }
+        );
+      } else {
+        saveLegacyExternalApiUrls();
+      }
+    }
+
+    function saveLegacyExternalApiUrls() {
       if (externalApiUrl !== undefined) {
         db.run(
           `INSERT INTO admin_config (config_key, config_value, updated_at) 

@@ -451,6 +451,19 @@ async function initializeTables() {
       )
     `);
 
+    // Map MO (liquid) to external API manufacturing row UUID (POST create response)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS external_manufacturing_map (
+        id SERIAL PRIMARY KEY,
+        mo_number TEXT NOT NULL,
+        production_type TEXT NOT NULL DEFAULT 'liquid',
+        external_resource_id TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (mo_number, production_type)
+      )
+    `);
+
     // Admin Configuration table
     await client.query(`
       CREATE TABLE IF NOT EXISTS admin_config (
@@ -487,6 +500,8 @@ async function initializeTables() {
       'CREATE INDEX IF NOT EXISTS idx_manufacturing_identity_manufacturing_id ON manufacturing_identity(manufacturing_id)',
       'CREATE INDEX IF NOT EXISTS idx_manufacturing_identity_status ON manufacturing_identity(status)',
       'CREATE INDEX IF NOT EXISTS idx_manufacturing_identity_created_at ON manufacturing_identity(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_external_mfg_map_mo ON external_manufacturing_map(mo_number)',
+      'CREATE INDEX IF NOT EXISTS idx_external_mfg_map_type ON external_manufacturing_map(production_type)',
     ];
 
     for (const indexQuery of indexes) {
