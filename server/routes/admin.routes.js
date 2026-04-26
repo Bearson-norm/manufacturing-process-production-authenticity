@@ -449,7 +449,7 @@ router.get('/test-connection', async (req, res) => {
           'Content-Type': 'application/json',
           'Cookie': COOKIE_HEADER
         },
-        timeout: 10000
+        timeout: 30000
       };
 
       const postData = JSON.stringify(requestData);

@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { mapLimit } from '../utils/mapLimit';
 import './Production.css';
+
+const BUFFER_REJECT_CONCURRENCY = 8;
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
@@ -147,7 +150,9 @@ function ProductionDevice() {
         });
       });
       
-      const bufferPromises = Array.from(moNumbers).map(async (moNumber) => {
+      const moList = Array.from(moNumbers);
+
+      const bufferResults = await mapLimit(moList, BUFFER_REJECT_CONCURRENCY, async (moNumber) => {
         try {
           const bufferResponse = await axios.get(`/api/buffer/device`, {
             params: { moNumber }
@@ -158,8 +163,16 @@ function ProductionDevice() {
           return { moNumber, buffers: [] };
         }
       });
-      
-      const rejectPromises = Array.from(moNumbers).map(async (moNumber) => {
+
+      const bufferMap = {};
+      bufferResults.forEach(({ moNumber, buffers }) => {
+        if (buffers.length > 0) {
+          bufferMap[moNumber] = buffers;
+        }
+      });
+      setBufferDataMap(bufferMap);
+
+      const rejectResults = await mapLimit(moList, BUFFER_REJECT_CONCURRENCY, async (moNumber) => {
         try {
           const rejectResponse = await axios.get(`/api/reject/device`, {
             params: { moNumber }
@@ -170,17 +183,6 @@ function ProductionDevice() {
           return { moNumber, rejects: [] };
         }
       });
-      
-      const bufferResults = await Promise.all(bufferPromises);
-      const bufferMap = {};
-      bufferResults.forEach(({ moNumber, buffers }) => {
-        if (buffers.length > 0) {
-          bufferMap[moNumber] = buffers;
-        }
-      });
-      setBufferDataMap(bufferMap);
-      
-      const rejectResults = await Promise.all(rejectPromises);
       const rejectMap = {};
       rejectResults.forEach(({ moNumber, rejects }) => {
         if (rejects.length > 0) {
