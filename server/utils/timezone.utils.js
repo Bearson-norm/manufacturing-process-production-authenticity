@@ -4,6 +4,39 @@
  */
 
 /**
+ * YYYY-MM-DDTHH:mm:ss.sss+07:00 in Asia/Jakarta.
+ * hourCycle h23 avoids invalid "hour 24" (RFC3339 / Go reject T24:...).
+ * @param {Date} date
+ * @returns {string|null}
+ */
+function formatDateAsJakartaRFC3339(date) {
+  if (!date || isNaN(date.getTime())) return null;
+
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23'
+  });
+
+  const parts = formatter.formatToParts(date);
+  const y = parts.find((p) => p.type === 'year').value;
+  const mo = parts.find((p) => p.type === 'month').value;
+  const d = parts.find((p) => p.type === 'day').value;
+  const h = parts.find((p) => p.type === 'hour').value;
+  const mi = parts.find((p) => p.type === 'minute').value;
+  const s = parts.find((p) => p.type === 'second').value;
+
+  const ms = String(date.getMilliseconds()).padStart(3, '0');
+  return `${y}-${mo}-${d}T${h.padStart(2, '0')}:${mi.padStart(2, '0')}:${s.padStart(2, '0')}.${ms}+07:00`;
+}
+
+/**
  * Convert a timestamp to Jakarta timezone ISO string
  * @param {Date|string} timestamp - The timestamp to convert
  * @returns {string} ISO string in Jakarta timezone
@@ -39,37 +72,14 @@ function toJakartaISO(timestamp) {
  */
 function formatJakartaTime(timestamp) {
   if (!timestamp) return null;
-  
+
   const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
-  
+
   if (isNaN(date.getTime())) {
     return null;
   }
-  
-  // Use Intl.DateTimeFormat to get Jakarta time
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Jakarta',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  });
-  
-  const parts = formatter.formatToParts(date);
-  const year = parts.find(p => p.type === 'year').value;
-  const month = parts.find(p => p.type === 'month').value;
-  const day = parts.find(p => p.type === 'day').value;
-  const hour = parts.find(p => p.type === 'hour').value;
-  const minute = parts.find(p => p.type === 'minute').value;
-  const second = parts.find(p => p.type === 'second').value;
-  
-  // Get milliseconds
-  const ms = date.getMilliseconds().toString().padStart(3, '0');
-  
-  return `${year}-${month}-${day}T${hour}:${minute}:${second}.${ms}+07:00`;
+
+  return formatDateAsJakartaRFC3339(date);
 }
 
 /**
@@ -80,37 +90,14 @@ function formatJakartaTime(timestamp) {
  */
 function convertDBTimestampToJakarta(dbTimestamp) {
   if (!dbTimestamp) return null;
-  
+
   const date = dbTimestamp instanceof Date ? dbTimestamp : new Date(dbTimestamp);
-  
+
   if (isNaN(date.getTime())) {
     return null;
   }
-  
-  // Create a date object in Jakarta timezone
-  // Use toLocaleString to get Jakarta time, then parse it
-  const jakartaString = date.toLocaleString('en-US', {
-    timeZone: 'Asia/Jakarta',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  });
-  
-  // Parse the Jakarta time string
-  // Format: "MM/DD/YYYY, HH:mm:ss"
-  const [datePart, timePart] = jakartaString.split(', ');
-  const [month, day, year] = datePart.split('/');
-  const [hour, minute, second] = timePart.split(':');
-  
-  // Get milliseconds from original date
-  const ms = String(date.getMilliseconds()).padStart(3, '0');
-  
-  // Return in ISO format with Jakarta timezone offset
-  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}.${ms}+07:00`;
+
+  return formatDateAsJakartaRFC3339(date);
 }
 
 /**
@@ -124,6 +111,7 @@ function getCurrentJakartaTime() {
 module.exports = {
   toJakartaISO,
   formatJakartaTime,
+  formatDateAsJakartaRFC3339,
   convertDBTimestampToJakarta,
   getCurrentJakartaTime
 };
