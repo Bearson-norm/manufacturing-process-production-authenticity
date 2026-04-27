@@ -51,6 +51,45 @@ function createBufferEndpoints(type) {
     );
   });
   
+  // POST /api/buffer/:type/batch — all buffer rows for many MO numbers in one query (avoids N parallel connections)
+  router.post(`/${type}/batch`, (req, res) => {
+    const raw = req.body && req.body.moNumbers;
+    if (!Array.isArray(raw)) {
+      res.status(400).json({ error: 'moNumbers must be an array' });
+      return;
+    }
+    const unique = [...new Set(raw.map((m) => String(m).trim()).filter(Boolean))];
+    if (unique.length === 0) {
+      res.json({});
+      return;
+    }
+    if (unique.length > 2000) {
+      res.status(400).json({ error: 'Too many moNumbers (max 2000)' });
+      return;
+    }
+    const sql = `SELECT * FROM ${table} WHERE mo_number = ANY($1::text[]) ORDER BY mo_number, created_at DESC`;
+    db.all(sql, [unique], (err, rows) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      const map = Object.fromEntries(unique.map((mo) => [mo, []]));
+      for (const row of rows) {
+        const parsed = {
+          ...row,
+          authenticity_numbers:
+            typeof row.authenticity_numbers === 'string'
+              ? JSON.parse(row.authenticity_numbers)
+              : row.authenticity_numbers
+        };
+        if (map[row.mo_number] !== undefined) {
+          map[row.mo_number].push(parsed);
+        }
+      }
+      res.json(map);
+    });
+  });
+
   // PUT /api/buffer/:type/:id
   router.put(`/${type}/:id`, (req, res) => {
     const { id } = req.params;

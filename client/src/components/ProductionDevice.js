@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { mapLimit } from '../utils/mapLimit';
 import './Production.css';
-
-const BUFFER_REJECT_CONCURRENCY = 8;
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
@@ -152,40 +149,34 @@ function ProductionDevice() {
       
       const moList = Array.from(moNumbers);
 
-      const bufferResults = await mapLimit(moList, BUFFER_REJECT_CONCURRENCY, async (moNumber) => {
-        try {
-          const bufferResponse = await axios.get(`/api/buffer/device`, {
-            params: { moNumber }
-          });
-          return { moNumber, buffers: bufferResponse.data };
-        } catch (error) {
-          console.error(`Error fetching buffer for ${moNumber}:`, error);
-          return { moNumber, buffers: [] };
-        }
-      });
+      if (moList.length === 0) {
+        setBufferDataMap({});
+        setRejectDataMap({});
+        return;
+      }
+
+      const [bufferBatch, rejectBatch] = await Promise.all([
+        axios.post('/api/buffer/device/batch', { moNumbers: moList }).catch((err) => {
+          console.error('Error fetching buffer batch:', err);
+          return { data: {} };
+        }),
+        axios.post('/api/reject/device/batch', { moNumbers: moList }).catch((err) => {
+          console.error('Error fetching reject batch:', err);
+          return { data: {} };
+        })
+      ]);
 
       const bufferMap = {};
-      bufferResults.forEach(({ moNumber, buffers }) => {
-        if (buffers.length > 0) {
+      Object.entries(bufferBatch.data || {}).forEach(([moNumber, buffers]) => {
+        if (Array.isArray(buffers) && buffers.length > 0) {
           bufferMap[moNumber] = buffers;
         }
       });
       setBufferDataMap(bufferMap);
 
-      const rejectResults = await mapLimit(moList, BUFFER_REJECT_CONCURRENCY, async (moNumber) => {
-        try {
-          const rejectResponse = await axios.get(`/api/reject/device`, {
-            params: { moNumber }
-          });
-          return { moNumber, rejects: rejectResponse.data };
-        } catch (error) {
-          console.error(`Error fetching reject for ${moNumber}:`, error);
-          return { moNumber, rejects: [] };
-        }
-      });
       const rejectMap = {};
-      rejectResults.forEach(({ moNumber, rejects }) => {
-        if (rejects.length > 0) {
+      Object.entries(rejectBatch.data || {}).forEach(([moNumber, rejects]) => {
+        if (Array.isArray(rejects) && rejects.length > 0) {
           rejectMap[moNumber] = rejects;
         }
       });
