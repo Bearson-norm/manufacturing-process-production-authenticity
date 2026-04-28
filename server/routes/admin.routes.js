@@ -778,12 +778,15 @@ router.post('/sync-production-data', async (req, res) => {
 // POST /api/admin/push-external-manufacturing-idle — register liquid MOs from odoo_mo_cache to external API (POST idle + map)
 router.post('/push-external-manufacturing-idle', async (req, res) => {
   try {
-    const summary = await pushIdleManufacturingForLiquidMosFromCache();
+    const limitRaw = req.query.limit != null ? parseInt(String(req.query.limit), 10) : NaN;
+    const limit = Number.isFinite(limitRaw) ? limitRaw : 400;
+    const summary = await pushIdleManufacturingForLiquidMosFromCache({ limit });
     res.json({
       success: true,
       posted: summary.posted,
       skipped: summary.skipped,
       linkedFromRemote: summary.linkedFromRemote,
+      limitUsed: summary.limitUsed,
       errors: summary.errors.slice(0, 50),
       errorCount: summary.errors.length
     });

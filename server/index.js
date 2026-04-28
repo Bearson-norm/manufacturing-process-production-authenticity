@@ -4520,7 +4520,7 @@ cron.schedule('0 */6 * * *', () => {
 // Push liquid MO idle registrations to external manufacturing API daily at 06:00 (server local TZ; set TZ=Asia/Jakarta if you need WIB)
 cron.schedule('0 6 * * *', () => {
   console.log('⏰ [Scheduler] Triggered: Push external manufacturing idle (liquid MOs)');
-  pushIdleManufacturingForLiquidMosFromCache().catch((err) => {
+  pushIdleManufacturingForLiquidMosFromCache({ limit: 2000 }).catch((err) => {
     console.error('❌ [Scheduler] pushIdleManufacturingForLiquidMosFromCache:', err.message);
   });
 });

@@ -7,6 +7,7 @@ const {
   buildManufacturingCollectionUrl,
   buildManufacturingItemUrl,
   buildManufacturingItemStatusUrl,
+  fetchManufacturingV1ListRows,
   getManufacturingIdentityByMoNumber,
   parseExternalManufacturingId
 } = require('./external-api.service');
@@ -60,8 +61,9 @@ function buildIdleManufacturingPayload(moRow, leaderName = IDLE_LEADER_PLACEHOLD
   };
 }
 
+/** PATCH .../manufacturing/:id/status — v1 gateway has no route for PATCH on the item root (404). */
 function patchManufacturingResourceStatus(baseUrl, bearerToken, externalId, body, callback) {
-  const url = buildManufacturingItemUrl(baseUrl, externalId);
+  const url = buildManufacturingItemStatusUrl(baseUrl, externalId);
   sendToExternalAPIWithUrl(body, url, 'PATCH', bearerToken)
     .then(() => callback(null))
     .catch((e) => callback(e));
@@ -77,7 +79,7 @@ function patchManufacturingSubresourceStatus(baseUrl, bearerToken, externalId, b
 /**
  * Crosscheck by mo_number: local map → remote list → POST idle. Invokes callback(err, { externalId, action }).
  * action: 'skipped' | 'linked_remote' | 'posted'
- * @param {{ idleLeaderName?: string }} [options] — used for POST idle body (Confirm Input); scheduler uses placeholder.
+ * @param {{ idleLeaderName?: string, preloadedListRows?: Array<object> }} [options] — preloadedListRows: v1 list from batch prefetch (push idle / cron).
  */
 function resolveOrCreateExternalManufacturingId(moRow, cfg, options, callback) {
   const idleLeader =
@@ -120,7 +122,10 @@ function resolveOrCreateExternalManufacturingId(moRow, cfg, options, callback) {
         .catch((e) => callback(e));
     };
 
-    getManufacturingIdentityByMoNumber(moNumber, cfg.baseUrl, cfg.bearerToken)
+    const lookupOpts =
+      options && Array.isArray(options.preloadedListRows) ? { preloadedListRows: options.preloadedListRows } : {};
+
+    getManufacturingIdentityByMoNumber(moNumber, cfg.baseUrl, cfg.bearerToken, lookupOpts)
       .then((getResult) => {
         if (getResult && getResult.success && getResult.id) {
           const extId = String(getResult.id);
@@ -256,11 +261,15 @@ function finalizeLiquidManufacturingExternal(moNumber, formattedPutBody, callbac
 
 /**
  * Cron / admin: POST idle for liquid MOs in cache without map (after crosscheck).
- * @returns {Promise<{ posted: number, skipped: number, linkedFromRemote: number, errors: Array<{ mo_number: string, message: string }> }>}
+ * Prefetches GET /api/v1/manufacturing once per run so each MO does not re-download the full list (avoids gateway timeouts).
+ * @param {{ limit?: number }} [opts] — max MO rows from odoo_mo_cache this run (default 200 admin-style; cron passes 2000).
+ * @returns {Promise<{ posted: number, skipped: number, linkedFromRemote: number, limitUsed: number, errors: Array<{ mo_number: string, message: string }> }>}
  */
-function pushIdleManufacturingForLiquidMosFromCache() {
+function pushIdleManufacturingForLiquidMosFromCache(opts = {}) {
+  const limitUsed = Math.min(2000, Math.max(1, parseInt(String(opts.limit), 10) || 200));
+
   return new Promise((resolve) => {
-    const summary = { posted: 0, skipped: 0, linkedFromRemote: 0, errors: [] };
+    const summary = { posted: 0, skipped: 0, linkedFromRemote: 0, limitUsed, errors: [] };
 
     getExternalManufacturingConfig((cfgErr, cfg) => {
       if (cfgErr || !cfg.baseUrl) {
@@ -269,51 +278,64 @@ function pushIdleManufacturingForLiquidMosFromCache() {
         return resolve(summary);
       }
 
-      const query = `
-        SELECT mo_number, sku_name, quantity, uom, note, create_date
-        FROM odoo_mo_cache
-        WHERE note ILIKE $1
-          AND sku_name NOT ILIKE '%MIXING%'
-          AND sku_name NOT ILIKE '%BRAY%'
-        ORDER BY create_date DESC, mo_number ASC
-        LIMIT 2000
-      `;
+      const listUrl = buildManufacturingCollectionUrl(cfg.baseUrl);
+      const prefetch = listUrl
+        ? fetchManufacturingV1ListRows(listUrl, cfg.bearerToken).catch((prefErr) => {
+            console.warn(`⚠️  [pushIdle] v1 list prefetch failed (${prefErr.message}); falling back to per-MO lookups`);
+            return null;
+          })
+        : Promise.resolve(null);
 
-      db.all(query, ['%liquid%'], (err, rows) => {
-        if (err) {
-          console.error('❌ [pushIdle] Query odoo_mo_cache failed:', err.message);
-          return resolve(summary);
-        }
-        if (!rows || rows.length === 0) {
-          return resolve(summary);
-        }
+      prefetch.then((preloadedRows) => {
+        const resolveOpts =
+          preloadedRows != null && Array.isArray(preloadedRows) ? { preloadedListRows: preloadedRows } : {};
 
-        let index = 0;
-        const next = () => {
-          if (index >= rows.length) {
-            console.log(
-              `✅ [pushIdle] Done: posted=${summary.posted} skipped=${summary.skipped} linkedFromRemote=${summary.linkedFromRemote} errors=${summary.errors.length}`
-            );
+        const query = `
+          SELECT mo_number, sku_name, quantity, uom, note, create_date
+          FROM odoo_mo_cache
+          WHERE note ILIKE $1
+            AND sku_name NOT ILIKE '%MIXING%'
+            AND sku_name NOT ILIKE '%BRAY%'
+          ORDER BY create_date DESC, mo_number ASC
+          LIMIT $2
+        `;
+
+        db.all(query, ['%liquid%', limitUsed], (err, rows) => {
+          if (err) {
+            console.error('❌ [pushIdle] Query odoo_mo_cache failed:', err.message);
             return resolve(summary);
           }
-          const row = rows[index++];
-          resolveOrCreateExternalManufacturingId(row, cfg, {}, (e, result) => {
-            if (e) {
-              summary.errors.push({ mo_number: row.mo_number, message: e.message });
-              if (summary.errors.length <= 20) {
-                console.error(`❌ [pushIdle] MO ${row.mo_number}:`, e.message);
-              }
-            } else if (result.action === 'skipped') {
-              summary.skipped += 1;
-            } else if (result.action === 'linked_remote') {
-              summary.linkedFromRemote += 1;
-            } else if (result.action === 'posted') {
-              summary.posted += 1;
+          if (!rows || rows.length === 0) {
+            return resolve(summary);
+          }
+
+          let index = 0;
+          const next = () => {
+            if (index >= rows.length) {
+              console.log(
+                `✅ [pushIdle] Done (limit=${limitUsed}): posted=${summary.posted} skipped=${summary.skipped} linkedFromRemote=${summary.linkedFromRemote} errors=${summary.errors.length}`
+              );
+              return resolve(summary);
             }
-            next();
-          });
-        };
-        next();
+            const row = rows[index++];
+            resolveOrCreateExternalManufacturingId(row, cfg, resolveOpts, (e, result) => {
+              if (e) {
+                summary.errors.push({ mo_number: row.mo_number, message: e.message });
+                if (summary.errors.length <= 20) {
+                  console.error(`❌ [pushIdle] MO ${row.mo_number}:`, e.message);
+                }
+              } else if (result.action === 'skipped') {
+                summary.skipped += 1;
+              } else if (result.action === 'linked_remote') {
+                summary.linkedFromRemote += 1;
+              } else if (result.action === 'posted') {
+                summary.posted += 1;
+              }
+              setImmediate(next);
+            });
+          };
+          next();
+        });
       });
     });
   });

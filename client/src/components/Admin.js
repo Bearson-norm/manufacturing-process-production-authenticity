@@ -273,10 +273,12 @@ function Admin() {
     setMessage({ type: '', text: '' });
 
     try {
-      const response = await axios.post('/api/admin/push-external-manufacturing-idle');
+      const response = await axios.post('/api/admin/push-external-manufacturing-idle?limit=400');
       if (response.data.success) {
         const errN = response.data.errorCount || 0;
+        const lim = response.data.limitUsed != null ? response.data.limitUsed : '';
         const parts = [
+          lim !== '' ? `MO rows scanned (max): ${lim}` : '',
           `posted: ${response.data.posted}`,
           `skipped (already mapped): ${response.data.skipped}`,
           `linked from API: ${response.data.linkedFromRemote}`,
@@ -290,7 +292,11 @@ function Admin() {
       }
     } catch (error) {
       console.error('Error push external manufacturing idle:', error);
-      setMessage({ type: 'error', text: error.response?.data?.error || 'Push failed' });
+      const msg =
+        error.response?.status === 504
+          ? 'Gateway timeout (504). Increase proxy read timeout for this upstream, or lower limit and retry.'
+          : error.response?.data?.error || 'Push failed';
+      setMessage({ type: 'error', text: msg });
     } finally {
       setLoading(false);
     }
@@ -596,7 +602,7 @@ function Admin() {
             {loading ? 'Processing...' : 'Push external manufacturing (idle, liquid MOs)'}
           </button>
           <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginTop: '8px' }}>
-            Same job as the daily 06:00 scheduler: cross-check <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>external_manufacturing_map</code> by MO number, then POST idle to <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>/api/v1/manufacturing</code> when needed. Server timezone controls 06:00 (use TZ=Asia/Jakarta on the host for WIB).
+            Same job as the daily 06:00 scheduler: one FOOM list prefetch per run, then up to 400 liquid MO rows from cache per click (<code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>limit</code> query on <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>POST /api/admin/push-external-manufacturing-idle</code>). Cross-checks <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>external_manufacturing_map</code>, then POST idle when needed. A 504 from the gateway usually means the reverse proxy gave up before the Node handler finished—increase <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>proxy_read_timeout</code> (or equivalent) for that route, or lower <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>limit</code> and run again.
           </small>
         </div>
 

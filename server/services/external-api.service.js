@@ -35,7 +35,7 @@ function buildManufacturingItemUrl(baseUrl, externalId) {
   return `${b}/api/v1/manufacturing/${encodeURIComponent(String(externalId))}`;
 }
 
-/** PATCH manufacturing status sub-resource (e.g. finished trigger). */
+/** PATCH manufacturing status sub-resource (started / finished transitions). */
 function buildManufacturingItemStatusUrl(baseUrl, externalId) {
   const b = normalizeExternalApiBaseUrl(baseUrl);
   if (!b || !externalId) return '';
@@ -402,13 +402,77 @@ async function sendToExternalAPI(data) {
 }
 
 /**
+ * GET /api/v1/manufacturing — full parsed row array (for batch jobs; avoids N list downloads).
+ * @returns {Promise<Array<object>>}
+ */
+function fetchManufacturingV1ListRows(fullListUrl, bearerToken) {
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    const http = require('http');
+    const url = require('url');
+    const parsedUrl = url.parse(fullListUrl);
+    const isHttps = parsedUrl.protocol === 'https:';
+    const httpModule = isHttps ? https : http;
+
+    const headers = { Accept: 'application/json' };
+    if (bearerToken && String(bearerToken).length > 0) {
+      headers.Authorization = `Bearer ${bearerToken}`;
+    }
+
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || (isHttps ? 443 : 80),
+      path: parsedUrl.path,
+      method: 'GET',
+      headers
+    };
+
+    const req = httpModule.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => {
+        responseData += chunk;
+      });
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`List GET ${res.statusCode}`));
+        }
+        logExternalApiHttpSuccess({
+          method: 'GET',
+          url: fullListUrl,
+          statusCode: res.statusCode,
+          body: responseData,
+          bodyMaxLen: EXTERNAL_API_RESPONSE_LOG_GET_MAX
+        });
+        try {
+          const response = JSON.parse(responseData);
+          let rows = [];
+          if (Array.isArray(response)) rows = response;
+          else if (response.data && Array.isArray(response.data)) rows = response.data;
+          resolve(rows);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(60000, () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+    req.end();
+  });
+}
+
+/**
  * Find manufacturing row id by MO (manufacturing_id) — GET /api/v1/manufacturing list, then GET /api/v1/manufacturing/:id
  * with path segment = encoded manufacturing_id (if supported), then legacy URLs.
  * @param {string} moNumber
  * @param {string} baseUrl - admin base URL (no path) or legacy base including /manufacturing
  * @param {string} [bearerToken]
+ * @param {{ preloadedListRows?: Array<object>|null }} [lookupOpts] — if preloadedListRows is an array, search it first and skip redundant list GET (batch push idle).
  */
-async function getManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken = '') {
+async function getManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken = '', lookupOpts = {}) {
   return new Promise((resolve, reject) => {
     if (!baseUrl || String(baseUrl).trim() === '') {
       return reject(new Error('External API base URL not provided'));
@@ -419,6 +483,33 @@ async function getManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken
 
     const normalizedRoot = normalizeExternalApiBaseUrl(baseUrl);
     const listUrl = buildManufacturingCollectionUrl(normalizedRoot);
+    const preloaded = lookupOpts && Array.isArray(lookupOpts.preloadedListRows) ? lookupOpts.preloadedListRows : null;
+
+    if (preloaded) {
+      const hit = preloaded.find(
+        (item) =>
+          item &&
+          (item.manufacturing_id === moNumber || String(item.manufacturing_id) === String(moNumber))
+      );
+      if (hit && hit.id) {
+        console.log(`✅ [External API] Found id from preloaded v1 list for MO ${moNumber}: ${hit.id}`);
+        return resolve({ success: true, id: String(hit.id), data: hit });
+      }
+      return fetchManufacturingV1ItemByPathIdentifier(moNumber, normalizedRoot, bearerToken)
+        .then((single) => {
+          if (single && single.id) {
+            return resolve({ success: true, id: single.id, data: single });
+          }
+          console.log(
+            `⚠️  [External API] MO ${moNumber} not in preloaded list or v1 GET item, trying legacy lookup`
+          );
+          return legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+        })
+        .catch((itemErr) => {
+          console.log(`⚠️  [External API] v1 GET item failed for MO ${moNumber} (${itemErr.message}), trying legacy`);
+          return legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+        });
+    }
 
     if (listUrl) {
       return fetchManufacturingListAndFind(moNumber, listUrl, bearerToken)
@@ -788,6 +879,7 @@ module.exports = {
   getFallbackUrl,
   sendToExternalAPI,
   sendToExternalAPIWithUrl,
+  fetchManufacturingV1ListRows,
   getManufacturingIdentityByMoNumber,
   checkCircuitBreaker,
   recordCircuitBreakerSuccess,
