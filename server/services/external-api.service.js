@@ -701,6 +701,87 @@ function fetchManufacturingV1ItemByPathIdentifier(moNumber, normalizedRoot, bear
   });
 }
 
+/**
+ * GET /api/v1/manufacturing/:id where :id is the external resource UUID (e.g. external_manufacturing_map.external_resource_id).
+ * @returns {Promise<object|null>} Parsed row or null (404 / empty / id mismatch).
+ */
+function fetchManufacturingV1ItemByUuid(baseUrl, externalUuid, bearerToken) {
+  const normalizedRoot = normalizeExternalApiBaseUrl(baseUrl);
+  return new Promise((resolve, reject) => {
+    if (!normalizedRoot || !externalUuid) {
+      return resolve(null);
+    }
+    const itemUrl = buildManufacturingItemUrl(normalizedRoot, externalUuid);
+    if (!itemUrl) {
+      return resolve(null);
+    }
+
+    const https = require('https');
+    const http = require('http');
+    const url = require('url');
+    const parsedUrl = url.parse(itemUrl);
+    const isHttps = parsedUrl.protocol === 'https:';
+    const httpModule = isHttps ? https : http;
+
+    const headers = { Accept: 'application/json' };
+    if (bearerToken && String(bearerToken).length > 0) {
+      headers.Authorization = `Bearer ${bearerToken}`;
+    }
+
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || (isHttps ? 443 : 80),
+      path: parsedUrl.path,
+      method: 'GET',
+      headers
+    };
+
+    const req = httpModule.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => {
+        responseData += chunk;
+      });
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          if (res.statusCode === 404) {
+            return resolve(null);
+          }
+          return reject(new Error(`v1 item GET by uuid ${res.statusCode}`));
+        }
+        logExternalApiHttpSuccess({
+          method: 'GET',
+          url: itemUrl,
+          statusCode: res.statusCode,
+          body: responseData,
+          bodyMaxLen: EXTERNAL_API_RESPONSE_LOG_GET_MAX
+        });
+        try {
+          const response = JSON.parse(responseData);
+          const row = response && response.data && typeof response.data === 'object' ? response.data : response;
+          if (!row || !row.id) {
+            return resolve(null);
+          }
+          if (String(row.id) !== String(externalUuid)) {
+            console.log(`⚠️  [External API] GET by uuid id mismatch: expected ${externalUuid}, got ${row.id}`);
+            return resolve(null);
+          }
+          console.log(`✅ [External API] Loaded manufacturing item GET /manufacturing/:id uuid ${externalUuid}`);
+          resolve({ ...row, id: String(row.id) });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(10000, () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+    req.end();
+  });
+}
+
 function legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken) {
   return new Promise((resolve, reject) => {
     try {
@@ -880,6 +961,7 @@ module.exports = {
   sendToExternalAPI,
   sendToExternalAPIWithUrl,
   fetchManufacturingV1ListRows,
+  fetchManufacturingV1ItemByUuid,
   getManufacturingIdentityByMoNumber,
   checkCircuitBreaker,
   recordCircuitBreakerSuccess,

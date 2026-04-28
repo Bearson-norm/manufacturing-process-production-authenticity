@@ -8,6 +8,7 @@ const {
   buildManufacturingItemUrl,
   buildManufacturingItemStatusUrl,
   fetchManufacturingV1ListRows,
+  fetchManufacturingV1ItemByUuid,
   getManufacturingIdentityByMoNumber,
   parseExternalManufacturingId
 } = require('./external-api.service');
@@ -76,7 +77,7 @@ function patchManufacturingSubresourceStatus(baseUrl, bearerToken, externalId, b
     .catch((e) => callback(e));
 }
 
-/** PUT .../manufacturing/:id with body { leader_name } only (v1 accepts item PUT; PATCH on item root may 404). */
+/** Fallback: PUT .../manufacturing/:id with { leader_name } only when GET by uuid is unavailable. */
 function putManufacturingLeaderNameOnly(baseUrl, bearerToken, externalId, leaderName, callback) {
   const trimmed = String(leaderName || '').trim();
   const leader = trimmed === '' ? IDLE_LEADER_PLACEHOLDER : trimmed;
@@ -84,6 +85,50 @@ function putManufacturingLeaderNameOnly(baseUrl, bearerToken, externalId, leader
   sendToExternalAPIWithUrl({ leader_name: leader }, url, 'PUT', bearerToken)
     .then(() => callback(null))
     .catch((e) => callback(e));
+}
+
+/** Build FOOM PUT body from GET row; only leader_name comes from confirm form. */
+function buildPutBodyFromV1ItemRow(row, leaderNameFromForm) {
+  const trimmed = String(leaderNameFromForm || '').trim();
+  const leader = trimmed === '' ? IDLE_LEADER_PLACEHOLDER : trimmed;
+  const skuFallback = String((row && row.sku_name) || (row && row.sku) || 'Unknown').trim() || 'Unknown';
+  const sku = String((row && row.sku) || '').trim() || skuFallback;
+  const skuName = String((row && row.sku_name) || '').trim() || skuFallback;
+  return {
+    manufacturing_id: row.manufacturing_id,
+    sku,
+    sku_name: skuName,
+    target_qty: Number(row.target_qty) || 0,
+    done_qty: row.done_qty == null || row.done_qty === '' ? 0 : Number(row.done_qty),
+    status: row.status != null && String(row.status).trim() !== '' ? String(row.status).trim() : 'started',
+    manual_finished_qty: row.manual_finished_qty == null || row.manual_finished_qty === '' ? 0 : Number(row.manual_finished_qty),
+    leader_name: leader,
+    started_at: row.started_at !== undefined ? row.started_at : null,
+    finished_at: row.finished_at !== undefined ? row.finished_at : null
+  };
+}
+
+/**
+ * After PATCH started: GET /api/v1/manufacturing/:id (uuid from map), merge leader_name from form, PUT full body.
+ * Falls back to leader-only PUT if GET fails or returns empty.
+ */
+function putManufacturingMergedLeaderFromRemote(baseUrl, bearerToken, externalId, leaderName, callback) {
+  fetchManufacturingV1ItemByUuid(baseUrl, externalId, bearerToken)
+    .then((row) => {
+      if (!row) {
+        console.log(`⚠️  [External API] GET manufacturing by uuid empty — fallback PUT leader_name only`);
+        return putManufacturingLeaderNameOnly(baseUrl, bearerToken, externalId, leaderName, callback);
+      }
+      const putBody = buildPutBodyFromV1ItemRow(row, leaderName);
+      const url = buildManufacturingItemUrl(baseUrl, externalId);
+      return sendToExternalAPIWithUrl(putBody, url, 'PUT', bearerToken)
+        .then(() => callback(null))
+        .catch((e) => callback(e));
+    })
+    .catch((e) => {
+      console.log(`⚠️  [External API] GET manufacturing by uuid failed (${e.message}) — fallback PUT leader_name only`);
+      putManufacturingLeaderNameOnly(baseUrl, bearerToken, externalId, leaderName, callback);
+    });
 }
 
 /**
@@ -157,7 +202,8 @@ function resolveOrCreateExternalManufacturingId(moRow, cfg, options, callback) {
 }
 
 /**
- * Confirm Input: resolve/create external row, PATCH .../status { started }, then PUT item { leader_name } from form.
+ * Confirm Input: resolve/create external row, PATCH .../status { started }, then GET item by uuid and PUT
+ * full body aligned with remote row with leader_name from form (fallback: PUT leader_name only).
  */
 function ensureLiquidExternalIdAndPatchStarted(moNumber, skuName, targetQty, leaderName, callback) {
   if (isExcludedFromExternalLiquidManufacturing(skuName)) {
@@ -192,16 +238,16 @@ function ensureLiquidExternalIdAndPatchStarted(moNumber, skuName, targetQty, lea
             return callback();
           }
           console.log(`✅ [External API] PATCH started OK for MO ${moNumber} (id ${resolved.externalId}, ${resolved.action})`);
-          putManufacturingLeaderNameOnly(
+          putManufacturingMergedLeaderFromRemote(
             cfg.baseUrl,
             cfg.bearerToken,
             resolved.externalId,
             leaderName,
             (putErr) => {
               if (putErr) {
-                console.error(`❌ [External API] PUT leader_name failed for MO ${moNumber}:`, putErr.message);
+                console.error(`❌ [External API] PUT after confirm failed for MO ${moNumber}:`, putErr.message);
               } else {
-                console.log(`✅ [External API] PUT leader_name OK for MO ${moNumber}`);
+                console.log(`✅ [External API] PUT after confirm OK for MO ${moNumber} (GET merge or leader-only fallback)`);
               }
               callback();
             }
