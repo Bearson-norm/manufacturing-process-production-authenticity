@@ -402,7 +402,8 @@ async function sendToExternalAPI(data) {
 }
 
 /**
- * Find manufacturing row id by MO (manufacturing_id) — GET /api/v1/manufacturing list, or legacy URLs.
+ * Find manufacturing row id by MO (manufacturing_id) — GET /api/v1/manufacturing list, then GET /api/v1/manufacturing/:id
+ * with path segment = encoded manufacturing_id (if supported), then legacy URLs.
  * @param {string} moNumber
  * @param {string} baseUrl - admin base URL (no path) or legacy base including /manufacturing
  * @param {string} [bearerToken]
@@ -425,12 +426,36 @@ async function getManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken
           if (found && found.id) {
             return resolve({ success: true, id: found.id, data: found });
           }
-          console.log(`⚠️  [External API] Not found in v1 list for MO ${moNumber}, trying legacy lookup`);
-          return legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+          return fetchManufacturingV1ItemByPathIdentifier(moNumber, normalizedRoot, bearerToken)
+            .then((single) => {
+              if (single && single.id) {
+                return resolve({ success: true, id: single.id, data: single });
+              }
+              console.log(
+                `⚠️  [External API] Not found in v1 list or v1 GET item for MO ${moNumber}, trying legacy lookup`
+              );
+              return legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+            })
+            .catch((itemErr) => {
+              console.log(
+                `⚠️  [External API] v1 GET item failed for MO ${moNumber} (${itemErr.message}), trying legacy lookup`
+              );
+              return legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+            });
         })
         .catch((e) => {
-          console.log(`⚠️  [External API] v1 list GET failed (${e.message}), trying legacy lookup`);
-          legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+          console.log(`⚠️  [External API] v1 list GET failed (${e.message}), trying v1 GET item then legacy`);
+          return fetchManufacturingV1ItemByPathIdentifier(moNumber, normalizedRoot, bearerToken)
+            .then((single) => {
+              if (single && single.id) {
+                return resolve({ success: true, id: single.id, data: single });
+              }
+              return legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+            })
+            .catch((itemErr) => {
+              console.log(`⚠️  [External API] v1 GET item failed (${itemErr.message}), trying legacy lookup`);
+              legacyGetManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken).then(resolve).catch(reject);
+            });
         });
     }
 
@@ -492,6 +517,84 @@ function fetchManufacturingListAndFind(moNumber, fullListUrl, bearerToken) {
           } else {
             resolve(null);
           }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(10000, () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+    req.end();
+  });
+}
+
+/**
+ * GET /api/v1/manufacturing/:id — some deployments accept manufacturing_id (e.g. PROD/MO/…) in the path
+ * when the list endpoint is incomplete; :id may also be a UUID (then this returns null if path is MO string).
+ * @returns {Promise<object|null>} Parsed body with id + manufacturing_id, or null if not found / no match.
+ */
+function fetchManufacturingV1ItemByPathIdentifier(moNumber, normalizedRoot, bearerToken) {
+  return new Promise((resolve, reject) => {
+    const itemUrl = buildManufacturingItemUrl(normalizedRoot, moNumber);
+    if (!itemUrl) {
+      return resolve(null);
+    }
+
+    const https = require('https');
+    const http = require('http');
+    const url = require('url');
+    const parsedUrl = url.parse(itemUrl);
+    const isHttps = parsedUrl.protocol === 'https:';
+    const httpModule = isHttps ? https : http;
+
+    const headers = { Accept: 'application/json' };
+    if (bearerToken && String(bearerToken).length > 0) {
+      headers.Authorization = `Bearer ${bearerToken}`;
+    }
+
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || (isHttps ? 443 : 80),
+      path: parsedUrl.path,
+      method: 'GET',
+      headers
+    };
+
+    const req = httpModule.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => {
+        responseData += chunk;
+      });
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          if (res.statusCode === 404) {
+            return resolve(null);
+          }
+          return reject(new Error(`v1 item GET ${res.statusCode}`));
+        }
+        logExternalApiHttpSuccess({
+          method: 'GET',
+          url: itemUrl,
+          statusCode: res.statusCode,
+          body: responseData,
+          bodyMaxLen: EXTERNAL_API_RESPONSE_LOG_GET_MAX
+        });
+        try {
+          const response = JSON.parse(responseData);
+          const row = response && response.data && typeof response.data === 'object' ? response.data : response;
+          if (!row || !row.id) {
+            return resolve(null);
+          }
+          const mid = row.manufacturing_id;
+          if (mid !== moNumber && String(mid) !== String(moNumber)) {
+            return resolve(null);
+          }
+          console.log(`✅ [External API] Found id from v1 GET /manufacturing/:id for MO ${moNumber}: ${row.id}`);
+          resolve({ ...row, id: String(row.id) });
         } catch (e) {
           reject(e);
         }
