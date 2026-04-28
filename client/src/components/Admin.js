@@ -260,6 +260,42 @@ function Admin() {
     }
   };
 
+  const handlePushExternalManufacturingIdle = async () => {
+    if (
+      !window.confirm(
+        'Register liquid MOs from cache to the external manufacturing API (POST idle where missing)? Requires external_api_base_url and token.'
+      )
+    ) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage({ type: '', text: '' });
+
+    try {
+      const response = await axios.post('/api/admin/push-external-manufacturing-idle');
+      if (response.data.success) {
+        const errN = response.data.errorCount || 0;
+        const parts = [
+          `posted: ${response.data.posted}`,
+          `skipped (already mapped): ${response.data.skipped}`,
+          `linked from API: ${response.data.linkedFromRemote}`,
+          errN ? `errors: ${errN}` : ''
+        ]
+          .filter(Boolean)
+          .join(', ');
+        setMessage({ type: errN ? 'warning' : 'success', text: `External manufacturing idle push completed. ${parts}` });
+      } else {
+        setMessage({ type: 'error', text: response.data.error || 'Push failed' });
+      }
+    } catch (error) {
+      console.error('Error push external manufacturing idle:', error);
+      setMessage({ type: 'error', text: error.response?.data?.error || 'Push failed' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="admin-container">
       <div className="admin-header">
@@ -538,6 +574,29 @@ function Admin() {
           </button>
           <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginTop: '8px' }}>
             Sync all data from Production Liquid, Device, and Cartridge tables to the unified production_results table.
+          </small>
+          <button
+            onClick={handlePushExternalManufacturingIdle}
+            disabled={loading}
+            type="button"
+            style={{
+              padding: '10px 20px',
+              fontSize: '14px',
+              fontWeight: '600',
+              marginTop: '12px',
+              display: 'block',
+              background: '#0d9488',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.6 : 1
+            }}
+          >
+            {loading ? 'Processing...' : 'Push external manufacturing (idle, liquid MOs)'}
+          </button>
+          <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginTop: '8px' }}>
+            Same job as the daily 06:00 scheduler: cross-check <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>external_manufacturing_map</code> by MO number, then POST idle to <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>/api/v1/manufacturing</code> when needed. Server timezone controls 06:00 (use TZ=Asia/Jakarta on the host for WIB).
           </small>
         </div>
 

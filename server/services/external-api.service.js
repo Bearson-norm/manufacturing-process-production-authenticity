@@ -35,6 +35,13 @@ function buildManufacturingItemUrl(baseUrl, externalId) {
   return `${b}/api/v1/manufacturing/${encodeURIComponent(String(externalId))}`;
 }
 
+/** PATCH manufacturing status sub-resource (e.g. finished trigger). */
+function buildManufacturingItemStatusUrl(baseUrl, externalId) {
+  const b = normalizeExternalApiBaseUrl(baseUrl);
+  if (!b || !externalId) return '';
+  return `${b}/api/v1/manufacturing/${encodeURIComponent(String(externalId))}/status`;
+}
+
 /** Parse resource id from POST create response (supports common shapes). */
 function parseExternalManufacturingId(responseBodyString) {
   if (!responseBodyString || typeof responseBodyString !== 'string') return null;
@@ -74,7 +81,7 @@ function formatResponseBodyForLog(responseData, maxLen = EXTERNAL_API_RESPONSE_L
 }
 
 /**
- * Log successful outbound HTTP to external manufacturing API (POST/PUT/GET).
+ * Log successful outbound HTTP to external manufacturing API (POST/PUT/PATCH/GET).
  * @param {{ method: string, url: string, statusCode: number, body: string, parsedId?: string|null, bodyMaxLen?: number }} opts
  */
 function logExternalApiHttpSuccess(opts) {
@@ -321,7 +328,8 @@ async function sendToExternalAPIWithUrl(data, apiUrl, method = 'POST', bearerTok
               url: apiUrl,
               statusCode: res.statusCode,
               body: responseData,
-              parsedId: httpMethod === 'POST' || httpMethod === 'PUT' ? parsedId : null
+              parsedId:
+                httpMethod === 'POST' || httpMethod === 'PUT' || httpMethod === 'PATCH' ? parsedId : null
             });
             resolve({ success: true, statusCode: res.statusCode, data: responseData, parsedId });
           } else {
@@ -670,6 +678,7 @@ module.exports = {
   normalizeExternalApiBaseUrl,
   buildManufacturingCollectionUrl,
   buildManufacturingItemUrl,
+  buildManufacturingItemStatusUrl,
   parseExternalManufacturingId,
   getExternalManufacturingConfig,
   getExternalAPIUrl,

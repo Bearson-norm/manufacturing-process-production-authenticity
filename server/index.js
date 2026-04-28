@@ -23,6 +23,7 @@ initializeTables().then(() => {
 const { getAdminConfig } = require('./routes/admin.routes');
 const { db, pool } = require('./database');
 const { sendToExternalAPIWithUrl, sendToExternalAPI } = require('./services/external-api.service');
+const { pushIdleManufacturingForLiquidMosFromCache } = require('./services/liquid-external-manufacturing.service');
 const { apiKeyAuth } = require('./middleware/auth.middleware');
 
 // Helper function to parse authenticity data
@@ -4516,6 +4517,14 @@ cron.schedule('0 */6 * * *', () => {
   updateMoDataFromOdoo();
 });
 
+// Push liquid MO idle registrations to external manufacturing API daily at 06:00 (server local TZ; set TZ=Asia/Jakarta if you need WIB)
+cron.schedule('0 6 * * *', () => {
+  console.log('⏰ [Scheduler] Triggered: Push external manufacturing idle (liquid MOs)');
+  pushIdleManufacturingForLiquidMosFromCache().catch((err) => {
+    console.error('❌ [Scheduler] pushIdleManufacturingForLiquidMosFromCache:', err.message);
+  });
+});
+
 // Sync and update production_results every 1 hour
 // This ensures production_results is always up to date with source tables
 cron.schedule('0 * * * *', () => {
@@ -4531,6 +4540,7 @@ cron.schedule('0 * * * *', () => {
 
 console.log('📅 [Scheduler] Cron jobs configured:');
 console.log('   - Update MO data from Odoo: Every 6 hours (cron: 0 */6 * * *)');
+console.log('   - External manufacturing idle POST (liquid): Daily at 06:00 (cron: 0 6 * * *)');
 console.log('   - Full production_results sync: Every 1 hour (cron: 0 * * * *)');
 
 // Initial sync on server startup (after 5 seconds delay to ensure DB is ready)

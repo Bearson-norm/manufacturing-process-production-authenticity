@@ -673,6 +673,11 @@ pm2 logs manufacturing-app | grep "External API"
 pm2 logs manufacturing-app | grep "Scheduler"
 ```
 
+### External manufacturing API (liquid, FOOM)
+
+- **Cron jam 06:00** (waktu lokal proses Node): mendaftarkan MO liquid dari `odoo_mo_cache` ke `POST /api/v1/manufacturing` dengan status `idle` bila belum ada di `external_manufacturing_map` (cross-check `mo_number` + opsional lookup remote). Untuk **WIB**, set environment `TZ=Asia/Jakarta` pada service PM2/systemd.
+- **Manual:** tombol admin *Push external manufacturing (idle, liquid MOs)* atau `POST /api/admin/push-external-manufacturing-idle` (perlu `external_api_base_url` + bearer token di Admin).
+
 ### Check Scheduler (Setelah 6 Jam)
 
 ```bash

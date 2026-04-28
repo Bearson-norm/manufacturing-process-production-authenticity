@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
 const { db, pool } = require('../database');
+const { pushIdleManufacturingForLiquidMosFromCache } = require('../services/liquid-external-manufacturing.service');
 
 // Helper function to get admin config
 function getAdminConfig(callback) {
@@ -771,6 +772,24 @@ router.post('/sync-production-data', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   } finally {
     client.release();
+  }
+});
+
+// POST /api/admin/push-external-manufacturing-idle — register liquid MOs from odoo_mo_cache to external API (POST idle + map)
+router.post('/push-external-manufacturing-idle', async (req, res) => {
+  try {
+    const summary = await pushIdleManufacturingForLiquidMosFromCache();
+    res.json({
+      success: true,
+      posted: summary.posted,
+      skipped: summary.skipped,
+      linkedFromRemote: summary.linkedFromRemote,
+      errors: summary.errors.slice(0, 50),
+      errorCount: summary.errors.length
+    });
+  } catch (error) {
+    console.error('❌ [Admin] push-external-manufacturing-idle:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
