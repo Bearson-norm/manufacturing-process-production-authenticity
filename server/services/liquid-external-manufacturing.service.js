@@ -76,6 +76,16 @@ function patchManufacturingSubresourceStatus(baseUrl, bearerToken, externalId, b
     .catch((e) => callback(e));
 }
 
+/** PUT .../manufacturing/:id with body { leader_name } only (v1 accepts item PUT; PATCH on item root may 404). */
+function putManufacturingLeaderNameOnly(baseUrl, bearerToken, externalId, leaderName, callback) {
+  const trimmed = String(leaderName || '').trim();
+  const leader = trimmed === '' ? IDLE_LEADER_PLACEHOLDER : trimmed;
+  const url = buildManufacturingItemUrl(baseUrl, externalId);
+  sendToExternalAPIWithUrl({ leader_name: leader }, url, 'PUT', bearerToken)
+    .then(() => callback(null))
+    .catch((e) => callback(e));
+}
+
 /**
  * Crosscheck by mo_number: local map → remote list → POST idle. Invokes callback(err, { externalId, action }).
  * action: 'skipped' | 'linked_remote' | 'posted'
@@ -147,7 +157,7 @@ function resolveOrCreateExternalManufacturingId(moRow, cfg, options, callback) {
 }
 
 /**
- * Confirm Input: ensure external row (idle + map) then PATCH main resource { status: started }.
+ * Confirm Input: resolve/create external row, PATCH .../status { started }, then PUT item { leader_name } from form.
  */
 function ensureLiquidExternalIdAndPatchStarted(moNumber, skuName, targetQty, leaderName, callback) {
   if (isExcludedFromExternalLiquidManufacturing(skuName)) {
@@ -177,13 +187,27 @@ function ensureLiquidExternalIdAndPatchStarted(moNumber, skuName, targetQty, lea
         resolved.externalId,
         { status: 'started', started_at: null },
         (patchErr) => {
-        if (patchErr) {
-          console.error(`❌ [External API] PATCH started failed for MO ${moNumber}:`, patchErr.message);
-        } else {
+          if (patchErr) {
+            console.error(`❌ [External API] PATCH started failed for MO ${moNumber}:`, patchErr.message);
+            return callback();
+          }
           console.log(`✅ [External API] PATCH started OK for MO ${moNumber} (id ${resolved.externalId}, ${resolved.action})`);
+          putManufacturingLeaderNameOnly(
+            cfg.baseUrl,
+            cfg.bearerToken,
+            resolved.externalId,
+            leaderName,
+            (putErr) => {
+              if (putErr) {
+                console.error(`❌ [External API] PUT leader_name failed for MO ${moNumber}:`, putErr.message);
+              } else {
+                console.log(`✅ [External API] PUT leader_name OK for MO ${moNumber}`);
+              }
+              callback();
+            }
+          );
         }
-        callback();
-      });
+      );
     });
   });
 }
