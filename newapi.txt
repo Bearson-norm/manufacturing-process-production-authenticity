@@ -1,0 +1,94 @@
+export BASE_URL="http://127.0.0.1:8083"
+  export TOKEN="c076841765e02914d3b1372b67df6e187b2385a332f2208da06b8ed8e94daa7a"
+
+  COMMON_HEADERS=(
+    -H "Authorization: Bearer $TOKEN"
+    -H "Content-Type: application/json"
+    -H "Accept: application/json"
+  )
+
+  Manufacturing Identity
+  Ini endpoint utama untuk data manufacturing order.
+
+  1. Create manufacturing order
+     Fungsi: bikin record manufacturing identity baru.
+
+  curl -X POST "$BASE_URL/api/v1/manufacturing" \
+    "${COMMON_HEADERS[@]}" \
+    -d '{
+      "manufacturing_id": "MFG-24001",
+      "sku": "SKU-APPLE-60",
+      "sku_name": "Apple Burst 60ml",
+      "target_qty": 5000,
+      "done_qty": 0,
+      "status": "started",
+      "manual_finished_qty": 0,
+      "leader_name": "Bima",
+      "finished_at": null
+    }'
+
+  2. List semua manufacturing order
+     Fungsi: ambil semua row manufacturing identity.
+
+  curl -X GET "$BASE_URL/api/v1/manufacturing" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json"
+
+  3. Get manufacturing order by record ID
+     Fungsi: ambil 1 row manufacturing identity berdasarkan id database, bukan manufacturing_id.
+
+  export MFG_ROW_ID="6cf2a9ad-d044-4b8c-892e-c5d706fd0001"
+
+  curl -X GET "$BASE_URL/api/v1/manufacturing/$MFG_ROW_ID" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json"
+
+  4. Update full manufacturing order
+     Fungsi: update semua field row manufacturing identity.
+
+  curl -X PUT "$BASE_URL/api/v1/manufacturing/$MFG_ROW_ID" \
+    "${COMMON_HEADERS[@]}" \
+    -d '{
+      "manufacturing_id": "MFG-24001",
+      "sku": "SKU-APPLE-60",
+      "sku_name": "Apple Burst 60ml Updated",
+      "target_qty": 5200,
+      "done_qty": 800,
+      "status": "idle",
+      "manual_finished_qty": 0,
+      "leader_name": "Bima",
+      "finished_at": null
+    }'
+
+  5. Update status manufacturing order
+     Fungsi: update field status saja. Valid: started, idle, finished.
+
+  curl -X PATCH "$BASE_URL/api/v1/manufacturing/$MFG_ROW_ID/status" \
+    "${COMMON_HEADERS[@]}" \
+    -d '{
+      "status": "finished"
+    }'
+
+  6. Update manual finished qty
+     Fungsi: update manual_finished_qty saja.
+
+  curl -X PATCH "$BASE_URL/api/v1/manufacturing/$MFG_ROW_ID/manual-finished-qty" \
+    "${COMMON_HEADERS[@]}" \
+    -d '{
+      "manual_finished_qty": 1200
+    }'
+
+  7. Delete manufacturing order
+     Fungsi: hapus row manufacturing identity.
+
+  curl -X DELETE "$BASE_URL/api/v1/manufacturing/$MFG_ROW_ID" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json"
+
+  Dashboard Terkait Manufacturing
+  8. Top leaders dashboard
+  Fungsi: leaderboard output manufacturing per leader.
+
+  curl -X GET "$BASE_URL/api/v1/dashboard/top-leaders?filter=today" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json"

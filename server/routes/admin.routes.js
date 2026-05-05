@@ -828,17 +828,19 @@ router.post('/sync-mo', async (req, res) => {
           let domainFilter;
           
           if (noteFilter === 'cartridge') {
-            domainFilter = ['|', '|', '|',
+            domainFilter = [
+              '|', '|', '|', '|', '|', '|',
               ['note', 'ilike', 'cartridge'],
               ['note', 'ilike', 'cartirdge'],
               ['note', 'ilike', 'cartrige'],
-              ['note', 'ilike', 'cartrdige']
+              ['note', 'ilike', 'cartrdige'],
+              ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 1'],
+              ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 2'],
+              ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 3']
             ];
           } else if (noteFilter === 'liquid') {
             domainFilter = ['note', 'ilike', 'liquid'];
-          } else if (noteFilter === 'device') {
-            domainFilter = ['note', 'ilike', 'device'];
-          } else {
+          } else if (noteFilter !== 'device') {
             continue;
           }
 
@@ -851,11 +853,23 @@ router.post('/sync-mo', async (req, res) => {
           if (noteFilter === 'cartridge') {
             combinedDomain = [
               '&',
-              '|', '|', '|',
+              '|', '|', '|', '|', '|', '|',
               ['note', 'ilike', 'cartridge'],
               ['note', 'ilike', 'cartirdge'],
               ['note', 'ilike', 'cartrige'],
               ['note', 'ilike', 'cartrdige'],
+              ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 1'],
+              ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 2'],
+              ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 3'],
+              ["create_date", ">=", startDateStr]
+            ];
+          } else if (noteFilter === 'device') {
+            combinedDomain = [
+              '&',
+              '|', '|',
+              ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
+              ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
+              ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
               ["create_date", ">=", startDateStr]
             ];
           } else {
