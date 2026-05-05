@@ -945,41 +945,48 @@ router.post('/sync-mo', async (req, res) => {
           });
 
           if (response.result && Array.isArray(response.result)) {
-            const insertPromises = response.result.map((mo) => {
-              return new Promise((resolve, reject) => {
-                const moCreateDate = mo.create_date || new Date().toISOString();
-                const productName = mo.product_id ? mo.product_id[1] : 'N/A';
-                const productQty = mo.product_qty || 0;
-                const productUom = mo.product_uom_id ? mo.product_uom_id[1] : '';
-                const moNote = mo.note || '';
-                
-                db.run(
-                  `INSERT INTO odoo_mo_cache 
+            // Avoid exhausting the pg pool: never run thousands of db.run() in parallel.
+            const MO_INSERT_CONCURRENCY = 12;
+            const rows = response.result;
+            for (let i = 0; i < rows.length; i += MO_INSERT_CONCURRENCY) {
+              const chunk = rows.slice(i, i + MO_INSERT_CONCURRENCY);
+              await Promise.all(
+                chunk.map(
+                  (mo) =>
+                    new Promise((resolve, reject) => {
+                      const moCreateDate = mo.create_date || new Date().toISOString();
+                      const productName = mo.product_id ? mo.product_id[1] : 'N/A';
+                      const productQty = mo.product_qty || 0;
+                      const productUom = mo.product_uom_id ? mo.product_uom_id[1] : '';
+                      const moNote = mo.note || '';
+
+                      db.run(
+                        `INSERT INTO odoo_mo_cache 
                    (mo_number, sku_name, quantity, uom, note, create_date, fetched_at, last_updated) 
                    VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                    ON CONFLICT (mo_number) DO UPDATE SET 
                      sku_name = $2, quantity = $3, uom = $4, note = $5, 
                      create_date = $6, last_updated = CURRENT_TIMESTAMP`,
-                  [
-                    mo.name,
-                    productName,
-                    productQty,
-                    productUom,
-                    moNote,
-                    moCreateDate
-                  ],
-                  function(insertErr) {
-                    if (insertErr) {
-                      reject(insertErr);
-                    } else {
-                      resolve();
-                    }
-                  }
-                );
-              });
-            });
-
-            await Promise.all(insertPromises);
+                        [
+                          mo.name,
+                          productName,
+                          productQty,
+                          productUom,
+                          moNote,
+                          moCreateDate
+                        ],
+                        function (insertErr) {
+                          if (insertErr) {
+                            reject(insertErr);
+                          } else {
+                            resolve();
+                          }
+                        }
+                      );
+                    })
+                )
+              );
+            }
             const updated = response.result.length;
             totalUpdated += updated;
             results.push({
