@@ -197,6 +197,16 @@ function ProductionCartridge() {
     }
   };
 
+  /** Filter MO for picker; safe if mo_number/sku_name null (avoids datalist/render crashes). */
+  const filterMoListBySearch = (list, term) => {
+    const t = (term || '').toLowerCase();
+    return list.filter((mo) => {
+      const num = String(mo.mo_number ?? '');
+      const sku = String(mo.sku_name ?? '');
+      return t === '' || num.toLowerCase().includes(t) || sku.toLowerCase().includes(t);
+    });
+  };
+
   const handleStartManufacturing = () => {
     setShowStartModal(true);
   };
@@ -262,7 +272,7 @@ function ProductionCartridge() {
         // Filter out SKU names that start with "MIXING" and MO numbers that have already been used
         const filteredMoData = moData.filter(mo => {
           // Exclude MIXING SKU
-          if (mo.sku_name && mo.sku_name.toUpperCase().startsWith('MIXING')) {
+          if (mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING')) {
             return false;
           }
           // Exclude MO numbers that have already been input
@@ -275,7 +285,7 @@ function ProductionCartridge() {
         setMoList(filteredMoData);
         console.log(`✅ Loaded ${filteredMoData.length} MO records for Cartridge production (filtered from ${moData.length}, ${usedMoNumbers.size} already used)`);
         if (filteredMoData.length === 0) {
-          alert('Tidak ada data MO untuk produksi Cartridge dalam 7 hari terakhir. Silakan periksa apakah scheduler telah memperbarui cache.');
+          alert('Tidak ada MO yang tersedia (semua sudah dipakai, SKU MIXING, atau belum ada di cache). Sync MO dari Odoo lalu coba lagi.');
         }
       } else {
         console.error('Failed to fetch MO list:', response.data.error);
@@ -301,7 +311,7 @@ function ProductionCartridge() {
         const moData = response.data.data || [];
         // Filter out SKU names that start with "MIXING"
         const filteredMoData = moData.filter(mo => {
-          return !(mo.sku_name && mo.sku_name.toUpperCase().startsWith('MIXING'));
+          return !(mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING'));
         });
         setMoList(filteredMoData);
       }
@@ -324,7 +334,7 @@ function ProductionCartridge() {
         const moData = response.data.data || [];
         // Filter out SKU names that start with "MIXING"
         const filteredMoData = moData.filter(mo => {
-          return !(mo.sku_name && mo.sku_name.toUpperCase().startsWith('MIXING'));
+          return !(mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING'));
         });
         setMoList(filteredMoData);
       }
@@ -984,33 +994,30 @@ function ProductionCartridge() {
 
   const handleMoChange = (moNumber) => {
     const mo = moList.find(m => m.mo_number === moNumber);
-    setSelectedMo(mo);
-    setMoSearchTerm(mo ? `${mo.mo_number} - ${mo.sku_name}` : '');
+    setSelectedMo(mo || null);
     setFormData({
       ...formData,
-      moNumber: moNumber,
+      moNumber: moNumber || '',
       skuName: mo ? mo.sku_name : ''
     });
   };
 
   const handleBufferMoChange = (moNumber) => {
     const mo = moList.find(m => m.mo_number === moNumber);
-    setSelectedBufferMo(mo);
-    setBufferMoSearchTerm(mo ? `${mo.mo_number} - ${mo.sku_name}` : '');
+    setSelectedBufferMo(mo || null);
     setBufferData({
       ...bufferData,
-      moNumber: moNumber,
+      moNumber: moNumber || '',
       skuName: mo ? mo.sku_name : ''
     });
   };
 
   const handleRejectMoChange = (moNumber) => {
     const mo = moList.find(m => m.mo_number === moNumber);
-    setSelectedRejectMo(mo);
-    setRejectMoSearchTerm(mo ? `${mo.mo_number} - ${mo.sku_name}` : '');
+    setSelectedRejectMo(mo || null);
     setRejectData({
       ...rejectData,
-      moNumber: moNumber,
+      moNumber: moNumber || '',
       skuName: mo ? mo.sku_name : ''
     });
   };
@@ -1968,42 +1975,42 @@ function ProductionCartridge() {
             <div className="form-group">
               <label>MO Number *</label>
               <input
-                type="text"
-                list="mo-datalist-cartridge"
+                type="search"
                 value={moSearchTerm}
+                onChange={(e) => setMoSearchTerm(e.target.value)}
+                placeholder="Ketik untuk menyaring daftar MO atau SKU..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              />
+              <select
+                value={formData.moNumber || ''}
                 onChange={(e) => {
-                  setMoSearchTerm(e.target.value);
-                  // Auto-select if exact match
-                  const exactMatch = moList.find(mo => 
-                    mo.mo_number === e.target.value || 
-                    `${mo.mo_number} - ${mo.sku_name}` === e.target.value
-                  );
-                  if (exactMatch) {
-                    handleMoChange(exactMatch.mo_number);
+                  const v = e.target.value;
+                  if (v) {
+                    handleMoChange(v);
                   } else {
                     setSelectedMo(null);
                     setFormData({ ...formData, moNumber: '', skuName: '' });
                   }
                 }}
-                placeholder="Type to search MO Number or SKU Name..."
-                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
-              />
-              <datalist id="mo-datalist-cartridge">
-                {moList
-                  .filter(mo => 
-                    moSearchTerm === '' ||
-                    mo.mo_number.toLowerCase().includes(moSearchTerm.toLowerCase()) ||
-                    mo.sku_name.toLowerCase().includes(moSearchTerm.toLowerCase())
-                  )
-                  .map((mo) => (
-                    <option key={mo.mo_number} value={mo.mo_number}>
-                      {mo.mo_number} - {mo.sku_name}
-                    </option>
-                  ))
-                }
-              </datalist>
+                style={{
+                  width: '100%',
+                  marginTop: '8px',
+                  padding: '8px',
+                  fontSize: '16px',
+                  borderRadius: '4px',
+                  border: '1px solid #ccc'
+                }}
+                size={Math.min(12, Math.max(4, filterMoListBySearch(moList, moSearchTerm).length + 1))}
+              >
+                <option value="">-- Pilih MO --</option>
+                {filterMoListBySearch(moList, moSearchTerm).map((mo) => (
+                  <option key={mo.mo_number} value={mo.mo_number}>
+                    {mo.mo_number} — {mo.sku_name || 'N/A'}
+                  </option>
+                ))}
+              </select>
               <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
-                Input MO yang mau diinput
+                Pilih MO dari daftar (scroll). Gunakan kotak pencarian di atas untuk menyaring banyak MO.
               </small>
               {selectedMo && (
                 <div className="mo-info-display">
@@ -2198,40 +2205,40 @@ function ProductionCartridge() {
             <div className="form-group">
               <label>MO Number *</label>
               <input
-                type="text"
-                list="mo-datalist-buffer-cartridge"
+                type="search"
                 value={bufferMoSearchTerm}
+                onChange={(e) => setBufferMoSearchTerm(e.target.value)}
+                placeholder="Ketik untuk menyaring daftar MO atau SKU..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              />
+              <select
+                value={bufferData.moNumber || ''}
                 onChange={(e) => {
-                  setBufferMoSearchTerm(e.target.value);
-                  // Auto-select if exact match
-                  const exactMatch = moList.find(mo => 
-                    mo.mo_number === e.target.value || 
-                    `${mo.mo_number} - ${mo.sku_name}` === e.target.value
-                  );
-                  if (exactMatch) {
-                    handleBufferMoChange(exactMatch.mo_number);
+                  const v = e.target.value;
+                  if (v) {
+                    handleBufferMoChange(v);
                   } else {
                     setSelectedBufferMo(null);
                     setBufferData({ ...bufferData, moNumber: '', skuName: '' });
                   }
                 }}
-                placeholder="Type to search MO Number or SKU Name..."
-                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
-              />
-              <datalist id="mo-datalist-buffer-cartridge">
-                {moList
-                  .filter(mo => 
-                    bufferMoSearchTerm === '' ||
-                    mo.mo_number.toLowerCase().includes(bufferMoSearchTerm.toLowerCase()) ||
-                    mo.sku_name.toLowerCase().includes(bufferMoSearchTerm.toLowerCase())
-                  )
-                  .map((mo) => (
-                    <option key={mo.mo_number} value={mo.mo_number}>
-                      {mo.mo_number} - {mo.sku_name}
-                    </option>
-                  ))
-                }
-              </datalist>
+                style={{
+                  width: '100%',
+                  marginTop: '8px',
+                  padding: '8px',
+                  fontSize: '16px',
+                  borderRadius: '4px',
+                  border: '1px solid #ccc'
+                }}
+                size={Math.min(12, Math.max(4, filterMoListBySearch(moList, bufferMoSearchTerm).length + 1))}
+              >
+                <option value="">-- Pilih MO --</option>
+                {filterMoListBySearch(moList, bufferMoSearchTerm).map((mo) => (
+                  <option key={mo.mo_number} value={mo.mo_number}>
+                    {mo.mo_number} — {mo.sku_name || 'N/A'}
+                  </option>
+                ))}
+              </select>
               {selectedBufferMo && (
                 <div className="mo-info-display">
                   <p><strong>SKU Name:</strong> {selectedBufferMo.sku_name}</p>
@@ -2321,40 +2328,40 @@ function ProductionCartridge() {
             <div className="form-group">
               <label>MO Number *</label>
               <input
-                type="text"
-                list="mo-datalist-reject-cartridge"
+                type="search"
                 value={rejectMoSearchTerm}
+                onChange={(e) => setRejectMoSearchTerm(e.target.value)}
+                placeholder="Ketik untuk menyaring daftar MO atau SKU..."
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              />
+              <select
+                value={rejectData.moNumber || ''}
                 onChange={(e) => {
-                  setRejectMoSearchTerm(e.target.value);
-                  // Auto-select if exact match
-                  const exactMatch = moList.find(mo => 
-                    mo.mo_number === e.target.value || 
-                    `${mo.mo_number} - ${mo.sku_name}` === e.target.value
-                  );
-                  if (exactMatch) {
-                    handleRejectMoChange(exactMatch.mo_number);
+                  const v = e.target.value;
+                  if (v) {
+                    handleRejectMoChange(v);
                   } else {
                     setSelectedRejectMo(null);
                     setRejectData({ ...rejectData, moNumber: '', skuName: '' });
                   }
                 }}
-                placeholder="Type to search MO Number or SKU Name..."
-                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
-              />
-              <datalist id="mo-datalist-reject-cartridge">
-                {moList
-                  .filter(mo => 
-                    rejectMoSearchTerm === '' ||
-                    mo.mo_number.toLowerCase().includes(rejectMoSearchTerm.toLowerCase()) ||
-                    mo.sku_name.toLowerCase().includes(rejectMoSearchTerm.toLowerCase())
-                  )
-                  .map((mo) => (
-                    <option key={mo.mo_number} value={mo.mo_number}>
-                      {mo.mo_number} - {mo.sku_name}
-                    </option>
-                  ))
-                }
-              </datalist>
+                style={{
+                  width: '100%',
+                  marginTop: '8px',
+                  padding: '8px',
+                  fontSize: '16px',
+                  borderRadius: '4px',
+                  border: '1px solid #ccc'
+                }}
+                size={Math.min(12, Math.max(4, filterMoListBySearch(moList, rejectMoSearchTerm).length + 1))}
+              >
+                <option value="">-- Pilih MO --</option>
+                {filterMoListBySearch(moList, rejectMoSearchTerm).map((mo) => (
+                  <option key={mo.mo_number} value={mo.mo_number}>
+                    {mo.mo_number} — {mo.sku_name || 'N/A'}
+                  </option>
+                ))}
+              </select>
               {selectedRejectMo && (
                 <div className="mo-info-display">
                   <p><strong>SKU Name:</strong> {selectedRejectMo.sku_name}</p>
