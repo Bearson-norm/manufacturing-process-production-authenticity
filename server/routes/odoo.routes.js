@@ -27,10 +27,11 @@ router.get('/mo-list', async (req, res) => {
         params.push('%liquid%');
       } else if (typeLower === 'device') {
         query += ` AND (note ILIKE $${params.length + 1} OR note ILIKE $${params.length + 2} OR note ILIKE $${params.length + 3})`;
+        query += ` AND COALESCE(sku_name,'') NOT ILIKE '%cartridge%'`;
         params.push('%TIM DEVICE CT - SHIFT 1%', '%TIM DEVICE CT - SHIFT 2%', '%TIM DEVICE CT - SHIFT 3%');
       } else if (typeLower === 'cartridge') {
         const b = params.length;
-        query += ` AND (note ILIKE $${b + 1} OR note ILIKE $${b + 2} OR note ILIKE $${b + 3} OR note ILIKE $${b + 4} OR note ILIKE $${b + 5} OR note ILIKE $${b + 6} OR note ILIKE $${b + 7})`;
+        query += ` AND (note ILIKE $${b + 1} OR note ILIKE $${b + 2} OR note ILIKE $${b + 3} OR note ILIKE $${b + 4} OR note ILIKE $${b + 5} OR note ILIKE $${b + 6} OR note ILIKE $${b + 7} OR note ILIKE $${b + 8} OR note ILIKE $${b + 9} OR note ILIKE $${b + 10})`;
         params.push(
           '%cartridge%',
           '%cartirdge%',
@@ -38,7 +39,10 @@ router.get('/mo-list', async (req, res) => {
           '%cartrdige%',
           '%TIM CARTRIDGE - SHIFT 1%',
           '%TIM CARTRIDGE - SHIFT 2%',
-          '%TIM CARTRIDGE - SHIFT 3%'
+          '%TIM CARTRIDGE - SHIFT 3%',
+          '%TIM DEVICE CT - SHIFT 1%',
+          '%TIM DEVICE CT - SHIFT 2%',
+          '%TIM DEVICE CT - SHIFT 3%'
         );
       }
       // If productionType is 'all' or not specified, return all
