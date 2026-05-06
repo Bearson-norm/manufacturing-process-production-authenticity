@@ -3722,15 +3722,15 @@ app.get('/api/odoo/mo-list', async (req, res) => {
     
     // Add OR conditions for variations
     if (noteFilter === 'cartridge') {
-      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6) OR LOWER(note) LIKE LOWER($7) OR LOWER(note) LIKE LOWER($8) OR LOWER(note) LIKE LOWER($9) OR LOWER(note) LIKE LOWER($10)`;
+      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6) OR LOWER(note) LIKE LOWER($7) OR LOWER(note) LIKE LOWER($8) OR LOWER(note) LIKE LOWER($9) OR LOWER(note) LIKE LOWER($10) OR LOWER(note) LIKE LOWER($11) OR LOWER(note) LIKE LOWER($12) OR LOWER(note) LIKE LOWER($13)`;
     } else if (noteFilter === 'liquid') {
       query += ` OR LOWER(note) LIKE LOWER($2)`;
     } else if (noteFilter === 'device') {
-      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3)`;
+      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6)`;
     }
 
     query += `)`;
-    // MO dengan note TIM DEVICE CT tapi SKU cartridge → hanya untuk halaman cartridge (bukan device)
+    // MO dengan note tim device (CT atau non-CT) tapi SKU cartridge → hanya untuk halaman cartridge (bukan device)
     if (noteFilter === 'device') {
       query += ` AND COALESCE(sku_name,'') NOT ILIKE '%cartridge%'`;
     }
@@ -3756,9 +3756,12 @@ app.get('/api/odoo/mo-list', async (req, res) => {
         '%TIM CARTRIDGE - SHIFT 3%',
         '%TIM DEVICE CT - SHIFT 1%',
         '%TIM DEVICE CT - SHIFT 2%',
-        '%TIM DEVICE CT - SHIFT 3%'
+        '%TIM DEVICE CT - SHIFT 3%',
+        '%TIM DEVICE - SHIFT 1%',
+        '%TIM DEVICE - SHIFT 2%',
+        '%TIM DEVICE - SHIFT 3%'
       );
-      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: cartridge + TIM CARTRIDGE/TIM DEVICE CT SHIFT 1/2/3`);
+      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: cartridge + TIM CARTRIDGE + TIM DEVICE CT / TIM DEVICE SHIFT 1/2/3`);
     } else if (noteFilter === 'liquid') {
       queryParams.push('%TEAM LIQUID%');
       console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TEAM LIQUID, liquid`);
@@ -3766,9 +3769,12 @@ app.get('/api/odoo/mo-list', async (req, res) => {
       queryParams = [
         '%TIM DEVICE CT - SHIFT 1%',
         '%TIM DEVICE CT - SHIFT 2%',
-        '%TIM DEVICE CT - SHIFT 3%'
+        '%TIM DEVICE CT - SHIFT 3%',
+        '%TIM DEVICE - SHIFT 1%',
+        '%TIM DEVICE - SHIFT 2%',
+        '%TIM DEVICE - SHIFT 3%'
       ];
-      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TIM DEVICE CT - SHIFT 1/2/3`);
+      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TIM DEVICE CT + TIM DEVICE - SHIFT 1/2/3`);
     } else {
       console.log(`🔍 [MO List] Querying cache for ${productionType} with pattern: ${searchPattern}`);
     }
@@ -3875,10 +3881,14 @@ app.get('/api/odoo/debug/mo-sync', async (req, res) => {
             SELECT 
               CASE 
                 WHEN LOWER(note) LIKE '%cartridge%' OR LOWER(note) LIKE '%cartirdge%' OR LOWER(note) LIKE '%cartrige%' OR LOWER(note) LIKE '%cartrdige%' OR LOWER(note) LIKE '%tim cartridge - shift 1%' OR LOWER(note) LIKE '%tim cartridge - shift 2%' OR LOWER(note) LIKE '%tim cartridge - shift 3%' THEN 'cartridge'
-                WHEN (LOWER(note) LIKE '%tim device ct - shift 1%' OR LOWER(note) LIKE '%tim device ct - shift 2%' OR LOWER(note) LIKE '%tim device ct - shift 3%')
+                WHEN (
+                     LOWER(note) LIKE '%tim device ct - shift 1%' OR LOWER(note) LIKE '%tim device ct - shift 2%' OR LOWER(note) LIKE '%tim device ct - shift 3%'
+                     OR LOWER(note) LIKE '%tim device - shift 1%' OR LOWER(note) LIKE '%tim device - shift 2%' OR LOWER(note) LIKE '%tim device - shift 3%'
+                   )
                      AND LOWER(COALESCE(sku_name,'')) LIKE '%cartridge%' THEN 'cartridge'
                 WHEN LOWER(note) LIKE '%liquid%' THEN 'liquid'
-                WHEN LOWER(note) LIKE '%tim device ct - shift 1%' OR LOWER(note) LIKE '%tim device ct - shift 2%' OR LOWER(note) LIKE '%tim device ct - shift 3%' THEN 'device'
+                WHEN LOWER(note) LIKE '%tim device ct - shift 1%' OR LOWER(note) LIKE '%tim device ct - shift 2%' OR LOWER(note) LIKE '%tim device ct - shift 3%'
+                     OR LOWER(note) LIKE '%tim device - shift 1%' OR LOWER(note) LIKE '%tim device - shift 2%' OR LOWER(note) LIKE '%tim device - shift 3%' THEN 'device'
                 ELSE 'unknown'
               END as production_type
             FROM odoo_mo_cache
@@ -4086,6 +4096,10 @@ app.get('/api/odoo/debug/query-mo', async (req, res) => {
           noteText.includes('tim device ct - shift 1') ||
           noteText.includes('tim device ct - shift 2') ||
           noteText.includes('tim device ct - shift 3');
+        const hasDevicePlainShift =
+          noteText.includes('tim device - shift 1') ||
+          noteText.includes('tim device - shift 2') ||
+          noteText.includes('tim device - shift 3');
         const hasCartridge =
           noteText.includes('cartridge') ||
           noteText.includes('cartirdge') ||
@@ -4094,7 +4108,7 @@ app.get('/api/odoo/debug/query-mo', async (req, res) => {
           noteText.includes('tim cartridge - shift 1') ||
           noteText.includes('tim cartridge - shift 2') ||
           noteText.includes('tim cartridge - shift 3') ||
-          (hasDeviceCtShift && skuLabel.includes('cartridge'));
+          ((hasDeviceCtShift || hasDevicePlainShift) && skuLabel.includes('cartridge'));
         
         moData.analysis = {
           create_date_parsed: createDate.toISOString(),
@@ -4380,7 +4394,7 @@ async function updateMoDataFromOdoo() {
         
         if (noteFilter === 'cartridge') {
           domainFilter = [
-            '|', '|', '|', '|', '|', '|', '|', '|', '|',
+            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
             ['note', 'ilike', 'cartridge'],
             ['note', 'ilike', 'cartirdge'],
             ['note', 'ilike', 'cartrige'],
@@ -4390,7 +4404,10 @@ async function updateMoDataFromOdoo() {
             ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 3'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
-            ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3']
+            ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 3']
           ];
         } else if (noteFilter === 'liquid') {
           // Use OR condition to catch "TEAM LIQUID" and "liquid" variations
@@ -4412,7 +4429,7 @@ async function updateMoDataFromOdoo() {
         if (noteFilter === 'cartridge') {
           combinedDomain = [
             '&',
-            '|', '|', '|', '|', '|', '|', '|', '|', '|',
+            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
             ['note', 'ilike', 'cartridge'],
             ['note', 'ilike', 'cartirdge'],
             ['note', 'ilike', 'cartrige'],
@@ -4423,6 +4440,9 @@ async function updateMoDataFromOdoo() {
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 3'],
             ["create_date", ">=", startDateStr]
           ];
         } else if (noteFilter === 'liquid') {
@@ -4437,10 +4457,13 @@ async function updateMoDataFromOdoo() {
         } else if (noteFilter === 'device') {
           combinedDomain = [
             '&',
-            '|', '|',
+            '|', '|', '|', '|', '|',
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 3'],
             ["create_date", ">=", startDateStr]
           ];
         }
