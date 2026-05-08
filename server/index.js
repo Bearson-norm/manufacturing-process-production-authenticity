@@ -3722,11 +3722,11 @@ app.get('/api/odoo/mo-list', async (req, res) => {
     
     // Add OR conditions for variations
     if (noteFilter === 'cartridge') {
-      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6) OR LOWER(note) LIKE LOWER($7) OR LOWER(note) LIKE LOWER($8) OR LOWER(note) LIKE LOWER($9) OR LOWER(note) LIKE LOWER($10) OR LOWER(note) LIKE LOWER($11) OR LOWER(note) LIKE LOWER($12) OR LOWER(note) LIKE LOWER($13)`;
+      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6) OR LOWER(note) LIKE LOWER($7) OR LOWER(note) LIKE LOWER($8) OR LOWER(note) LIKE LOWER($9) OR LOWER(note) LIKE LOWER($10) OR LOWER(note) LIKE LOWER($11) OR LOWER(note) LIKE LOWER($12) OR LOWER(note) LIKE LOWER($13) OR LOWER(note) LIKE LOWER($14) OR LOWER(note) LIKE LOWER($15) OR LOWER(note) LIKE LOWER($16) OR LOWER(note) LIKE LOWER($17) OR LOWER(note) LIKE LOWER($18) OR LOWER(note) LIKE LOWER($19)`;
     } else if (noteFilter === 'liquid') {
       query += ` OR LOWER(note) LIKE LOWER($2)`;
     } else if (noteFilter === 'device') {
-      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6)`;
+      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6) OR LOWER(note) LIKE LOWER($7) OR LOWER(note) LIKE LOWER($8) OR LOWER(note) LIKE LOWER($9) OR LOWER(note) LIKE LOWER($10) OR LOWER(note) LIKE LOWER($11) OR LOWER(note) LIKE LOWER($12)`;
     }
 
     query += `)`;
@@ -3759,9 +3759,15 @@ app.get('/api/odoo/mo-list', async (req, res) => {
         '%TIM DEVICE CT - SHIFT 3%',
         '%TIM DEVICE - SHIFT 1%',
         '%TIM DEVICE - SHIFT 2%',
-        '%TIM DEVICE - SHIFT 3%'
+        '%TIM DEVICE - SHIFT 3%',
+        '%TEAM DEVICE CT - SHIFT 1%',
+        '%TEAM DEVICE CT - SHIFT 2%',
+        '%TEAM DEVICE CT - SHIFT 3%',
+        '%TEAM DEVICE - SHIFT 1%',
+        '%TEAM DEVICE - SHIFT 2%',
+        '%TEAM DEVICE - SHIFT 3%'
       );
-      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: cartridge + TIM CARTRIDGE + TIM DEVICE CT / TIM DEVICE SHIFT 1/2/3`);
+      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: cartridge + TIM/TEAM CARTRIDGE + TIM/TEAM DEVICE CT / DEVICE SHIFT 1/2/3`);
     } else if (noteFilter === 'liquid') {
       queryParams.push('%TEAM LIQUID%');
       console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TEAM LIQUID, liquid`);
@@ -3772,9 +3778,15 @@ app.get('/api/odoo/mo-list', async (req, res) => {
         '%TIM DEVICE CT - SHIFT 3%',
         '%TIM DEVICE - SHIFT 1%',
         '%TIM DEVICE - SHIFT 2%',
-        '%TIM DEVICE - SHIFT 3%'
+        '%TIM DEVICE - SHIFT 3%',
+        '%TEAM DEVICE CT - SHIFT 1%',
+        '%TEAM DEVICE CT - SHIFT 2%',
+        '%TEAM DEVICE CT - SHIFT 3%',
+        '%TEAM DEVICE - SHIFT 1%',
+        '%TEAM DEVICE - SHIFT 2%',
+        '%TEAM DEVICE - SHIFT 3%'
       ];
-      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TIM DEVICE CT + TIM DEVICE - SHIFT 1/2/3`);
+      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TIM/TEAM DEVICE CT + TIM/TEAM DEVICE - SHIFT 1/2/3`);
     } else {
       console.log(`🔍 [MO List] Querying cache for ${productionType} with pattern: ${searchPattern}`);
     }
@@ -4394,7 +4406,7 @@ async function updateMoDataFromOdoo() {
         
         if (noteFilter === 'cartridge') {
           domainFilter = [
-            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
+            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
             ['note', 'ilike', 'cartridge'],
             ['note', 'ilike', 'cartirdge'],
             ['note', 'ilike', 'cartrige'],
@@ -4407,7 +4419,13 @@ async function updateMoDataFromOdoo() {
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
             ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
             ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
-            ['note', 'ilike', 'TIM DEVICE - SHIFT 3']
+            ['note', 'ilike', 'TIM DEVICE - SHIFT 3'],
+            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 1'],
+            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 2'],
+            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 3'],
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 3']
           ];
         } else if (noteFilter === 'liquid') {
           // Use OR condition to catch "TEAM LIQUID" and "liquid" variations
@@ -4429,7 +4447,7 @@ async function updateMoDataFromOdoo() {
         if (noteFilter === 'cartridge') {
           combinedDomain = [
             '&',
-            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
+            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
             ['note', 'ilike', 'cartridge'],
             ['note', 'ilike', 'cartirdge'],
             ['note', 'ilike', 'cartrige'],
@@ -4443,6 +4461,12 @@ async function updateMoDataFromOdoo() {
             ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
             ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
             ['note', 'ilike', 'TIM DEVICE - SHIFT 3'],
+            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 1'],
+            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 2'],
+            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 3'],
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
             ["create_date", ">=", startDateStr]
           ];
         } else if (noteFilter === 'liquid') {
@@ -4457,13 +4481,19 @@ async function updateMoDataFromOdoo() {
         } else if (noteFilter === 'device') {
           combinedDomain = [
             '&',
-            '|', '|', '|', '|', '|',
+            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
             ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
             ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
             ['note', 'ilike', 'TIM DEVICE - SHIFT 3'],
+            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 1'],
+            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 2'],
+            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 3'],
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
             ["create_date", ">=", startDateStr]
           ];
         }

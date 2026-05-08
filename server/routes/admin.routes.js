@@ -825,28 +825,8 @@ router.post('/sync-mo', async (req, res) => {
           const https = require('https');
           const url = require('url');
           const noteFilter = productionType.toLowerCase();
-          let domainFilter;
-          
-          if (noteFilter === 'cartridge') {
-            domainFilter = [
-              '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
-              ['note', 'ilike', 'cartridge'],
-              ['note', 'ilike', 'cartirdge'],
-              ['note', 'ilike', 'cartrige'],
-              ['note', 'ilike', 'cartrdige'],
-              ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 1'],
-              ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 2'],
-              ['note', 'ilike', 'TIM CARTRIDGE - SHIFT 3'],
-              ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
-              ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
-              ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
-              ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
-              ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
-              ['note', 'ilike', 'TIM DEVICE - SHIFT 3']
-            ];
-          } else if (noteFilter === 'liquid') {
-            domainFilter = ['note', 'ilike', 'liquid'];
-          } else if (noteFilter !== 'device') {
+
+          if (noteFilter !== 'cartridge' && noteFilter !== 'liquid' && noteFilter !== 'device') {
             continue;
           }
 
@@ -859,7 +839,7 @@ router.post('/sync-mo', async (req, res) => {
           if (noteFilter === 'cartridge') {
             combinedDomain = [
               '&',
-              '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
+              '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
               ['note', 'ilike', 'cartridge'],
               ['note', 'ilike', 'cartirdge'],
               ['note', 'ilike', 'cartrige'],
@@ -873,25 +853,42 @@ router.post('/sync-mo', async (req, res) => {
               ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
               ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
               ['note', 'ilike', 'TIM DEVICE - SHIFT 3'],
+              ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 1'],
+              ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 2'],
+              ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 3'],
+              ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
+              ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
+              ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
               ["create_date", ">=", startDateStr]
             ];
           } else if (noteFilter === 'device') {
             combinedDomain = [
               '&',
-              '|', '|', '|', '|', '|',
+              '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
               ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
               ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
               ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
               ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
               ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
               ['note', 'ilike', 'TIM DEVICE - SHIFT 3'],
+              ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 1'],
+              ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 2'],
+              ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 3'],
+              ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
+              ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
+              ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
+              ["create_date", ">=", startDateStr]
+            ];
+          } else if (noteFilter === 'liquid') {
+            combinedDomain = [
+              '&',
+              '|',
+              ['note', 'ilike', 'TEAM LIQUID'],
+              ['note', 'ilike', 'liquid'],
               ["create_date", ">=", startDateStr]
             ];
           } else {
-            combinedDomain = [
-              domainFilter,
-              ["create_date", ">=", startDateStr]
-            ];
+            continue;
           }
 
           const ODOO_URL = `${config.odooBaseUrl}/web/dataset/call_kw/mrp.production/search_read`;
