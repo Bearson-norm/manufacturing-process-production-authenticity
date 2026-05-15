@@ -202,10 +202,13 @@ router.get('/manufacturing-data', apiKeyAuth, async (req, res) => {
         pic: row.pic,
         production_type: row.production_type,
         completed_at: row.completed_at || null,
-        authenticity_data: row.authenticity_data.map(auth => ({
+        authenticity_data: row.authenticity_data.map((auth) => ({
           first_authenticity: auth.firstAuthenticity || '',
           last_authenticity: auth.lastAuthenticity || '',
-          roll_number: auth.rollNumber || ''
+          roll_number: auth.rollNumber || '',
+          vendorId: auth.vendorId != null ? auth.vendorId : null,
+          vendorName: auth.vendorName != null ? auth.vendorName : null,
+          vendorDigitCount: auth.vendorDigitCount != null ? auth.vendorDigitCount : null
         })),
         buffered_auth: allBuffers
           .filter(b => b.mo_number === row.mo_number)

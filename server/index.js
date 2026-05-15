@@ -22,7 +22,6 @@ initializeTables().then(() => {
 // TODO: Move to services/scheduler.service.js in future refactoring
 const { getAdminConfig } = require('./routes/admin.routes');
 const { db } = require('./database');
-const { sendToExternalAPIWithUrl } = require('./services/external-api.service');
 
 // Helper function to parse authenticity data
 function parseAuthenticityData(row) {
@@ -750,10 +749,13 @@ app.get('/api/external/manufacturing-data', apiKeyAuth, async (req, res) => {
         pic: row.pic,
         production_type: row.production_type,
         completed_at: row.completed_at || null,
-        authenticity_data: row.authenticity_data.map(auth => ({
+        authenticity_data: row.authenticity_data.map((auth) => ({
           first_authenticity: auth.firstAuthenticity || '',
           last_authenticity: auth.lastAuthenticity || '',
-          roll_number: auth.rollNumber || ''
+          roll_number: auth.rollNumber || '',
+          vendorId: auth.vendorId != null ? auth.vendorId : null,
+          vendorName: auth.vendorName != null ? auth.vendorName : null,
+          vendorDigitCount: auth.vendorDigitCount != null ? auth.vendorDigitCount : null
         })),
         buffered_auth: allBuffers
           .filter(b => b.mo_number === row.mo_number)
@@ -1035,10 +1037,13 @@ app.get('/api/external/manufacturing-data/by-date', apiKeyAuth, async (req, res)
         pic: row.pic,
         production_type: row.production_type,
         completed_at: row.completed_at || null,
-        authenticity_data: row.authenticity_data.map(auth => ({
+        authenticity_data: row.authenticity_data.map((auth) => ({
           first_authenticity: auth.firstAuthenticity || '',
           last_authenticity: auth.lastAuthenticity || '',
-          roll_number: auth.rollNumber || ''
+          roll_number: auth.rollNumber || '',
+          vendorId: auth.vendorId != null ? auth.vendorId : null,
+          vendorName: auth.vendorName != null ? auth.vendorName : null,
+          vendorDigitCount: auth.vendorDigitCount != null ? auth.vendorDigitCount : null
         })),
         buffered_auth: allBuffers
           .filter(b => b.mo_number === row.mo_number)
@@ -3037,27 +3042,6 @@ app.post('/api/admin/generate-api-key', (req, res) => {
   }
 });
 
-// GET admin config helper function
-function getAdminConfig(callback) {
-  db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['odoo_session_id'], (err, row) => {
-    if (err) {
-      return callback(err, null);
-    }
-    
-    const sessionId = row ? row.config_value : process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae';
-    
-    db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['odoo_base_url'], (err2, row2) => {
-      if (err2) {
-        return callback(err2, null);
-      }
-      
-      const odooBaseUrl = row2 ? row2.config_value : process.env.ODOO_API_URL || 'https://foomx.odoo.com';
-      
-      callback(null, { sessionId, odooBaseUrl });
-    });
-  });
-}
-
 // Get detailed MO cache stats for debugging
 app.get('/api/admin/mo-cache-details', (req, res) => {
   try {
@@ -4409,7 +4393,6 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
->>>>>>> origin/main
 
 // Scheduler Functions
 // Function to update MO data from Odoo for all production types

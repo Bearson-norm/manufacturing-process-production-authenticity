@@ -434,6 +434,53 @@ async function initializeTables() {
       )
     `);
 
+    // Authenticity vendor master (digit length per vendor name)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS authenticity_vendor (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        digit_count INTEGER NOT NULL CHECK (digit_count > 0 AND digit_count <= 64),
+        is_active INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Buffer / reject: optional vendor columns (NULL = legacy rows)
+    const vendorAlterTables = [
+      'buffer_liquid',
+      'buffer_device',
+      'buffer_cartridge',
+      'reject_liquid',
+      'reject_device',
+      'reject_cartridge'
+    ];
+    for (const tbl of vendorAlterTables) {
+      await client.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = '${tbl}' AND column_name = 'vendor_id'
+          ) THEN
+            ALTER TABLE ${tbl} ADD COLUMN vendor_id INTEGER REFERENCES authenticity_vendor(id) ON DELETE SET NULL;
+          END IF;
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = '${tbl}' AND column_name = 'vendor_name'
+          ) THEN
+            ALTER TABLE ${tbl} ADD COLUMN vendor_name TEXT;
+          END IF;
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = '${tbl}' AND column_name = 'vendor_digit_count'
+          ) THEN
+            ALTER TABLE ${tbl} ADD COLUMN vendor_digit_count INTEGER;
+          END IF;
+        END $$;
+      `);
+    }
+
     // Create indexes
     const indexes = [
       'CREATE INDEX IF NOT EXISTS idx_production_combined_mo_number ON production_combined(mo_number)',

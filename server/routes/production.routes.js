@@ -1,8 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../database');
-const { parseAuthenticityData, normalizeAuthenticityArray } = require('../utils/authenticity.utils');
-const { sendToExternalAPI, sendToExternalAPIWithUrl, getExternalAPIUrl } = require('../services/external-api.service');
+const {
+  parseAuthenticityData,
+  applyVendorSnapshotToRows,
+  isProductionAuthenticityRowBlank,
+  validateProductionAuthenticityRowsOrError
+} = require('../utils/authenticity.utils');
+const { sendToExternalAPIWithUrl, getExternalAPIUrl } = require('../services/external-api.service');
+const { ensureLiquidExternalIdAndPatchStarted } = require('../services/liquid-external-manufacturing.service');
 
 // Helper function to calculate done_qty from authenticity_data array (handle multiple rolls)
 function calculateDoneQty(authenticityDataArray) {
@@ -87,6 +93,22 @@ function groupBySession(rows) {
     });
   });
   return Object.values(grouped).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+function fetchActiveVendor(vendor_id, callback) {
+  const vid = parseInt(String(vendor_id), 10);
+  if (!Number.isFinite(vid)) {
+    return callback({ status: 400, message: 'vendor_id wajib dan harus valid' });
+  }
+  db.get(
+    'SELECT id, name, digit_count FROM authenticity_vendor WHERE id = $1 AND is_active = 1',
+    [vid],
+    (err, vendor) => {
+      if (err) return callback({ status: 500, message: err.message });
+      if (!vendor) return callback({ status: 400, message: 'Vendor tidak valid atau tidak aktif' });
+      callback(null, vendor);
+    }
+  );
 }
 
 // GET /api/production/liquid
@@ -228,72 +250,170 @@ router.get('/report', (req, res) => {
 
 // POST /api/production/liquid
 router.post('/liquid', (req, res) => {
-  const { session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const authenticityRows = normalizeAuthenticityArray(authenticity_data);
-  
-  db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [mo_number], (err, row) => {
-    const targetQty = (!err && row) ? (row.quantity || 0) : 0;
-    
-    const insertPromises = authenticityRows.map((authRow) => {
+  const {
+    session_id,
+    leader_name,
+    shift_number,
+    pic,
+    mo_number,
+    sku_name,
+    authenticity_data,
+    vendor_id
+  } = req.body;
+
+  fetchActiveVendor(vendor_id, (e, vendor) => {
+    if (e) {
+      return res.status(e.status || 400).json({ error: e.message });
+    }
+    const authenticityRows = applyVendorSnapshotToRows(authenticity_data, vendor);
+    const verr = validateProductionAuthenticityRowsOrError(authenticityRows);
+    if (verr) {
+      return res.status(400).json({ error: verr });
+    }
+    const rowsToInsert = authenticityRows.filter((r) => !isProductionAuthenticityRowBlank(r));
+    if (rowsToInsert.length === 0) {
+      return res.status(400).json({ error: 'Minimal satu baris authenticity harus diisi' });
+    }
+
+    db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [mo_number], (err, row) => {
+      const targetQty = (!err && row) ? (row.quantity || 0) : 0;
+
+      const insertPromises = rowsToInsert.map((authRow) => {
+        return new Promise((resolve, reject) => {
+          db.run(
+            `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+            [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([authRow])],
+            function (insertErr) {
+              if (insertErr) {
+                reject(insertErr);
+              } else {
+                resolve({ id: this.lastID, row: authRow });
+              }
+            }
+          );
+        });
+      });
+
+      Promise.all(insertPromises)
+        .then((results) => {
+          ensureLiquidExternalIdAndPatchStarted(mo_number, sku_name, targetQty, leader_name, () => {});
+
+          res.json({
+            message: 'Data saved successfully',
+            saved_count: results.length,
+            data: results.map((r) => ({
+              id: r.id,
+              session_id,
+              leader_name,
+              shift_number,
+              pic,
+              mo_number,
+              sku_name,
+              authenticity_data: [r.row]
+            }))
+          });
+        })
+        .catch((err) => {
+          res.status(500).json({ error: err.message });
+        });
+    });
+  });
+});
+
+// POST /api/production/device
+router.post('/device', (req, res) => {
+  const {
+    session_id,
+    leader_name,
+    shift_number,
+    pic,
+    mo_number,
+    sku_name,
+    authenticity_data,
+    vendor_id
+  } = req.body;
+
+  fetchActiveVendor(vendor_id, (e, vendor) => {
+    if (e) {
+      return res.status(e.status || 400).json({ error: e.message });
+    }
+    const authenticityRows = applyVendorSnapshotToRows(authenticity_data, vendor);
+    const verr = validateProductionAuthenticityRowsOrError(authenticityRows);
+    if (verr) {
+      return res.status(400).json({ error: verr });
+    }
+    const rowsToInsert = authenticityRows.filter((r) => !isProductionAuthenticityRowBlank(r));
+    if (rowsToInsert.length === 0) {
+      return res.status(400).json({ error: 'Minimal satu baris authenticity harus diisi' });
+    }
+
+    const insertPromises = rowsToInsert.map((row) => {
       return new Promise((resolve, reject) => {
         db.run(
-          `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+          `INSERT INTO production_device (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
-          [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([authRow])],
-          function(insertErr) {
-            if (insertErr) {
-              reject(insertErr);
+          [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
+          function (err) {
+            if (err) {
+              reject(err);
             } else {
-              resolve({ id: this.lastID, row: authRow });
+              resolve({ id: this.lastID, row });
             }
           }
         );
       });
     });
-    
+
     Promise.all(insertPromises)
       .then((results) => {
-        // Send to external API with new format
+        // Send to external API with new format (staging)
         getExternalAPIUrl('active', (err, externalApiUrl) => {
           if (err) {
             console.error(`❌ [External API] Error getting external API URL for active status:`, err);
             return;
           }
-          
+
           if (!externalApiUrl || externalApiUrl.trim() === '') {
-            console.log(`⚠️  [External API] External API URL for active status not configured, skipping send for MO ${mo_number}`);
+            console.log(
+              `⚠️  [External API] External API URL for active status not configured, skipping send for MO ${mo_number}`
+            );
             return;
           }
-          
-          const formattedData = formatManufacturingData(
-            mo_number,
-            sku_name,
-            targetQty,
-            null, // done_qty is null for active status
-            leader_name,
-            null  // finished_at is null for active status
-          );
-          
-          console.log(`📤 [External API] Sending active status for MO ${mo_number} to: ${externalApiUrl}`);
-          
-          sendToExternalAPIWithUrl(formattedData, externalApiUrl, 'POST')
-            .then(result => {
-              if (result.success) {
-                console.log(`✅ [External API] Successfully sent active status for MO ${mo_number}`);
-              } else {
-                console.log(`⚠️  [External API] Active status send skipped for MO ${mo_number}: ${result.message}`);
-              }
-            })
-            .catch(apiErr => {
-          console.error(`❌ [External API] Failed to send active status for MO ${mo_number}:`, apiErr.message);
-            });
+
+          db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [mo_number], (qtyErr, qtyRow) => {
+            const targetQty = (!qtyErr && qtyRow) ? qtyRow.quantity || 0 : 0;
+            const formattedData = formatManufacturingData(
+              mo_number,
+              sku_name,
+              targetQty,
+              null,
+              leader_name,
+              null
+            );
+
+            console.log(`📤 [External API] Sending active status for MO ${mo_number} to: ${externalApiUrl}`);
+
+            sendToExternalAPIWithUrl(formattedData, externalApiUrl, 'POST')
+              .then((result) => {
+                if (result.success) {
+                  console.log(`✅ [External API] Successfully sent active status for MO ${mo_number}`);
+                } else {
+                  console.log(
+                    `⚠️  [External API] Active status send skipped for MO ${mo_number}: ${result.message}`
+                  );
+                }
+              })
+              .catch((apiErr) => {
+                console.error(`❌ [External API] Failed to send active status for MO ${mo_number}:`, apiErr.message);
+              });
+          });
         });
-        
-        res.json({ 
+
+        res.json({
           message: 'Data saved successfully',
           saved_count: results.length,
-          data: results.map(r => ({
+          data: results.map((r) => ({
             id: r.id,
             session_id,
             leader_name,
@@ -311,94 +431,71 @@ router.post('/liquid', (req, res) => {
   });
 });
 
-// POST /api/production/device
-router.post('/device', (req, res) => {
-  const { session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const authenticityRows = normalizeAuthenticityArray(authenticity_data);
-  
-  const insertPromises = authenticityRows.map((row) => {
-    return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO production_device (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
-        [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
-        function(err) {
-          if (err) {
-            reject(err);
-          } else {
-            resolve({ id: this.lastID, row });
-          }
-        }
-      );
-    });
-  });
-  
-  Promise.all(insertPromises)
-    .then((results) => {
-      res.json({ 
-        message: 'Data saved successfully',
-        saved_count: results.length,
-        data: results.map(r => ({
-          id: r.id,
-          session_id,
-          leader_name,
-          shift_number,
-          pic,
-          mo_number,
-          sku_name,
-          authenticity_data: [r.row]
-        }))
-      });
-    })
-    .catch((err) => {
-      res.status(500).json({ error: err.message });
-    });
-});
-
 // POST /api/production/cartridge
 router.post('/cartridge', (req, res) => {
-  const { session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const authenticityRows = normalizeAuthenticityArray(authenticity_data);
-  
-  const insertPromises = authenticityRows.map((row) => {
-    return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO production_cartridge (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
-        [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
-        function(err) {
-          if (err) {
-            reject(err);
-          } else {
-            resolve({ id: this.lastID, row });
+  const {
+    session_id,
+    leader_name,
+    shift_number,
+    pic,
+    mo_number,
+    sku_name,
+    authenticity_data,
+    vendor_id
+  } = req.body;
+
+  fetchActiveVendor(vendor_id, (e, vendor) => {
+    if (e) {
+      return res.status(e.status || 400).json({ error: e.message });
+    }
+    const authenticityRows = applyVendorSnapshotToRows(authenticity_data, vendor);
+    const verr = validateProductionAuthenticityRowsOrError(authenticityRows);
+    if (verr) {
+      return res.status(400).json({ error: verr });
+    }
+    const rowsToInsert = authenticityRows.filter((r) => !isProductionAuthenticityRowBlank(r));
+    if (rowsToInsert.length === 0) {
+      return res.status(400).json({ error: 'Minimal satu baris authenticity harus diisi' });
+    }
+
+    const insertPromises = rowsToInsert.map((row) => {
+      return new Promise((resolve, reject) => {
+        db.run(
+          `INSERT INTO production_cartridge (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+          [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
+          function (err) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve({ id: this.lastID, row });
+            }
           }
-        }
-      );
-    });
-  });
-  
-  Promise.all(insertPromises)
-    .then((results) => {
-      res.json({ 
-        message: 'Data saved successfully',
-        saved_count: results.length,
-        data: results.map(r => ({
-          id: r.id,
-          session_id,
-          leader_name,
-          shift_number,
-          pic,
-          mo_number,
-          sku_name,
-          authenticity_data: [r.row]
-        }))
+        );
       });
-    })
-    .catch((err) => {
-      res.status(500).json({ error: err.message });
     });
+
+    Promise.all(insertPromises)
+      .then((results) => {
+        res.json({
+          message: 'Data saved successfully',
+          saved_count: results.length,
+          data: results.map((r) => ({
+            id: r.id,
+            session_id,
+            leader_name,
+            shift_number,
+            pic,
+            mo_number,
+            sku_name,
+            authenticity_data: [r.row]
+          }))
+        });
+      })
+      .catch((err) => {
+        res.status(500).json({ error: err.message });
+      });
+  });
 });
 
 // PUT /api/production/liquid/end-session
@@ -935,133 +1032,199 @@ router.put('/cartridge/update-status/:id', (req, res) => {
 // PUT /api/production/liquid/:id
 router.put('/liquid/:id', (req, res) => {
   const { id } = req.params;
-  const { pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const updates = [];
-  const values = [];
-  
-  if (pic !== undefined) {
-    updates.push(`pic = $${values.length + 1}`);
-    values.push(pic);
-  }
-  if (mo_number !== undefined) {
-    updates.push(`mo_number = $${values.length + 1}`);
-    values.push(mo_number);
-  }
-  if (sku_name !== undefined) {
-    updates.push(`sku_name = $${values.length + 1}`);
-    values.push(sku_name);
-  }
-  if (authenticity_data !== undefined) {
-    updates.push(`authenticity_data = $${values.length + 1}`);
-    values.push(JSON.stringify(normalizeAuthenticityArray(authenticity_data)));
-  }
-  
-  if (updates.length === 0) {
-    return res.status(400).json({ error: 'No fields to update' });
-  }
-  
-  values.push(id);
-  
-  db.run(
-    `UPDATE production_liquid SET ${updates.join(', ')} WHERE id = $${values.length}`,
-    values,
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      res.json({ message: 'Data updated successfully', id: id });
+  const { pic, mo_number, sku_name, authenticity_data, vendor_id } = req.body;
+
+  const doUpdate = (authPayload) => {
+    const updates = [];
+    const values = [];
+
+    if (pic !== undefined) {
+      updates.push(`pic = $${values.length + 1}`);
+      values.push(pic);
     }
-  );
+    if (mo_number !== undefined) {
+      updates.push(`mo_number = $${values.length + 1}`);
+      values.push(mo_number);
+    }
+    if (sku_name !== undefined) {
+      updates.push(`sku_name = $${values.length + 1}`);
+      values.push(sku_name);
+    }
+    if (authPayload !== undefined) {
+      updates.push(`authenticity_data = $${values.length + 1}`);
+      values.push(JSON.stringify(authPayload));
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    values.push(id);
+
+    db.run(
+      `UPDATE production_liquid SET ${updates.join(', ')} WHERE id = $${values.length}`,
+      values,
+      function (err) {
+        if (err) {
+          res.status(500).json({ error: err.message });
+          return;
+        }
+        res.json({ message: 'Data updated successfully', id: id });
+      }
+    );
+  };
+
+  if (authenticity_data !== undefined) {
+    fetchActiveVendor(vendor_id, (e, vendor) => {
+      if (e) {
+        return res.status(e.status || 400).json({ error: e.message });
+      }
+      const rows = applyVendorSnapshotToRows(authenticity_data, vendor);
+      const verr = validateProductionAuthenticityRowsOrError(rows);
+      if (verr) {
+        return res.status(400).json({ error: verr });
+      }
+      const rowsToSave = rows.filter((r) => !isProductionAuthenticityRowBlank(r));
+      if (rowsToSave.length === 0) {
+        return res.status(400).json({ error: 'Minimal satu baris authenticity harus diisi' });
+      }
+      doUpdate(rowsToSave);
+    });
+  } else {
+    doUpdate(undefined);
+  }
 });
 
 // PUT /api/production/device/:id
 router.put('/device/:id', (req, res) => {
   const { id } = req.params;
-  const { pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const updates = [];
-  const values = [];
-  
-  if (pic !== undefined) {
-    updates.push(`pic = $${values.length + 1}`);
-    values.push(pic);
-  }
-  if (mo_number !== undefined) {
-    updates.push(`mo_number = $${values.length + 1}`);
-    values.push(mo_number);
-  }
-  if (sku_name !== undefined) {
-    updates.push(`sku_name = $${values.length + 1}`);
-    values.push(sku_name);
-  }
-  if (authenticity_data !== undefined) {
-    updates.push(`authenticity_data = $${values.length + 1}`);
-    values.push(JSON.stringify(normalizeAuthenticityArray(authenticity_data)));
-  }
-  
-  if (updates.length === 0) {
-    return res.status(400).json({ error: 'No fields to update' });
-  }
-  
-  values.push(id);
-  
-  db.run(
-    `UPDATE production_device SET ${updates.join(', ')} WHERE id = $${values.length}`,
-    values,
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      res.json({ message: 'Data updated successfully', id: id });
+  const { pic, mo_number, sku_name, authenticity_data, vendor_id } = req.body;
+
+  const doUpdate = (authPayload) => {
+    const updates = [];
+    const values = [];
+
+    if (pic !== undefined) {
+      updates.push(`pic = $${values.length + 1}`);
+      values.push(pic);
     }
-  );
+    if (mo_number !== undefined) {
+      updates.push(`mo_number = $${values.length + 1}`);
+      values.push(mo_number);
+    }
+    if (sku_name !== undefined) {
+      updates.push(`sku_name = $${values.length + 1}`);
+      values.push(sku_name);
+    }
+    if (authPayload !== undefined) {
+      updates.push(`authenticity_data = $${values.length + 1}`);
+      values.push(JSON.stringify(authPayload));
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    values.push(id);
+
+    db.run(
+      `UPDATE production_device SET ${updates.join(', ')} WHERE id = $${values.length}`,
+      values,
+      function (err) {
+        if (err) {
+          res.status(500).json({ error: err.message });
+          return;
+        }
+        res.json({ message: 'Data updated successfully', id: id });
+      }
+    );
+  };
+
+  if (authenticity_data !== undefined) {
+    fetchActiveVendor(vendor_id, (e, vendor) => {
+      if (e) {
+        return res.status(e.status || 400).json({ error: e.message });
+      }
+      const rows = applyVendorSnapshotToRows(authenticity_data, vendor);
+      const verr = validateProductionAuthenticityRowsOrError(rows);
+      if (verr) {
+        return res.status(400).json({ error: verr });
+      }
+      const rowsToSave = rows.filter((r) => !isProductionAuthenticityRowBlank(r));
+      if (rowsToSave.length === 0) {
+        return res.status(400).json({ error: 'Minimal satu baris authenticity harus diisi' });
+      }
+      doUpdate(rowsToSave);
+    });
+  } else {
+    doUpdate(undefined);
+  }
 });
 
 // PUT /api/production/cartridge/:id
 router.put('/cartridge/:id', (req, res) => {
   const { id } = req.params;
-  const { pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const updates = [];
-  const values = [];
-  
-  if (pic !== undefined) {
-    updates.push(`pic = $${values.length + 1}`);
-    values.push(pic);
-  }
-  if (mo_number !== undefined) {
-    updates.push(`mo_number = $${values.length + 1}`);
-    values.push(mo_number);
-  }
-  if (sku_name !== undefined) {
-    updates.push(`sku_name = $${values.length + 1}`);
-    values.push(sku_name);
-  }
-  if (authenticity_data !== undefined) {
-    updates.push(`authenticity_data = $${values.length + 1}`);
-    values.push(JSON.stringify(normalizeAuthenticityArray(authenticity_data)));
-  }
-  
-  if (updates.length === 0) {
-    return res.status(400).json({ error: 'No fields to update' });
-  }
-  
-  values.push(id);
-  
-  db.run(
-    `UPDATE production_cartridge SET ${updates.join(', ')} WHERE id = $${values.length}`,
-    values,
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      res.json({ message: 'Data updated successfully', id: id });
+  const { pic, mo_number, sku_name, authenticity_data, vendor_id } = req.body;
+
+  const doUpdate = (authPayload) => {
+    const updates = [];
+    const values = [];
+
+    if (pic !== undefined) {
+      updates.push(`pic = $${values.length + 1}`);
+      values.push(pic);
     }
-  );
+    if (mo_number !== undefined) {
+      updates.push(`mo_number = $${values.length + 1}`);
+      values.push(mo_number);
+    }
+    if (sku_name !== undefined) {
+      updates.push(`sku_name = $${values.length + 1}`);
+      values.push(sku_name);
+    }
+    if (authPayload !== undefined) {
+      updates.push(`authenticity_data = $${values.length + 1}`);
+      values.push(JSON.stringify(authPayload));
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    values.push(id);
+
+    db.run(
+      `UPDATE production_cartridge SET ${updates.join(', ')} WHERE id = $${values.length}`,
+      values,
+      function (err) {
+        if (err) {
+          res.status(500).json({ error: err.message });
+          return;
+        }
+        res.json({ message: 'Data updated successfully', id: id });
+      }
+    );
+  };
+
+  if (authenticity_data !== undefined) {
+    fetchActiveVendor(vendor_id, (e, vendor) => {
+      if (e) {
+        return res.status(e.status || 400).json({ error: e.message });
+      }
+      const rows = applyVendorSnapshotToRows(authenticity_data, vendor);
+      const verr = validateProductionAuthenticityRowsOrError(rows);
+      if (verr) {
+        return res.status(400).json({ error: verr });
+      }
+      const rowsToSave = rows.filter((r) => !isProductionAuthenticityRowBlank(r));
+      if (rowsToSave.length === 0) {
+        return res.status(400).json({ error: 'Minimal satu baris authenticity harus diisi' });
+      }
+      doUpdate(rowsToSave);
+    });
+  } else {
+    doUpdate(undefined);
+  }
 });
 
 // GET /api/production/check-mo-used

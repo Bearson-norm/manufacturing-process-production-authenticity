@@ -1,6 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import {
+  validateAuthenticityWithVendorDigit,
+  validateBufferRejectNumbers,
+  formatVendorDisplayName
+} from '../utils/authenticityClient';
 import './Production.css';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
@@ -115,10 +120,42 @@ function ProductionLiquid() {
   const [editingReject, setEditingReject] = useState(null);
   const [editBufferData, setEditBufferData] = useState(null);
   const [editRejectData, setEditRejectData] = useState(null);
+  const [vendorList, setVendorList] = useState([]);
+  const [labelVendorId, setLabelVendorId] = useState('');
+  const [bufferVendorId, setBufferVendorId] = useState('');
+  const [rejectVendorId, setRejectVendorId] = useState('');
+  const [editVendorId, setEditVendorId] = useState('');
+  const [editBufferVendorId, setEditBufferVendorId] = useState('');
+  const [editRejectVendorId, setEditRejectVendorId] = useState('');
+
+  const labelVendorDigitCount = useMemo(() => {
+    const id = parseInt(String(labelVendorId), 10);
+    const v = vendorList.find((x) => x.id === id);
+    return v ? v.digit_count : null;
+  }, [labelVendorId, vendorList]);
+
+  const bufferVendorDigitCount = useMemo(() => {
+    const id = parseInt(String(bufferVendorId), 10);
+    const v = vendorList.find((x) => x.id === id);
+    return v ? v.digit_count : null;
+  }, [bufferVendorId, vendorList]);
+
+  const rejectVendorDigitCount = useMemo(() => {
+    const id = parseInt(String(rejectVendorId), 10);
+    const v = vendorList.find((x) => x.id === id);
+    return v ? v.digit_count : null;
+  }, [rejectVendorId, vendorList]);
+
+  const editVendorDigitCount = useMemo(() => {
+    const id = parseInt(String(editVendorId), 10);
+    const v = vendorList.find((x) => x.id === id);
+    return v ? v.digit_count : null;
+  }, [editVendorId, vendorList]);
 
   useEffect(() => {
     fetchData();
     fetchPicList();
+    fetchVendorList();
     // Load session from localStorage
     const savedSession = localStorage.getItem('production_liquid_session');
     if (savedSession) {
@@ -201,6 +238,17 @@ function ProductionLiquid() {
       }
     } catch (error) {
       console.error('Error fetching PIC list:', error);
+    }
+  };
+
+  const fetchVendorList = async () => {
+    try {
+      const response = await axios.get('/api/authenticity-vendors/list');
+      if (response.data.success) {
+        setVendorList(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching vendor list:', error);
     }
   };
 
@@ -396,9 +444,20 @@ function ProductionLiquid() {
       return;
     }
 
+    if (!bufferVendorId) {
+      alert('Pilih vendor untuk buffer authenticity');
+      return;
+    }
+
     const validNumbers = bufferData.authenticityNumbers.filter(num => num.trim() !== '');
     if (validNumbers.length === 0) {
       alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    const digitCheck = validateBufferRejectNumbers(validNumbers, bufferVendorDigitCount);
+    if (!digitCheck.valid) {
+      alert(digitCheck.message);
       return;
     }
 
@@ -408,7 +467,8 @@ function ProductionLiquid() {
         pic: bufferData.pic,
         mo_number: bufferData.moNumber,
         sku_name: bufferData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_id: parseInt(String(bufferVendorId), 10)
       });
 
       // Reset form
@@ -418,11 +478,12 @@ function ProductionLiquid() {
         skuName: '',
         authenticityNumbers: ['']
       });
+      setBufferVendorId('');
       setShowBufferModal(false);
       fetchData();
     } catch (error) {
       console.error('Error saving buffer data:', error);
-      alert('Error menyimpan data buffer');
+      alert(error.response?.data?.error || 'Error menyimpan data buffer');
     }
   };
 
@@ -481,9 +542,20 @@ function ProductionLiquid() {
       return;
     }
 
+    if (!rejectVendorId) {
+      alert('Pilih vendor untuk reject authenticity');
+      return;
+    }
+
     const validNumbers = rejectData.authenticityNumbers.filter(num => num.trim() !== '');
     if (validNumbers.length === 0) {
       alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    const digitCheck = validateBufferRejectNumbers(validNumbers, rejectVendorDigitCount);
+    if (!digitCheck.valid) {
+      alert(digitCheck.message);
       return;
     }
 
@@ -493,7 +565,8 @@ function ProductionLiquid() {
         pic: rejectData.pic,
         mo_number: rejectData.moNumber,
         sku_name: rejectData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_id: parseInt(String(rejectVendorId), 10)
       });
 
       // Reset form
@@ -503,11 +576,12 @@ function ProductionLiquid() {
         skuName: '',
         authenticityNumbers: ['']
       });
+      setRejectVendorId('');
       setShowRejectModal(false);
       fetchData();
     } catch (error) {
       console.error('Error saving reject data:', error);
-      alert('Error menyimpan data reject');
+      alert(error.response?.data?.error || 'Error menyimpan data reject');
     }
   };
 
@@ -517,9 +591,22 @@ function ProductionLiquid() {
       return;
     }
 
+    if (!editBufferVendorId) {
+      alert('Pilih vendor');
+      return;
+    }
+
     const validNumbers = editBufferData.authenticityNumbers.filter(num => num.trim() !== '');
     if (validNumbers.length === 0) {
       alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    const vid = parseInt(String(editBufferVendorId), 10);
+    const v = vendorList.find((x) => x.id === vid);
+    const digitCheck = validateBufferRejectNumbers(validNumbers, v ? v.digit_count : null);
+    if (!digitCheck.valid) {
+      alert(digitCheck.message);
       return;
     }
 
@@ -528,11 +615,13 @@ function ProductionLiquid() {
         pic: editBufferData.pic,
         mo_number: editBufferData.moNumber,
         sku_name: editBufferData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_id: vid
       });
 
       setEditingBuffer(null);
       setEditBufferData(null);
+      setEditBufferVendorId('');
       fetchData();
       alert('Buffer data berhasil diperbarui');
     } catch (error) {
@@ -547,9 +636,22 @@ function ProductionLiquid() {
       return;
     }
 
+    if (!editRejectVendorId) {
+      alert('Pilih vendor');
+      return;
+    }
+
     const validNumbers = editRejectData.authenticityNumbers.filter(num => num.trim() !== '');
     if (validNumbers.length === 0) {
       alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    const vid = parseInt(String(editRejectVendorId), 10);
+    const v = vendorList.find((x) => x.id === vid);
+    const digitCheck = validateBufferRejectNumbers(validNumbers, v ? v.digit_count : null);
+    if (!digitCheck.valid) {
+      alert(digitCheck.message);
       return;
     }
 
@@ -558,11 +660,13 @@ function ProductionLiquid() {
         pic: editRejectData.pic,
         mo_number: editRejectData.moNumber,
         sku_name: editRejectData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_id: vid
       });
 
       setEditingReject(null);
       setEditRejectData(null);
+      setEditRejectVendorId('');
       fetchData();
       alert('Reject data berhasil diperbarui');
     } catch (error) {
@@ -680,80 +784,49 @@ function ProductionLiquid() {
   };
 
   const validateAuthenticityRow = (index, firstAuth, lastAuth, isEdit = false) => {
-    // Skip validation if fields are empty
     if (!firstAuth || !lastAuth || firstAuth.trim() === '' || lastAuth.trim() === '') {
-      // Clear invalid status for empty fields
       if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => {
+        setAuthenticityInvalidStatus((prev) => {
           const newStatus = { ...prev };
           delete newStatus[index];
           return newStatus;
         });
       }
-      return { valid: true, message: '' }; // Allow empty fields
+      return { valid: true, message: '' };
     }
 
-    const first = parseInt(firstAuth);
-    const last = parseInt(lastAuth);
+    let digitN = labelVendorDigitCount;
+    if (isEdit && editFormData && editFormData.authenticityRows && editFormData.authenticityRows.length > 0) {
+      const r0 = editFormData.authenticityRows[0];
+      if (r0.vendorDigitCount != null && r0.vendorDigitCount > 0) {
+        digitN = r0.vendorDigitCount;
+      } else {
+        digitN = editVendorDigitCount;
+      }
+    }
 
-    // Check if values are valid numbers
-    if (isNaN(first) || isNaN(last)) {
+    const chk = validateAuthenticityWithVendorDigit(firstAuth, lastAuth, digitN);
+    if (!chk.valid) {
       if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => ({
+        setAuthenticityInvalidStatus((prev) => ({
           ...prev,
-          [index]: 'First dan Last Authenticity harus berupa angka'
+          [index]: chk.message
         }));
       }
-      return { valid: false, message: 'First dan Last Authenticity harus berupa angka' };
+      return chk;
     }
 
-    const difference = last - first;
-
-    // Check if difference is negative
-    if (difference < 0) {
-      if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => ({
-          ...prev,
-          [index]: 'Selisih tidak boleh negatif'
-        }));
-      }
-      return { valid: false, message: 'Selisih tidak boleh negatif' };
-    }
-
-    // Check if First and Last Authenticity are the same
-    if (difference === 0) {
-      if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => ({
-          ...prev,
-          [index]: 'First dan Last Authenticity tidak boleh sama'
-        }));
-      }
-      return { valid: false, message: 'First dan Last Authenticity tidak boleh sama' };
-    }
-
-    // Check if difference is more than 7000
-    if (difference > 7000) {
-      if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => ({
-          ...prev,
-          [index]: 'Selisih tidak boleh lebih dari 7000'
-        }));
-      }
-      return { valid: false, message: 'Selisih tidak boleh lebih dari 7000' };
-    }
-
-    // Valid - clear invalid status
     if (isEdit) {
-      setEditAuthenticityValidationStatus(prev => ({
+      setEditAuthenticityValidationStatus((prev) => ({
         ...prev,
         [index]: true
       }));
     } else {
-      setAuthenticityValidationStatus(prev => ({
+      setAuthenticityValidationStatus((prev) => ({
         ...prev,
         [index]: true
       }));
-      setAuthenticityInvalidStatus(prev => {
+      setAuthenticityInvalidStatus((prev) => {
         const newStatus = { ...prev };
         delete newStatus[index];
         return newStatus;
@@ -1063,6 +1136,11 @@ function ProductionLiquid() {
       return;
     }
 
+    if (!labelVendorId) {
+      alert('Pilih vendor untuk authenticity');
+      return;
+    }
+
     // Check if all non-empty rows are validated
     const rowsToValidate = formData.authenticityRows.filter((row, idx) => {
       const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
@@ -1139,7 +1217,8 @@ function ProductionLiquid() {
         pic: formData.pic,
         mo_number: formData.moNumber,
         sku_name: formData.skuName,
-        authenticity_data: formData.authenticityRows
+        authenticity_data: formData.authenticityRows,
+        vendor_id: parseInt(String(labelVendorId), 10)
       });
 
       // Reset form
@@ -1149,6 +1228,7 @@ function ProductionLiquid() {
         skuName: '',
         authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }]
       });
+      setLabelVendorId('');
       setAuthenticityValidationStatus({});
       setSelectedMo(null);
       setMoSearchTerm('');
@@ -1156,7 +1236,7 @@ function ProductionLiquid() {
       fetchData();
     } catch (error) {
       console.error('Error saving data:', error);
-      alert('Error menyimpan data');
+      alert(error.response?.data?.error || 'Error menyimpan data');
     }
   };
 
@@ -1189,37 +1269,11 @@ function ProductionLiquid() {
             };
           }
           
-          // Validate the authenticity values
-          const first = parseInt(firstAuth);
-          const last = parseInt(lastAuth);
-          
-          if (isNaN(first) || isNaN(last)) {
+          const chk = validateAuthenticityWithVendorDigit(firstAuth, lastAuth, auth.vendorDigitCount);
+          if (!chk.valid) {
             return {
               valid: false,
-              message: `MO ${input.mo_number}: First dan Last Authenticity harus berupa angka.`
-            };
-          }
-          
-          const difference = last - first;
-          
-          if (difference < 0) {
-            return {
-              valid: false,
-              message: `MO ${input.mo_number}: Selisih authenticity tidak boleh negatif.`
-            };
-          }
-          
-          if (difference === 0) {
-            return {
-              valid: false,
-              message: `MO ${input.mo_number}: First dan Last Authenticity tidak boleh sama.`
-            };
-          }
-          
-          if (difference > 7000) {
-            return {
-              valid: false,
-              message: `MO ${input.mo_number}: Selisih authenticity tidak boleh lebih dari 7000.`
+              message: `MO ${input.mo_number}: ${chk.message}`
             };
           }
         }
@@ -1400,7 +1454,10 @@ function ProductionLiquid() {
           allAuthenticityRows.push({
             firstAuthenticity: auth.firstAuthenticity || '',
             lastAuthenticity: auth.lastAuthenticity || '',
-            rollNumber: auth.rollNumber || ''
+            rollNumber: auth.rollNumber || '',
+            vendorId: auth.vendorId != null ? auth.vendorId : null,
+            vendorName: auth.vendorName != null ? auth.vendorName : null,
+            vendorDigitCount: auth.vendorDigitCount != null ? auth.vendorDigitCount : null
           });
         });
       }
@@ -1420,6 +1477,8 @@ function ProductionLiquid() {
       inputIds: inputsWithSameMo.map(input => input.id)
     });
     setEditAuthenticityValidationStatus({});
+    const fr = allAuthenticityRows[0];
+    setEditVendorId(fr && fr.vendorId != null && String(fr.vendorId) !== '' ? String(fr.vendorId) : '');
   };
 
   const handleCancelEdit = () => {
@@ -1428,6 +1487,7 @@ function ProductionLiquid() {
     setEditingMoNumber(null);
     setEditingSessionId(null);
     setEditAuthenticityValidationStatus({});
+    setEditVendorId('');
   };
 
   const handleSaveEdit = async () => {
@@ -1449,6 +1509,10 @@ function ProductionLiquid() {
     });
 
     if (rowsToValidate.length > 0) {
+      if (!editVendorId) {
+        alert('Pilih vendor untuk menyimpan authenticity');
+        return;
+      }
       // Check if roll number is filled for rows with authenticity data
       const rowsWithMissingRollNumber = rowsToValidate.filter((row, idx) => {
         return !row.rollNumber || row.rollNumber.trim() === '';
@@ -1471,15 +1535,26 @@ function ProductionLiquid() {
     }
 
     try {
-      // Update first input with all authenticity data, others with empty array to prevent duplication
-      const updatePromises = editFormData.inputIds.map((inputId, index) => 
-        axios.put(`/api/production/liquid/${inputId}`, {
-          pic: editFormData.pic.split(',')[0].trim(), // Use first PIC if multiple
+      const updatePromises = editFormData.inputIds.map((inputId, index) => {
+        const picVal = editFormData.pic.split(',')[0].trim();
+        if (index === 0) {
+          const payload = {
+            pic: picVal,
+            mo_number: editFormData.moNumber,
+            sku_name: editFormData.skuName
+          };
+          if (rowsToValidate.length > 0) {
+            payload.authenticity_data = editFormData.authenticityRows;
+            payload.vendor_id = parseInt(String(editVendorId), 10);
+          }
+          return axios.put(`/api/production/liquid/${inputId}`, payload);
+        }
+        return axios.put(`/api/production/liquid/${inputId}`, {
+          pic: picVal,
           mo_number: editFormData.moNumber,
-          sku_name: editFormData.skuName,
-          authenticity_data: index === 0 ? editFormData.authenticityRows : [] // Only first input gets all data
-        })
-      );
+          sku_name: editFormData.skuName
+        });
+      });
       
       await Promise.all(updatePromises);
       
@@ -1488,6 +1563,7 @@ function ProductionLiquid() {
       setEditingMoNumber(null);
       setEditingSessionId(null);
       setEditAuthenticityValidationStatus({});
+      setEditVendorId('');
       fetchData();
     } catch (error) {
       console.error('Error updating data:', error);
@@ -1850,6 +1926,21 @@ function ProductionLiquid() {
                                           style={{ width: '100%', padding: '6px' }}
                                         />
                                       </div>
+                                      <div className="form-group" style={{ marginBottom: '12px' }}>
+                                        <label>Vendor *</label>
+                                        <select
+                                          value={editVendorId}
+                                          onChange={(e) => setEditVendorId(e.target.value)}
+                                          style={{ width: '100%', padding: '6px' }}
+                                        >
+                                          <option value="">Pilih vendor</option>
+                                          {vendorList.map((v) => (
+                                            <option key={v.id} value={String(v.id)}>
+                                              {v.name} ({v.digit_count} digit)
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
                                       <div className="authenticity-section">
                                         <label>Authenticity Data</label>
                                         {editFormData.authenticityRows.map((row, rowIdx) => {
@@ -1956,11 +2047,19 @@ function ProductionLiquid() {
                                     <>
                                       <div className="input-card-info-row">
                                         <p><strong>PIC:</strong> {Array.from(uniquePics).join(', ')}</p>
+                                        <p>
+                                          <strong>Vendor:</strong>{' '}
+                                          {formatVendorDisplayName(
+                                            inputs.find((i) => i.authenticity_data && i.authenticity_data[0])
+                                              ?.authenticity_data?.[0]
+                                          )}
+                                        </p>
                                       </div>
                                       <div className="authenticity-list">
                                         <strong>Authenticity Data:</strong>
                                         {allAuthenticityData.map((row, rowIdx) => (
                                           <div key={rowIdx} className="authenticity-row">
+                                            <span>Vendor: {formatVendorDisplayName(row)}</span>
                                             <span>First: {row.firstAuthenticity}</span>
                                             <span>Last: {row.lastAuthenticity}</span>
                                             <span>Roll: {row.rollNumber}</span>
@@ -1982,6 +2081,11 @@ function ProductionLiquid() {
                                       onClick={() => {
                                         const firstBuffer = bufferDataMap[moNumber][0];
                                         setEditingBuffer(firstBuffer);
+                                        setEditBufferVendorId(
+                                          firstBuffer.vendor_id != null && firstBuffer.vendor_id !== ''
+                                            ? String(firstBuffer.vendor_id)
+                                            : ''
+                                        );
                                         setEditBufferData({
                                           pic: firstBuffer.pic,
                                           moNumber: firstBuffer.mo_number,
@@ -1999,6 +2103,7 @@ function ProductionLiquid() {
                                       <div key={buffer.id} className="buffer-item">
                                         <div className="buffer-info">
                                           <span><strong>PIC:</strong> {buffer.pic}</span>
+                                          <span><strong>Vendor:</strong> {buffer.vendor_name || '—'}</span>
                                           <span><strong>SKU:</strong> {buffer.sku_name}</span>
                                         </div>
                                         <div className="buffer-numbers">
@@ -2020,6 +2125,11 @@ function ProductionLiquid() {
                                       onClick={() => {
                                         const firstReject = rejectDataMap[moNumber][0];
                                         setEditingReject(firstReject);
+                                        setEditRejectVendorId(
+                                          firstReject.vendor_id != null && firstReject.vendor_id !== ''
+                                            ? String(firstReject.vendor_id)
+                                            : ''
+                                        );
                                         setEditRejectData({
                                           pic: firstReject.pic,
                                           moNumber: firstReject.mo_number,
@@ -2037,6 +2147,7 @@ function ProductionLiquid() {
                                       <div key={reject.id} className="reject-item">
                                         <div className="reject-info">
                                           <span><strong>PIC:</strong> {reject.pic}</span>
+                                          <span><strong>Vendor:</strong> {reject.vendor_name || '—'}</span>
                                           <span><strong>SKU:</strong> {reject.sku_name}</span>
                                         </div>
                                         <div className="reject-numbers">
@@ -2114,6 +2225,24 @@ function ProductionLiquid() {
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Input Authenticity Label Process</h2>
+            <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={labelVendorId}
+                onChange={(e) => setLabelVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+              <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                First dan Last Authenticity harus masing-masing sepanjang digit vendor
+              </small>
+            </div>
             <div className="form-group">
               <label>PIC *</label>
               <input
@@ -2351,6 +2480,21 @@ function ProductionLiquid() {
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Input Buffer Authenticity</h2>
             <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={bufferVendorId}
+                onChange={(e) => setBufferVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
               <label>Nama PIC *</label>
               <input
                 type="text"
@@ -2474,6 +2618,21 @@ function ProductionLiquid() {
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Input Reject Authenticity</h2>
             <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={rejectVendorId}
+                onChange={(e) => setRejectVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
               <label>Nama PIC *</label>
               <input
                 type="text"
@@ -2596,9 +2755,25 @@ function ProductionLiquid() {
         <div className="modal-overlay" onClick={() => {
           setEditingBuffer(null);
           setEditBufferData(null);
+          setEditBufferVendorId('');
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Edit Buffer Authenticity</h2>
+            <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={editBufferVendorId}
+                onChange={(e) => setEditBufferVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -2702,9 +2877,25 @@ function ProductionLiquid() {
         <div className="modal-overlay" onClick={() => {
           setEditingReject(null);
           setEditRejectData(null);
+          setEditRejectVendorId('');
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Edit Reject Authenticity</h2>
+            <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={editRejectVendorId}
+                onChange={(e) => setEditRejectVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="form-group">
               <label>Nama PIC *</label>
               <input

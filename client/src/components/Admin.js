@@ -22,11 +22,17 @@ function Admin() {
   const [newPicName, setNewPicName] = useState('');
   const [editingPic, setEditingPic] = useState(null);
   const [picMessage, setPicMessage] = useState({ type: '', text: '' });
+  const [vendorList, setVendorList] = useState([]);
+  const [newVendorName, setNewVendorName] = useState('');
+  const [newVendorDigits, setNewVendorDigits] = useState('');
+  const [editingVendor, setEditingVendor] = useState(null);
+  const [vendorMessage, setVendorMessage] = useState({ type: '', text: '' });
 
   useEffect(() => {
     fetchConfig();
     fetchMoStats();
     fetchPicList();
+    fetchVendorList();
   }, []);
 
   const fetchConfig = async () => {
@@ -129,6 +135,88 @@ function Admin() {
     
     const newStatus = currentStatus === 1 ? 0 : 1;
     await handleUpdatePic(id, pic.name, newStatus);
+  };
+
+  const fetchVendorList = async () => {
+    try {
+      const response = await axios.get('/api/authenticity-vendors/all');
+      if (response.data.success) {
+        setVendorList(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching vendor list:', error);
+    }
+  };
+
+  const handleAddVendor = async () => {
+    if (!newVendorName.trim()) {
+      setVendorMessage({ type: 'error', text: 'Nama vendor wajib diisi' });
+      return;
+    }
+    const dc = parseInt(String(newVendorDigits), 10);
+    if (!Number.isFinite(dc) || dc < 1 || dc > 64) {
+      setVendorMessage({ type: 'error', text: 'Jumlah digit harus 1–64' });
+      return;
+    }
+    try {
+      const response = await axios.post('/api/authenticity-vendors/add', {
+        name: newVendorName.trim(),
+        digit_count: dc
+      });
+      if (response.data.success) {
+        setVendorMessage({ type: 'success', text: 'Vendor berhasil ditambahkan' });
+        setNewVendorName('');
+        setNewVendorDigits('');
+        fetchVendorList();
+      } else {
+        setVendorMessage({ type: 'error', text: response.data.error || 'Gagal menambah vendor' });
+      }
+    } catch (error) {
+      setVendorMessage({ type: 'error', text: error.response?.data?.error || 'Gagal menambah vendor' });
+    }
+  };
+
+  const handleUpdateVendor = async (id, name, digit_count, is_active) => {
+    try {
+      const response = await axios.put(`/api/authenticity-vendors/update/${id}`, {
+        name,
+        digit_count,
+        is_active
+      });
+      if (response.data.success) {
+        setVendorMessage({ type: 'success', text: 'Vendor diperbarui' });
+        setEditingVendor(null);
+        fetchVendorList();
+      } else {
+        setVendorMessage({ type: 'error', text: response.data.error || 'Gagal update vendor' });
+      }
+    } catch (error) {
+      setVendorMessage({ type: 'error', text: error.response?.data?.error || 'Gagal update vendor' });
+    }
+  };
+
+  const handleToggleVendorStatus = async (id, currentActive) => {
+    const v = vendorList.find((x) => x.id === id);
+    if (!v) return;
+    const next = currentActive === 1 ? 0 : 1;
+    await handleUpdateVendor(id, v.name, v.digit_count, next);
+  };
+
+  const handleDeleteVendor = async (id) => {
+    if (!window.confirm('Hapus vendor ini dari database? Referensi di buffer/reject bisa menjadi NULL.')) {
+      return;
+    }
+    try {
+      const response = await axios.delete(`/api/authenticity-vendors/delete/${id}`);
+      if (response.data.success) {
+        setVendorMessage({ type: 'success', text: 'Vendor dihapus' });
+        fetchVendorList();
+      } else {
+        setVendorMessage({ type: 'error', text: response.data.error || 'Gagal hapus' });
+      }
+    } catch (error) {
+      setVendorMessage({ type: 'error', text: error.response?.data?.error || 'Gagal hapus' });
+    }
   };
 
   const handleGenerateApiKey = async () => {
@@ -770,6 +858,234 @@ function Admin() {
                 <li>Scheduler untuk pengiriman MO list berjalan setiap 6 jam (10 menit setelah update MO data) dan menggunakan URL fallback</li>
               </ul>
             </div>
+          </div>
+        </div>
+
+        {/* Authenticity vendor master */}
+        <div className="config-section" style={{ marginTop: '24px' }}>
+          <h2>🏷️ Authenticity vendor</h2>
+          <p className="section-description">
+            Atur nama vendor dan jumlah digit untuk validasi First/Last Authenticity serta nomor buffer/reject di halaman produksi (Liquid, Device, Cartridge).
+          </p>
+          {vendorMessage.text && (
+            <div className={`message ${vendorMessage.type}`} style={{ marginBottom: '16px' }}>
+              {vendorMessage.text}
+            </div>
+          )}
+          <div className="pic-add-section" style={{ marginBottom: '24px', padding: '16px', background: '#1e293b', borderRadius: '8px', border: '1px solid #334155' }}>
+            <h3 style={{ color: '#e2e8f0', fontSize: '16px', marginBottom: '12px' }}>Tambah vendor</h3>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                value={newVendorName}
+                onChange={(e) => setNewVendorName(e.target.value)}
+                placeholder="Nama vendor"
+                style={{
+                  flex: '1 1 200px',
+                  padding: '10px 12px',
+                  background: '#0f172a',
+                  border: '1px solid #374151',
+                  borderRadius: '6px',
+                  color: '#e2e8f0',
+                  fontSize: '14px'
+                }}
+              />
+              <input
+                type="number"
+                min={1}
+                max={64}
+                value={newVendorDigits}
+                onChange={(e) => setNewVendorDigits(e.target.value)}
+                placeholder="Digit (1–64)"
+                style={{
+                  width: '140px',
+                  padding: '10px 12px',
+                  background: '#0f172a',
+                  border: '1px solid #374151',
+                  borderRadius: '6px',
+                  color: '#e2e8f0',
+                  fontSize: '14px'
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleAddVendor}
+                style={{
+                  padding: '10px 24px',
+                  background: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Tambah
+              </button>
+            </div>
+          </div>
+          <div className="pic-list-section">
+            <h3 style={{ color: '#e2e8f0', fontSize: '16px', marginBottom: '12px' }}>Daftar vendor ({vendorList.length})</h3>
+            <div style={{ maxHeight: '360px', overflowY: 'auto' }}>
+              {vendorList.length === 0 ? (
+                <p style={{ color: '#94a3b8', textAlign: 'center', padding: '24px' }}>Belum ada vendor</p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#1e293b', zIndex: 1 }}>
+                    <tr style={{ borderBottom: '2px solid #334155' }}>
+                      <th style={{ padding: '12px', textAlign: 'left', color: '#e2e8f0', fontWeight: '600', fontSize: '14px' }}>Nama</th>
+                      <th style={{ padding: '12px', textAlign: 'center', color: '#e2e8f0', fontWeight: '600', fontSize: '14px' }}>Digit</th>
+                      <th style={{ padding: '12px', textAlign: 'center', color: '#e2e8f0', fontWeight: '600', fontSize: '14px' }}>Status</th>
+                      <th style={{ padding: '12px', textAlign: 'center', color: '#e2e8f0', fontWeight: '600', fontSize: '14px' }}>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vendorList.map((v) => (
+                      <tr key={v.id} style={{ borderBottom: '1px solid #334155' }}>
+                        <td style={{ padding: '12px', color: '#e2e8f0', fontSize: '14px' }}>
+                          {editingVendor === v.id ? (
+                            <input
+                              type="text"
+                              defaultValue={v.name}
+                              onBlur={(e) => {
+                                const name = e.target.value.trim();
+                                if (name && name !== v.name) {
+                                  handleUpdateVendor(v.id, name, v.digit_count, v.is_active);
+                                } else {
+                                  setEditingVendor(null);
+                                }
+                              }}
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter') {
+                                  const name = e.target.value.trim();
+                                  if (name && name !== v.name) {
+                                    handleUpdateVendor(v.id, name, v.digit_count, v.is_active);
+                                  } else {
+                                    setEditingVendor(null);
+                                  }
+                                }
+                              }}
+                              autoFocus
+                              style={{
+                                padding: '6px 10px',
+                                background: '#0f172a',
+                                border: '1px solid #3b82f6',
+                                borderRadius: '4px',
+                                color: '#e2e8f0',
+                                fontSize: '14px',
+                                width: '100%'
+                              }}
+                            />
+                          ) : (
+                            v.name
+                          )}
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center', color: '#cbd5e1' }}>
+                          {editingVendor === v.id ? (
+                            <input
+                              type="number"
+                              min={1}
+                              max={64}
+                              defaultValue={v.digit_count}
+                              onBlur={(e) => {
+                                const dc = parseInt(e.target.value, 10);
+                                if (Number.isFinite(dc) && dc !== v.digit_count) {
+                                  handleUpdateVendor(v.id, v.name, dc, v.is_active);
+                                } else {
+                                  setEditingVendor(null);
+                                }
+                              }}
+                              style={{
+                                width: '72px',
+                                padding: '6px',
+                                background: '#0f172a',
+                                border: '1px solid #3b82f6',
+                                borderRadius: '4px',
+                                color: '#e2e8f0'
+                              }}
+                            />
+                          ) : (
+                            v.digit_count
+                          )}
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <span
+                            style={{
+                              padding: '4px 12px',
+                              borderRadius: '12px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              background: v.is_active === 1 ? '#10b98180' : '#6b728080',
+                              color: v.is_active === 1 ? '#10b981' : '#9ca3af',
+                              border: `1px solid ${v.is_active === 1 ? '#10b981' : '#6b7280'}`
+                            }}
+                          >
+                            {v.is_active === 1 ? 'Aktif' : 'Nonaktif'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                            {editingVendor !== v.id && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingVendor(v.id)}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: '#3b82f6',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Edit
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleVendorStatus(v.id, v.is_active)}
+                              style={{
+                                padding: '6px 12px',
+                                background: v.is_active === 1 ? '#ef4444' : '#10b981',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {v.is_active === 1 ? 'Nonaktifkan' : 'Aktifkan'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteVendor(v.id)}
+                              style={{
+                                padding: '6px 12px',
+                                background: '#64748b',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+          <div style={{ marginTop: '16px', padding: '12px', background: '#1e293b', borderRadius: '6px', border: '1px solid #334155' }}>
+            <p style={{ fontSize: '13px', color: '#94a3b8', margin: 0, lineHeight: '1.6' }}>
+              <strong style={{ color: '#e2e8f0' }}>Catatan:</strong> Data produksi lama tanpa vendor tetap valid; input baru wajib memilih vendor. First dan Last masing-masing harus sepanjang digit yang diatur.
+            </p>
           </div>
         </div>
 

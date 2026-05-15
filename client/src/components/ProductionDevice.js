@@ -1,6 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import {
+  validateAuthenticityWithVendorDigit,
+  validateBufferRejectNumbers,
+  formatVendorDisplayName
+} from '../utils/authenticityClient';
 import './Production.css';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
@@ -115,10 +120,42 @@ function ProductionDevice() {
   const [editingReject, setEditingReject] = useState(null);
   const [editBufferData, setEditBufferData] = useState(null);
   const [editRejectData, setEditRejectData] = useState(null);
+  const [vendorList, setVendorList] = useState([]);
+  const [labelVendorId, setLabelVendorId] = useState('');
+  const [bufferVendorId, setBufferVendorId] = useState('');
+  const [rejectVendorId, setRejectVendorId] = useState('');
+  const [editVendorId, setEditVendorId] = useState('');
+  const [editBufferVendorId, setEditBufferVendorId] = useState('');
+  const [editRejectVendorId, setEditRejectVendorId] = useState('');
+
+  const labelVendorDigitCount = useMemo(() => {
+    const id = parseInt(String(labelVendorId), 10);
+    const v = vendorList.find((x) => x.id === id);
+    return v ? v.digit_count : null;
+  }, [labelVendorId, vendorList]);
+
+  const bufferVendorDigitCount = useMemo(() => {
+    const id = parseInt(String(bufferVendorId), 10);
+    const v = vendorList.find((x) => x.id === id);
+    return v ? v.digit_count : null;
+  }, [bufferVendorId, vendorList]);
+
+  const rejectVendorDigitCount = useMemo(() => {
+    const id = parseInt(String(rejectVendorId), 10);
+    const v = vendorList.find((x) => x.id === id);
+    return v ? v.digit_count : null;
+  }, [rejectVendorId, vendorList]);
+
+  const editVendorDigitCount = useMemo(() => {
+    const id = parseInt(String(editVendorId), 10);
+    const v = vendorList.find((x) => x.id === id);
+    return v ? v.digit_count : null;
+  }, [editVendorId, vendorList]);
 
   useEffect(() => {
     fetchData();
     fetchPicList();
+    fetchVendorList();
     // Load session from localStorage
     const savedSession = localStorage.getItem('production_device_session');
     if (savedSession) {
@@ -201,6 +238,17 @@ function ProductionDevice() {
       }
     } catch (error) {
       console.error('Error fetching PIC list:', error);
+    }
+  };
+
+  const fetchVendorList = async () => {
+    try {
+      const response = await axios.get('/api/authenticity-vendors/list');
+      if (response.data.success) {
+        setVendorList(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching vendor list:', error);
     }
   };
 
@@ -396,9 +444,20 @@ function ProductionDevice() {
       return;
     }
 
+    if (!bufferVendorId) {
+      alert('Pilih vendor untuk buffer authenticity');
+      return;
+    }
+
     const validNumbers = bufferData.authenticityNumbers.filter(num => num.trim() !== '');
     if (validNumbers.length === 0) {
       alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    const digitCheck = validateBufferRejectNumbers(validNumbers, bufferVendorDigitCount);
+    if (!digitCheck.valid) {
+      alert(digitCheck.message);
       return;
     }
 
@@ -408,7 +467,8 @@ function ProductionDevice() {
         pic: bufferData.pic,
         mo_number: bufferData.moNumber,
         sku_name: bufferData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_id: parseInt(String(bufferVendorId), 10)
       });
 
       // Reset form
@@ -418,11 +478,12 @@ function ProductionDevice() {
         skuName: '',
         authenticityNumbers: ['']
       });
+      setBufferVendorId('');
       setShowBufferModal(false);
       fetchData();
     } catch (error) {
       console.error('Error saving buffer data:', error);
-      alert('Error menyimpan data buffer');
+      alert(error.response?.data?.error || 'Error menyimpan data buffer');
     }
   };
 
@@ -481,9 +542,20 @@ function ProductionDevice() {
       return;
     }
 
+    if (!rejectVendorId) {
+      alert('Pilih vendor untuk reject authenticity');
+      return;
+    }
+
     const validNumbers = rejectData.authenticityNumbers.filter(num => num.trim() !== '');
     if (validNumbers.length === 0) {
       alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    const digitCheck = validateBufferRejectNumbers(validNumbers, rejectVendorDigitCount);
+    if (!digitCheck.valid) {
+      alert(digitCheck.message);
       return;
     }
 
@@ -493,7 +565,8 @@ function ProductionDevice() {
         pic: rejectData.pic,
         mo_number: rejectData.moNumber,
         sku_name: rejectData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_id: parseInt(String(rejectVendorId), 10)
       });
 
       // Reset form
@@ -503,11 +576,12 @@ function ProductionDevice() {
         skuName: '',
         authenticityNumbers: ['']
       });
+      setRejectVendorId('');
       setShowRejectModal(false);
       fetchData();
     } catch (error) {
       console.error('Error saving reject data:', error);
-      alert('Error menyimpan data reject');
+      alert(error.response?.data?.error || 'Error menyimpan data reject');
     }
   };
 
@@ -517,9 +591,22 @@ function ProductionDevice() {
       return;
     }
 
+    if (!editBufferVendorId) {
+      alert('Pilih vendor');
+      return;
+    }
+
     const validNumbers = editBufferData.authenticityNumbers.filter(num => num.trim() !== '');
     if (validNumbers.length === 0) {
       alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    const vid = parseInt(String(editBufferVendorId), 10);
+    const v = vendorList.find((x) => x.id === vid);
+    const digitCheck = validateBufferRejectNumbers(validNumbers, v ? v.digit_count : null);
+    if (!digitCheck.valid) {
+      alert(digitCheck.message);
       return;
     }
 
@@ -528,11 +615,13 @@ function ProductionDevice() {
         pic: editBufferData.pic,
         mo_number: editBufferData.moNumber,
         sku_name: editBufferData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_id: vid
       });
 
       setEditingBuffer(null);
       setEditBufferData(null);
+      setEditBufferVendorId('');
       fetchData();
       alert('Buffer data berhasil diperbarui');
     } catch (error) {
@@ -547,9 +636,22 @@ function ProductionDevice() {
       return;
     }
 
+    if (!editRejectVendorId) {
+      alert('Pilih vendor');
+      return;
+    }
+
     const validNumbers = editRejectData.authenticityNumbers.filter(num => num.trim() !== '');
     if (validNumbers.length === 0) {
       alert('Silakan masukkan setidaknya satu nomor authenticity');
+      return;
+    }
+
+    const vid = parseInt(String(editRejectVendorId), 10);
+    const v = vendorList.find((x) => x.id === vid);
+    const digitCheck = validateBufferRejectNumbers(validNumbers, v ? v.digit_count : null);
+    if (!digitCheck.valid) {
+      alert(digitCheck.message);
       return;
     }
 
@@ -558,11 +660,13 @@ function ProductionDevice() {
         pic: editRejectData.pic,
         mo_number: editRejectData.moNumber,
         sku_name: editRejectData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_id: vid
       });
 
       setEditingReject(null);
       setEditRejectData(null);
+      setEditRejectVendorId('');
       fetchData();
       alert('Reject data berhasil diperbarui');
     } catch (error) {
@@ -680,80 +784,49 @@ function ProductionDevice() {
   };
 
   const validateAuthenticityRow = (index, firstAuth, lastAuth, isEdit = false) => {
-    // Skip validation if fields are empty
     if (!firstAuth || !lastAuth || firstAuth.trim() === '' || lastAuth.trim() === '') {
-      // Clear invalid status for empty fields
       if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => {
+        setAuthenticityInvalidStatus((prev) => {
           const newStatus = { ...prev };
           delete newStatus[index];
           return newStatus;
         });
       }
-      return { valid: true, message: '' }; // Allow empty fields
+      return { valid: true, message: '' };
     }
 
-    const first = parseInt(firstAuth);
-    const last = parseInt(lastAuth);
+    let digitN = labelVendorDigitCount;
+    if (isEdit && editFormData && editFormData.authenticityRows && editFormData.authenticityRows.length > 0) {
+      const r0 = editFormData.authenticityRows[0];
+      if (r0.vendorDigitCount != null && r0.vendorDigitCount > 0) {
+        digitN = r0.vendorDigitCount;
+      } else {
+        digitN = editVendorDigitCount;
+      }
+    }
 
-    // Check if values are valid numbers
-    if (isNaN(first) || isNaN(last)) {
+    const chk = validateAuthenticityWithVendorDigit(firstAuth, lastAuth, digitN);
+    if (!chk.valid) {
       if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => ({
+        setAuthenticityInvalidStatus((prev) => ({
           ...prev,
-          [index]: 'First dan Last Authenticity harus berupa angka'
+          [index]: chk.message
         }));
       }
-      return { valid: false, message: 'First dan Last Authenticity harus berupa angka' };
+      return chk;
     }
 
-    const difference = last - first;
-
-    // Check if difference is negative
-    if (difference < 0) {
-      if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => ({
-          ...prev,
-          [index]: 'Selisih tidak boleh negatif'
-        }));
-      }
-      return { valid: false, message: 'Selisih tidak boleh negatif' };
-    }
-
-    // Check if First and Last Authenticity are the same
-    if (difference === 0) {
-      if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => ({
-          ...prev,
-          [index]: 'First dan Last Authenticity tidak boleh sama'
-        }));
-      }
-      return { valid: false, message: 'First dan Last Authenticity tidak boleh sama' };
-    }
-
-    // Check if difference is more than 7000
-    if (difference > 7000) {
-      if (!isEdit) {
-        setAuthenticityInvalidStatus(prev => ({
-          ...prev,
-          [index]: 'Selisih tidak boleh lebih dari 7000'
-        }));
-      }
-      return { valid: false, message: 'Selisih tidak boleh lebih dari 7000' };
-    }
-
-    // Valid - clear invalid status
     if (isEdit) {
-      setEditAuthenticityValidationStatus(prev => ({
+      setEditAuthenticityValidationStatus((prev) => ({
         ...prev,
         [index]: true
       }));
     } else {
-      setAuthenticityValidationStatus(prev => ({
+      setAuthenticityValidationStatus((prev) => ({
         ...prev,
         [index]: true
       }));
-      setAuthenticityInvalidStatus(prev => {
+      setAuthenticityInvalidStatus((prev) => {
         const newStatus = { ...prev };
         delete newStatus[index];
         return newStatus;
@@ -863,6 +936,34 @@ function ProductionDevice() {
     const newRows = [...formData.authenticityRows];
     newRows[index][field] = value;
     
+    // Auto-calculate Last Authenticity when First Authenticity is entered
+    if (field === 'firstAuthenticity' && value.trim() !== '') {
+      const firstNum = parseInt(value);
+      if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+        // Calculate Last = First + rollNumber (if rollNumber exists and is valid), otherwise First + 1
+        const rollNum = parseInt(newRows[index].rollNumber);
+        const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
+          ? firstNum + rollNum 
+          : firstNum + 1;
+        newRows[index].lastAuthenticity = calculatedLast.toString();
+      }
+    }
+    
+    // Recalculate Last Authenticity when rollNumber changes (if First is set and Last is empty)
+    if (field === 'rollNumber') {
+      const firstValue = newRows[index].firstAuthenticity;
+      if (firstValue && firstValue.trim() !== '') {
+        const firstNum = parseInt(firstValue);
+        if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+          const rollNum = parseInt(value);
+          const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
+            ? firstNum + rollNum 
+            : firstNum + 1;
+          newRows[index].lastAuthenticity = calculatedLast.toString();
+        }
+      }
+    }
+    
     setFormData({
       ...formData,
       authenticityRows: newRows
@@ -945,9 +1046,16 @@ function ProductionDevice() {
         // Focus on the new input after it's rendered
         setTimeout(() => {
           const inputs = document.querySelectorAll('.buffer-row-input input[type="text"]');
-          const currentIndex = Array.from(inputs).findIndex(input => input === e.target);
-          if (currentIndex !== -1 && inputs[currentIndex + 1]) {
-            inputs[currentIndex + 1].focus();
+          const rejectInputs = Array.from(inputs).filter(input => 
+            input.placeholder === 'Enter authenticity number' && 
+            input.value === rejectData.authenticityNumbers[rejectData.authenticityNumbers.length - 1]
+          );
+          if (rejectInputs[0]) {
+            const allRejectInputs = document.querySelectorAll('.buffer-row-input input[type="text"]');
+            const lastRejectIndex = Array.from(allRejectInputs).findIndex(inp => inp === e.target);
+            if (allRejectInputs[lastRejectIndex + 1]) {
+              allRejectInputs[lastRejectIndex + 1].focus();
+            }
           }
         }, 50);
       } else {
@@ -1028,6 +1136,11 @@ function ProductionDevice() {
       return;
     }
 
+    if (!labelVendorId) {
+      alert('Pilih vendor untuk authenticity');
+      return;
+    }
+
     // Check if all non-empty rows are validated
     const rowsToValidate = formData.authenticityRows.filter((row, idx) => {
       const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
@@ -1104,7 +1217,8 @@ function ProductionDevice() {
         pic: formData.pic,
         mo_number: formData.moNumber,
         sku_name: formData.skuName,
-        authenticity_data: formData.authenticityRows
+        authenticity_data: formData.authenticityRows,
+        vendor_id: parseInt(String(labelVendorId), 10)
       });
 
       // Reset form
@@ -1114,6 +1228,7 @@ function ProductionDevice() {
         skuName: '',
         authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }]
       });
+      setLabelVendorId('');
       setAuthenticityValidationStatus({});
       setSelectedMo(null);
       setMoSearchTerm('');
@@ -1121,7 +1236,7 @@ function ProductionDevice() {
       fetchData();
     } catch (error) {
       console.error('Error saving data:', error);
-      alert('Error menyimpan data');
+      alert(error.response?.data?.error || 'Error menyimpan data');
     }
   };
 
@@ -1154,37 +1269,11 @@ function ProductionDevice() {
             };
           }
           
-          // Validate the authenticity values
-          const first = parseInt(firstAuth);
-          const last = parseInt(lastAuth);
-          
-          if (isNaN(first) || isNaN(last)) {
+          const chk = validateAuthenticityWithVendorDigit(firstAuth, lastAuth, auth.vendorDigitCount);
+          if (!chk.valid) {
             return {
               valid: false,
-              message: `MO ${input.mo_number}: First dan Last Authenticity harus berupa angka.`
-            };
-          }
-          
-          const difference = last - first;
-          
-          if (difference < 0) {
-            return {
-              valid: false,
-              message: `MO ${input.mo_number}: Selisih authenticity tidak boleh negatif.`
-            };
-          }
-          
-          if (difference === 0) {
-            return {
-              valid: false,
-              message: `MO ${input.mo_number}: First dan Last Authenticity tidak boleh sama.`
-            };
-          }
-          
-          if (difference > 7000) {
-            return {
-              valid: false,
-              message: `MO ${input.mo_number}: Selisih authenticity tidak boleh lebih dari 7000.`
+              message: `MO ${input.mo_number}: ${chk.message}`
             };
           }
         }
@@ -1209,6 +1298,18 @@ function ProductionDevice() {
       return;
     }
 
+    // Validate: Check if all inputs for this MO are active (active_count == 0 for this session)
+    // This is a frontend validation - backend will also check
+    const allInputsForMo = session.inputs.filter(input => input.mo_number === moNumber);
+    const activeInputsForMo = allInputsForMo.filter(input => input.status === 'active');
+    
+    // Only allow submit if all inputs for this MO in this session are active (no completed ones)
+    // Note: There might be other inputs with same MO in other sessions, but we check that in backend
+    if (activeInputsForMo.length !== allInputsForMo.length) {
+      alert(`Tidak dapat submit MO ${moNumber}. Masih ada input dengan status completed di session ini.`);
+      return;
+    }
+
     // Validate authenticity data before submit
     const validation = validateAuthenticityData(inputsWithSameMo);
     if (!validation.valid) {
@@ -1221,17 +1322,65 @@ function ProductionDevice() {
     }
 
     try {
-      const updatePromises = inputsWithSameMo.map(input => 
-        axios.put(`/api/production/device/update-status/${input.id}`, {
-          status: 'completed'
-        })
-      );
+      // Use the new batch submit endpoint instead of individual updates
+      // MO number is passed in body to handle special characters like '/'
+      const response = await axios.put(`/api/production/device/submit-mo-group`, {
+        mo_number: moNumber,
+        session_id: sessionId
+      });
       
-      await Promise.all(updatePromises);
+      // Check if response has auto_reverted flag
+      if (response.data && response.data.auto_reverted === true) {
+        const activeCount = response.data.active_count || 0;
+        alert(`Submit MO ${moNumber} gagal. Masih ada ${activeCount} input aktif dengan MO yang sama di session lain. Semua input yang sudah di-submit telah di-revert kembali ke aktif. Silakan submit ulang setelah semua input siap.`);
+      } else {
+        const updatedCount = response.data?.updated_count || inputsWithSameMo.length;
+        alert(`Berhasil submit ${updatedCount} input untuk MO ${moNumber}`);
+      }
+      
       fetchData();
     } catch (error) {
-      console.error('Error updating status:', error);
+      console.error('Error submitting MO:', error);
+      if (error.response && error.response.data && error.response.data.error) {
+        alert(`Error: ${error.response.data.error}`);
+      } else {
       alert('Error memperbarui status');
+      }
+    }
+  };
+
+  const handleRevertMoGroup = async (moNumber) => {
+    const userRole = localStorage.getItem('userRole') || 'production';
+    const isAdmin = userRole === 'admin';
+    
+    if (!isAdmin) {
+      alert('Hanya admin yang dapat melakukan revert MO');
+      return;
+    }
+    
+    if (!window.confirm(`Apakah Anda yakin ingin revert semua input untuk MO ${moNumber}? Status akan diubah dari completed kembali ke active.`)) {
+      return;
+    }
+    
+    try {
+      const response = await axios.put(`/api/production/device/revert-mo-group/${moNumber}`, {
+        userRole: userRole
+      });
+      
+      if (response.data && response.data.reverted_count > 0) {
+        alert(`Berhasil revert ${response.data.reverted_count} input untuk MO ${moNumber}`);
+      } else {
+        alert(response.data?.message || 'Tidak ada input yang dapat di-revert');
+      }
+      
+      fetchData();
+    } catch (error) {
+      console.error('Error reverting MO group:', error);
+      if (error.response && error.response.status === 403) {
+        alert('Akses ditolak: Hanya admin yang dapat melakukan revert MO');
+      } else {
+        alert('Error melakukan revert MO');
+      }
     }
   };
 
@@ -1305,7 +1454,10 @@ function ProductionDevice() {
           allAuthenticityRows.push({
             firstAuthenticity: auth.firstAuthenticity || '',
             lastAuthenticity: auth.lastAuthenticity || '',
-            rollNumber: auth.rollNumber || ''
+            rollNumber: auth.rollNumber || '',
+            vendorId: auth.vendorId != null ? auth.vendorId : null,
+            vendorName: auth.vendorName != null ? auth.vendorName : null,
+            vendorDigitCount: auth.vendorDigitCount != null ? auth.vendorDigitCount : null
           });
         });
       }
@@ -1325,6 +1477,8 @@ function ProductionDevice() {
       inputIds: inputsWithSameMo.map(input => input.id)
     });
     setEditAuthenticityValidationStatus({});
+    const fr = allAuthenticityRows[0];
+    setEditVendorId(fr && fr.vendorId != null && String(fr.vendorId) !== '' ? String(fr.vendorId) : '');
   };
 
   const handleCancelEdit = () => {
@@ -1333,6 +1487,7 @@ function ProductionDevice() {
     setEditingMoNumber(null);
     setEditingSessionId(null);
     setEditAuthenticityValidationStatus({});
+    setEditVendorId('');
   };
 
   const handleSaveEdit = async () => {
@@ -1354,6 +1509,10 @@ function ProductionDevice() {
     });
 
     if (rowsToValidate.length > 0) {
+      if (!editVendorId) {
+        alert('Pilih vendor untuk menyimpan authenticity');
+        return;
+      }
       // Check if roll number is filled for rows with authenticity data
       const rowsWithMissingRollNumber = rowsToValidate.filter((row, idx) => {
         return !row.rollNumber || row.rollNumber.trim() === '';
@@ -1376,15 +1535,26 @@ function ProductionDevice() {
     }
 
     try {
-      // Update first input with all authenticity data, others with empty array to prevent duplication
-      const updatePromises = editFormData.inputIds.map((inputId, index) => 
-        axios.put(`/api/production/device/${inputId}`, {
-          pic: editFormData.pic.split(',')[0].trim(), // Use first PIC if multiple
+      const updatePromises = editFormData.inputIds.map((inputId, index) => {
+        const picVal = editFormData.pic.split(',')[0].trim();
+        if (index === 0) {
+          const payload = {
+            pic: picVal,
+            mo_number: editFormData.moNumber,
+            sku_name: editFormData.skuName
+          };
+          if (rowsToValidate.length > 0) {
+            payload.authenticity_data = editFormData.authenticityRows;
+            payload.vendor_id = parseInt(String(editVendorId), 10);
+          }
+          return axios.put(`/api/production/device/${inputId}`, payload);
+        }
+        return axios.put(`/api/production/device/${inputId}`, {
+          pic: picVal,
           mo_number: editFormData.moNumber,
-          sku_name: editFormData.skuName,
-          authenticity_data: index === 0 ? editFormData.authenticityRows : [] // Only first input gets all data
-        })
-      );
+          sku_name: editFormData.skuName
+        });
+      });
       
       await Promise.all(updatePromises);
       
@@ -1393,6 +1563,7 @@ function ProductionDevice() {
       setEditingMoNumber(null);
       setEditingSessionId(null);
       setEditAuthenticityValidationStatus({});
+      setEditVendorId('');
       fetchData();
     } catch (error) {
       console.error('Error updating data:', error);
@@ -1403,6 +1574,34 @@ function ProductionDevice() {
   const handleEditRowChange = (index, field, value) => {
     const newRows = [...editFormData.authenticityRows];
     newRows[index][field] = value;
+    
+    // Auto-calculate Last Authenticity when First Authenticity is entered
+    if (field === 'firstAuthenticity' && value.trim() !== '') {
+      const firstNum = parseInt(value);
+      if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+        // Calculate Last = First + rollNumber (if rollNumber exists and is valid), otherwise First + 1
+        const rollNum = parseInt(newRows[index].rollNumber);
+        const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
+          ? firstNum + rollNum 
+          : firstNum + 1;
+        newRows[index].lastAuthenticity = calculatedLast.toString();
+      }
+    }
+    
+    // Recalculate Last Authenticity when rollNumber changes (if First is set and Last is empty)
+    if (field === 'rollNumber') {
+      const firstValue = newRows[index].firstAuthenticity;
+      if (firstValue && firstValue.trim() !== '') {
+        const firstNum = parseInt(firstValue);
+        if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+          const rollNum = parseInt(value);
+          const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0 
+            ? firstNum + rollNum 
+            : firstNum + 1;
+          newRows[index].lastAuthenticity = calculatedLast.toString();
+        }
+      }
+    }
     
     setEditFormData({
       ...editFormData,
@@ -1616,6 +1815,10 @@ function ProductionDevice() {
 
                         // Check if this MO group is being edited
                         const isEditing = editingMoNumber === moNumber && editingSessionId === session.session_id;
+                        
+                        // Check if user is admin
+                        const userRole = localStorage.getItem('userRole') || 'production';
+                        const isAdmin = userRole === 'admin';
 
                         return (
                           <div key={moNumber} className="mo-group-card">
@@ -1624,19 +1827,60 @@ function ProductionDevice() {
                                 <strong>MO Number:</strong> {moNumber}
                                 <span className="mo-sku-badge">{inputs[0].sku_name}</span>
                               </div>
-                              <span className={`status-badge ${moGroupStatus}`} style={{ marginLeft: 'auto' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+                                {isMoGroupCompleted && isAdmin && !isEditing ? (
+                                  <button
+                                    onClick={() => handleRevertMoGroup(moNumber)}
+                                    className="revert-button"
+                                    style={{ 
+                                      padding: '4px 8px', 
+                                      fontSize: '11px', 
+                                      background: '#dc2626', 
+                                      color: 'white', 
+                                      border: 'none', 
+                                      borderRadius: '4px', 
+                                      cursor: 'pointer'
+                                    }}
+                                    title="Revert MO (Admin only)"
+                                  >
+                                    Revert
+                                  </button>
+                                ) : null}
+                                <span className={`status-badge ${moGroupStatus}`}>
                                 {moGroupStatus === 'completed' ? 'Completed' : 'Active'}
                               </span>
+                              </div>
                             </div>
                             <div className="input-card">
                               <div className="input-card-header">
                                 <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                  {activeInputs.length > 0 && !isEditing && (
+                                  {(() => {
+                                    if (activeInputs.length === 0 || isEditing) {
+                                      return null;
+                                    }
+                                    
+                                    // Check if all inputs for this MO in this session are active (no completed ones)
+                                    const allInputsForMo = inputs.filter(input => input.mo_number === moNumber);
+                                    const activeInputsForMo = allInputsForMo.filter(input => input.status === 'active');
+                                    const canSubmit = activeInputsForMo.length === allInputsForMo.length && activeInputsForMo.length > 0;
+                                    
+                                    return (
                                     <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
                                       <button
                                         onClick={() => handleSubmitMoGroup(moNumber, session.session_id)}
                                         className="submit-button"
-                                        style={{ padding: '6px 12px', fontSize: '12px', background: '#059669', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                          disabled={!canSubmit}
+                                          style={{ 
+                                            padding: '6px 12px', 
+                                            fontSize: '12px', 
+                                            background: canSubmit ? '#059669' : '#9ca3af', 
+                                            color: 'white', 
+                                            border: 'none', 
+                                            borderRadius: '4px', 
+                                            cursor: canSubmit ? 'pointer' : 'not-allowed',
+                                            opacity: canSubmit ? 1 : 0.6
+                                          }}
+                                          title={!canSubmit ? 'Tidak dapat submit: masih ada input dengan status completed untuk MO ini' : ''}
                                       >
                                         Submit MO
                                       </button>
@@ -1648,7 +1892,8 @@ function ProductionDevice() {
                                         Edit
                                       </button>
                                     </div>
-                                  )}
+                                    );
+                                  })()}
                                 </div>
                               </div>
                                 <div className="input-card-body">
@@ -1680,6 +1925,21 @@ function ProductionDevice() {
                                           onChange={(e) => setEditFormData({ ...editFormData, skuName: e.target.value })}
                                           style={{ width: '100%', padding: '6px' }}
                                         />
+                                      </div>
+                                      <div className="form-group" style={{ marginBottom: '12px' }}>
+                                        <label>Vendor *</label>
+                                        <select
+                                          value={editVendorId}
+                                          onChange={(e) => setEditVendorId(e.target.value)}
+                                          style={{ width: '100%', padding: '6px' }}
+                                        >
+                                          <option value="">Pilih vendor</option>
+                                          {vendorList.map((v) => (
+                                            <option key={v.id} value={String(v.id)}>
+                                              {v.name} ({v.digit_count} digit)
+                                            </option>
+                                          ))}
+                                        </select>
                                       </div>
                                       <div className="authenticity-section">
                                         <label>Authenticity Data</label>
@@ -1787,11 +2047,19 @@ function ProductionDevice() {
                                     <>
                                       <div className="input-card-info-row">
                                         <p><strong>PIC:</strong> {Array.from(uniquePics).join(', ')}</p>
+                                        <p>
+                                          <strong>Vendor:</strong>{' '}
+                                          {formatVendorDisplayName(
+                                            inputs.find((i) => i.authenticity_data && i.authenticity_data[0])
+                                              ?.authenticity_data?.[0]
+                                          )}
+                                        </p>
                                       </div>
                                       <div className="authenticity-list">
                                         <strong>Authenticity Data:</strong>
                                         {allAuthenticityData.map((row, rowIdx) => (
                                           <div key={rowIdx} className="authenticity-row">
+                                            <span>Vendor: {formatVendorDisplayName(row)}</span>
                                             <span>First: {row.firstAuthenticity}</span>
                                             <span>Last: {row.lastAuthenticity}</span>
                                             <span>Roll: {row.rollNumber}</span>
@@ -1813,6 +2081,11 @@ function ProductionDevice() {
                                       onClick={() => {
                                         const firstBuffer = bufferDataMap[moNumber][0];
                                         setEditingBuffer(firstBuffer);
+                                        setEditBufferVendorId(
+                                          firstBuffer.vendor_id != null && firstBuffer.vendor_id !== ''
+                                            ? String(firstBuffer.vendor_id)
+                                            : ''
+                                        );
                                         setEditBufferData({
                                           pic: firstBuffer.pic,
                                           moNumber: firstBuffer.mo_number,
@@ -1830,6 +2103,7 @@ function ProductionDevice() {
                                       <div key={buffer.id} className="buffer-item">
                                         <div className="buffer-info">
                                           <span><strong>PIC:</strong> {buffer.pic}</span>
+                                          <span><strong>Vendor:</strong> {buffer.vendor_name || '—'}</span>
                                           <span><strong>SKU:</strong> {buffer.sku_name}</span>
                                         </div>
                                         <div className="buffer-numbers">
@@ -1851,6 +2125,11 @@ function ProductionDevice() {
                                       onClick={() => {
                                         const firstReject = rejectDataMap[moNumber][0];
                                         setEditingReject(firstReject);
+                                        setEditRejectVendorId(
+                                          firstReject.vendor_id != null && firstReject.vendor_id !== ''
+                                            ? String(firstReject.vendor_id)
+                                            : ''
+                                        );
                                         setEditRejectData({
                                           pic: firstReject.pic,
                                           moNumber: firstReject.mo_number,
@@ -1868,6 +2147,7 @@ function ProductionDevice() {
                                       <div key={reject.id} className="reject-item">
                                         <div className="reject-info">
                                           <span><strong>PIC:</strong> {reject.pic}</span>
+                                          <span><strong>Vendor:</strong> {reject.vendor_name || '—'}</span>
                                           <span><strong>SKU:</strong> {reject.sku_name}</span>
                                         </div>
                                         <div className="reject-numbers">
@@ -1906,8 +2186,9 @@ function ProductionDevice() {
                 style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
               >
                 <option value="">Select leader name</option>
-                <option value="Hikmatul Iman">Hikmatul Iman</option>
-                <option value="Calvin Lama Tokan">Calvin Lama Tokan</option>
+                <option value="Bagas Prasetya">Bagas Prasetya</option>
+                <option value="Ilyas Safiq">Ilyas Safiq</option>
+                <option value="Ardani Bin Akmad">Ardani Bin Akmad</option>
               </select>
             </div>
             <div className="form-group">
@@ -1945,6 +2226,24 @@ function ProductionDevice() {
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Input Authenticity Label Process</h2>
             <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={labelVendorId}
+                onChange={(e) => setLabelVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+              <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                First dan Last Authenticity harus masing-masing sepanjang digit vendor
+              </small>
+            </div>
+            <div className="form-group">
               <label>PIC *</label>
               <input
                 type="text"
@@ -1977,7 +2276,7 @@ function ProductionDevice() {
               <label>MO Number *</label>
               <input
                 type="text"
-                list="mo-datalist"
+                list="mo-datalist-device"
                 value={moSearchTerm}
                 onChange={(e) => {
                   setMoSearchTerm(e.target.value);
@@ -1996,7 +2295,7 @@ function ProductionDevice() {
                 placeholder="Type to search MO Number or SKU Name..."
                 style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
               />
-              <datalist id="mo-datalist">
+              <datalist id="mo-datalist-device">
                 {moList
                   .filter(mo => 
                     moSearchTerm === '' ||
@@ -2181,6 +2480,21 @@ function ProductionDevice() {
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Input Buffer Authenticity</h2>
             <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={bufferVendorId}
+                onChange={(e) => setBufferVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
               <label>Nama PIC *</label>
               <input
                 type="text"
@@ -2304,6 +2618,21 @@ function ProductionDevice() {
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Input Reject Authenticity</h2>
             <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={rejectVendorId}
+                onChange={(e) => setRejectVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
               <label>Nama PIC *</label>
               <input
                 type="text"
@@ -2426,9 +2755,25 @@ function ProductionDevice() {
         <div className="modal-overlay" onClick={() => {
           setEditingBuffer(null);
           setEditBufferData(null);
+          setEditBufferVendorId('');
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Edit Buffer Authenticity</h2>
+            <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={editBufferVendorId}
+                onChange={(e) => setEditBufferVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -2532,9 +2877,25 @@ function ProductionDevice() {
         <div className="modal-overlay" onClick={() => {
           setEditingReject(null);
           setEditRejectData(null);
+          setEditRejectVendorId('');
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Edit Reject Authenticity</h2>
+            <div className="form-group">
+              <label>Vendor *</label>
+              <select
+                value={editRejectVendorId}
+                onChange={(e) => setEditRejectVendorId(e.target.value)}
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              >
+                <option value="">Pilih vendor</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.name} ({v.digit_count} digit)
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
