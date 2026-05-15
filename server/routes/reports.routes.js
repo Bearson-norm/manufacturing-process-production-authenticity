@@ -5,9 +5,15 @@ const { parseAuthenticityData } = require('../utils/authenticity.utils');
 
 // GET /api/reports/manufacturing
 router.get('/manufacturing', async (req, res) => {
+  const sendJson = (status, body) => {
+    if (!res.headersSent) {
+      res.status(status).json(body);
+    }
+  };
+
   try {
     const { type, startDate, endDate, moNumber } = req.query;
-    
+
     const tables = [];
     if (!type || type === 'all' || type === 'liquid') {
       tables.push({ name: 'production_liquid', type: 'liquid' });
@@ -18,10 +24,18 @@ router.get('/manufacturing', async (req, res) => {
     if (!type || type === 'all' || type === 'cartridge') {
       tables.push({ name: 'production_cartridge', type: 'cartridge' });
     }
-    
+
+    if (tables.length === 0) {
+      return sendJson(400, {
+        success: false,
+        error: 'Invalid production type'
+      });
+    }
+
     const allResults = [];
     let completedQueries = 0;
-    
+    let queryError = null;
+
     tables.forEach((table) => {
       let query = `
         SELECT 
@@ -40,58 +54,63 @@ router.get('/manufacturing', async (req, res) => {
         FROM ${table.name}
         WHERE 1=1
       `;
-      
+
       const params = [];
-      
+
       if (moNumber) {
         query += ` AND mo_number = $${params.length + 1}`;
         params.push(moNumber);
       }
-      
+
       if (startDate) {
         query += ` AND DATE(created_at) >= $${params.length + 1}`;
         params.push(startDate);
       }
-      
+
       if (endDate) {
         query += ` AND DATE(created_at) <= $${params.length + 1}`;
         params.push(endDate);
       }
-      
+
       query += ' ORDER BY created_at DESC';
-      
+
       db.all(query, params, (err, rows) => {
         if (err) {
           console.error(`Error querying ${table.name}:`, err);
+          queryError = queryError || err;
         } else {
-          const parsedRows = rows.map(row => parseAuthenticityData(row));
-          allResults.push(...parsedRows);
+          try {
+            const safeRows = Array.isArray(rows) ? rows : [];
+            const parsedRows = safeRows.map((row) => parseAuthenticityData(row));
+            allResults.push(...parsedRows);
+          } catch (parseErr) {
+            console.error(`Error parsing rows from ${table.name}:`, parseErr);
+            queryError = queryError || parseErr;
+          }
         }
-        
+
         completedQueries++;
-        
+
         if (completedQueries === tables.length) {
-          // Sort by created_at descending
+          if (queryError && allResults.length === 0) {
+            return sendJson(500, {
+              success: false,
+              error: queryError.message || 'Database error'
+            });
+          }
           allResults.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-          
-          res.json({
+          return sendJson(200, {
             success: true,
             total: allResults.length,
-            data: allResults
+            data: allResults,
+            ...(queryError ? { partial: true, warning: 'Some production tables failed to load' } : {})
           });
         }
       });
     });
-    
-    if (tables.length === 0) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid production type'
-      });
-    }
   } catch (error) {
     console.error('Error in /api/reports/manufacturing:', error);
-    res.status(500).json({
+    sendJson(500, {
       success: false,
       error: error.message || 'Internal server error'
     });
