@@ -1068,34 +1068,6 @@ function ProductionCartridge() {
       }
     }
 
-    // Check if there's an active MO number in the current session
-    const currentSession = savedData.find(s => s.session_id === sessionId);
-    if (currentSession) {
-      // Group inputs by MO Number
-      const groupedByMo = {};
-      currentSession.inputs.forEach(input => {
-        if (!groupedByMo[input.mo_number]) {
-          groupedByMo[input.mo_number] = [];
-        }
-        groupedByMo[input.mo_number].push(input);
-      });
-
-      // Check if there's any MO group with active inputs (not the one being input)
-      const activeMoGroups = Object.entries(groupedByMo).filter(([moNumber, inputs]) => {
-        if (moNumber === formData.moNumber) {
-          return false; // Skip the MO number being input
-        }
-        return inputs.some(input => input.status === 'active');
-      });
-
-      if (activeMoGroups.length > 0) {
-        const activeMoNumbers = activeMoGroups.map(([moNumber]) => moNumber).join(', ');
-        alert(`Ada MO number yang sedang aktif: ${activeMoNumbers}. Silakan submit MO yang aktif terlebih dahulu sebelum menginput MO baru.`);
-        setShowInputModal(false);
-        return;
-      }
-    }
-
     try {
       await axios.post('/api/production/cartridge', {
         session_id: sessionId,
