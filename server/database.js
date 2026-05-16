@@ -491,6 +491,49 @@ async function initializeTables() {
       )
     `);
 
+    // Authenticity vendors (name + digit length for validation)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS authenticity_vendor (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        digit_count INTEGER NOT NULL CHECK (digit_count > 0),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Buffer / reject: optional vendor identifier (NULL for legacy rows)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'buffer_liquid' AND column_name = 'vendor_name') THEN
+          ALTER TABLE buffer_liquid ADD COLUMN vendor_name TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'buffer_device' AND column_name = 'vendor_name') THEN
+          ALTER TABLE buffer_device ADD COLUMN vendor_name TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'buffer_cartridge' AND column_name = 'vendor_name') THEN
+          ALTER TABLE buffer_cartridge ADD COLUMN vendor_name TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'reject_liquid' AND column_name = 'vendor_name') THEN
+          ALTER TABLE reject_liquid ADD COLUMN vendor_name TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'reject_device' AND column_name = 'vendor_name') THEN
+          ALTER TABLE reject_device ADD COLUMN vendor_name TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'reject_cartridge' AND column_name = 'vendor_name') THEN
+          ALTER TABLE reject_cartridge ADD COLUMN vendor_name TEXT;
+        END IF;
+      END $$;
+    `);
+
     // Create indexes
     const indexes = [
       'CREATE INDEX IF NOT EXISTS idx_production_combined_mo_number ON production_combined(mo_number)',
@@ -508,6 +551,7 @@ async function initializeTables() {
       'CREATE INDEX IF NOT EXISTS idx_manufacturing_identity_created_at ON manufacturing_identity(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_external_mfg_map_mo ON external_manufacturing_map(mo_number)',
       'CREATE INDEX IF NOT EXISTS idx_external_mfg_map_type ON external_manufacturing_map(production_type)',
+      'CREATE INDEX IF NOT EXISTS idx_authenticity_vendor_active ON authenticity_vendor(is_active)',
     ];
 
     for (const indexQuery of indexes) {

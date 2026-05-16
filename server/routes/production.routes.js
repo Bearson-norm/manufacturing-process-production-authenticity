@@ -1,12 +1,32 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../database');
-const { parseAuthenticityData, normalizeAuthenticityArray } = require('../utils/authenticity.utils');
+const {
+  parseAuthenticityData,
+  normalizeAuthenticityArray,
+  validateProductionAuthRowVendorDigits,
+  loadActiveVendorMapDb
+} = require('../utils/authenticity.utils');
 const {
   ensureLiquidExternalIdAndPatchStarted,
   finalizeLiquidManufacturingExternal
 } = require('../services/liquid-external-manufacturing.service');
 const { convertDBTimestampToJakarta } = require('../utils/timezone.utils');
+
+function loadActiveVendorMap(callback) {
+  loadActiveVendorMapDb(db, callback);
+}
+
+function validateRowsVendorDigits(rows, vendorMap, res) {
+  for (const row of rows) {
+    const msg = validateProductionAuthRowVendorDigits(row, vendorMap);
+    if (msg) {
+      res.status(400).json({ error: msg });
+      return false;
+    }
+  }
+  return true;
+}
 
 // Helper function to calculate done_qty from authenticity_data array (handle multiple rolls)
 function calculateDoneQty(authenticityDataArray) {
@@ -237,34 +257,97 @@ router.get('/report', (req, res) => {
 // POST /api/production/liquid
 router.post('/liquid', (req, res) => {
   const { session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data } = req.body;
-  
+
   const authenticityRows = normalizeAuthenticityArray(authenticity_data);
-  
-  db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [mo_number], (err, row) => {
-    const targetQty = (!err && row) ? (row.quantity || 0) : 0;
-    
-    const insertPromises = authenticityRows.map((authRow) => {
+
+  loadActiveVendorMap((mapErr, vendorMap) => {
+    if (mapErr) {
+      return res.status(500).json({ error: mapErr.message });
+    }
+    if (!validateRowsVendorDigits(authenticityRows, vendorMap, res)) {
+      return;
+    }
+
+    db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [mo_number], (err, row) => {
+      const targetQty = (!err && row) ? (row.quantity || 0) : 0;
+
+      const insertPromises = authenticityRows.map((authRow) => {
+        return new Promise((resolve, reject) => {
+          db.run(
+            `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+            [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([authRow])],
+            function(insertErr) {
+              if (insertErr) {
+                reject(insertErr);
+              } else {
+                resolve({ id: this.lastID, row: authRow });
+              }
+            }
+          );
+        });
+      });
+
+      Promise.all(insertPromises)
+        .then((results) => {
+          ensureLiquidExternalIdAndPatchStarted(mo_number, sku_name, targetQty, leader_name, () => {});
+
+          res.json({
+            message: 'Data saved successfully',
+            saved_count: results.length,
+            data: results.map(r => ({
+              id: r.id,
+              session_id,
+              leader_name,
+              shift_number,
+              pic,
+              mo_number,
+              sku_name,
+              authenticity_data: [r.row]
+            }))
+          });
+        })
+        .catch((err) => {
+          res.status(500).json({ error: err.message });
+        });
+    });
+  });
+});
+
+// POST /api/production/device
+router.post('/device', (req, res) => {
+  const { session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data } = req.body;
+
+  const authenticityRows = normalizeAuthenticityArray(authenticity_data);
+
+  loadActiveVendorMap((mapErr, vendorMap) => {
+    if (mapErr) {
+      return res.status(500).json({ error: mapErr.message });
+    }
+    if (!validateRowsVendorDigits(authenticityRows, vendorMap, res)) {
+      return;
+    }
+
+    const insertPromises = authenticityRows.map((row) => {
       return new Promise((resolve, reject) => {
         db.run(
-          `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
-          [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([authRow])],
-          function(insertErr) {
-            if (insertErr) {
-              reject(insertErr);
+          `INSERT INTO production_device (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+          [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
+          function(err) {
+            if (err) {
+              reject(err);
             } else {
-              resolve({ id: this.lastID, row: authRow });
+              resolve({ id: this.lastID, row });
             }
           }
         );
       });
     });
-    
+
     Promise.all(insertPromises)
       .then((results) => {
-        ensureLiquidExternalIdAndPatchStarted(mo_number, sku_name, targetQty, leader_name, () => {});
-
-        res.json({ 
+        res.json({
           message: 'Data saved successfully',
           saved_count: results.length,
           data: results.map(r => ({
@@ -285,94 +368,58 @@ router.post('/liquid', (req, res) => {
   });
 });
 
-// POST /api/production/device
-router.post('/device', (req, res) => {
-  const { session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const authenticityRows = normalizeAuthenticityArray(authenticity_data);
-  
-  const insertPromises = authenticityRows.map((row) => {
-    return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO production_device (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
-        [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
-        function(err) {
-          if (err) {
-            reject(err);
-          } else {
-            resolve({ id: this.lastID, row });
-          }
-        }
-      );
-    });
-  });
-  
-  Promise.all(insertPromises)
-    .then((results) => {
-      res.json({ 
-        message: 'Data saved successfully',
-        saved_count: results.length,
-        data: results.map(r => ({
-          id: r.id,
-          session_id,
-          leader_name,
-          shift_number,
-          pic,
-          mo_number,
-          sku_name,
-          authenticity_data: [r.row]
-        }))
-      });
-    })
-    .catch((err) => {
-      res.status(500).json({ error: err.message });
-    });
-});
-
 // POST /api/production/cartridge
 router.post('/cartridge', (req, res) => {
   const { session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data } = req.body;
-  
+
   const authenticityRows = normalizeAuthenticityArray(authenticity_data);
-  
-  const insertPromises = authenticityRows.map((row) => {
-    return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO production_cartridge (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+
+  loadActiveVendorMap((mapErr, vendorMap) => {
+    if (mapErr) {
+      return res.status(500).json({ error: mapErr.message });
+    }
+    if (!validateRowsVendorDigits(authenticityRows, vendorMap, res)) {
+      return;
+    }
+
+    const insertPromises = authenticityRows.map((row) => {
+      return new Promise((resolve, reject) => {
+        db.run(
+          `INSERT INTO production_cartridge (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
-        [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
-        function(err) {
-          if (err) {
-            reject(err);
-          } else {
-            resolve({ id: this.lastID, row });
+          [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
+          function(err) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve({ id: this.lastID, row });
+            }
           }
-        }
-      );
-    });
-  });
-  
-  Promise.all(insertPromises)
-    .then((results) => {
-      res.json({ 
-        message: 'Data saved successfully',
-        saved_count: results.length,
-        data: results.map(r => ({
-          id: r.id,
-          session_id,
-          leader_name,
-          shift_number,
-          pic,
-          mo_number,
-          sku_name,
-          authenticity_data: [r.row]
-        }))
+        );
       });
-    })
-    .catch((err) => {
-      res.status(500).json({ error: err.message });
     });
+
+    Promise.all(insertPromises)
+      .then((results) => {
+        res.json({
+          message: 'Data saved successfully',
+          saved_count: results.length,
+          data: results.map(r => ({
+            id: r.id,
+            session_id,
+            leader_name,
+            shift_number,
+            pic,
+            mo_number,
+            sku_name,
+            authenticity_data: [r.row]
+          }))
+        });
+      })
+      .catch((err) => {
+        res.status(500).json({ error: err.message });
+      });
+  });
 });
 
 // PUT /api/production/liquid/end-session
@@ -820,132 +867,177 @@ router.put('/cartridge/update-status/:id', (req, res) => {
 router.put('/liquid/:id', (req, res) => {
   const { id } = req.params;
   const { pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const updates = [];
-  const values = [];
-  
-  if (pic !== undefined) {
-    updates.push(`pic = $${values.length + 1}`);
-    values.push(pic);
-  }
-  if (mo_number !== undefined) {
-    updates.push(`mo_number = $${values.length + 1}`);
-    values.push(mo_number);
-  }
-  if (sku_name !== undefined) {
-    updates.push(`sku_name = $${values.length + 1}`);
-    values.push(sku_name);
-  }
-  if (authenticity_data !== undefined) {
-    updates.push(`authenticity_data = $${values.length + 1}`);
-    values.push(JSON.stringify(normalizeAuthenticityArray(authenticity_data)));
-  }
-  
-  if (updates.length === 0) {
-    return res.status(400).json({ error: 'No fields to update' });
-  }
-  
-  values.push(id);
-  
-  db.run(
-    `UPDATE production_liquid SET ${updates.join(', ')} WHERE id = $${values.length}`,
-    values,
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
+
+  const normalizedAuth =
+    authenticity_data !== undefined ? normalizeAuthenticityArray(authenticity_data) : null;
+
+  const runUpdate = () => {
+    const updates = [];
+    const values = [];
+    if (pic !== undefined) {
+      updates.push(`pic = $${values.length + 1}`);
+      values.push(pic);
+    }
+    if (mo_number !== undefined) {
+      updates.push(`mo_number = $${values.length + 1}`);
+      values.push(mo_number);
+    }
+    if (sku_name !== undefined) {
+      updates.push(`sku_name = $${values.length + 1}`);
+      values.push(sku_name);
+    }
+    if (normalizedAuth !== null) {
+      updates.push(`authenticity_data = $${values.length + 1}`);
+      values.push(JSON.stringify(normalizedAuth));
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+    values.push(id);
+    db.run(
+      `UPDATE production_liquid SET ${updates.join(', ')} WHERE id = $${values.length}`,
+      values,
+      function(err) {
+        if (err) {
+          res.status(500).json({ error: err.message });
+          return;
+        }
+        res.json({ message: 'Data updated successfully', id: id });
+      }
+    );
+  };
+
+  if (normalizedAuth !== null) {
+    loadActiveVendorMap((mapErr, vendorMap) => {
+      if (mapErr) {
+        return res.status(500).json({ error: mapErr.message });
+      }
+      if (!validateRowsVendorDigits(normalizedAuth, vendorMap, res)) {
         return;
       }
-      res.json({ message: 'Data updated successfully', id: id });
-    }
-  );
+      runUpdate();
+    });
+  } else {
+    runUpdate();
+  }
 });
 
 // PUT /api/production/device/:id
 router.put('/device/:id', (req, res) => {
   const { id } = req.params;
   const { pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const updates = [];
-  const values = [];
-  
-  if (pic !== undefined) {
-    updates.push(`pic = $${values.length + 1}`);
-    values.push(pic);
-  }
-  if (mo_number !== undefined) {
-    updates.push(`mo_number = $${values.length + 1}`);
-    values.push(mo_number);
-  }
-  if (sku_name !== undefined) {
-    updates.push(`sku_name = $${values.length + 1}`);
-    values.push(sku_name);
-  }
-  if (authenticity_data !== undefined) {
-    updates.push(`authenticity_data = $${values.length + 1}`);
-    values.push(JSON.stringify(normalizeAuthenticityArray(authenticity_data)));
-  }
-  
-  if (updates.length === 0) {
-    return res.status(400).json({ error: 'No fields to update' });
-  }
-  
-  values.push(id);
-  
-  db.run(
-    `UPDATE production_device SET ${updates.join(', ')} WHERE id = $${values.length}`,
-    values,
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
+
+  const normalizedAuth =
+    authenticity_data !== undefined ? normalizeAuthenticityArray(authenticity_data) : null;
+
+  const runUpdate = () => {
+    const updates = [];
+    const values = [];
+    if (pic !== undefined) {
+      updates.push(`pic = $${values.length + 1}`);
+      values.push(pic);
+    }
+    if (mo_number !== undefined) {
+      updates.push(`mo_number = $${values.length + 1}`);
+      values.push(mo_number);
+    }
+    if (sku_name !== undefined) {
+      updates.push(`sku_name = $${values.length + 1}`);
+      values.push(sku_name);
+    }
+    if (normalizedAuth !== null) {
+      updates.push(`authenticity_data = $${values.length + 1}`);
+      values.push(JSON.stringify(normalizedAuth));
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+    values.push(id);
+    db.run(
+      `UPDATE production_device SET ${updates.join(', ')} WHERE id = $${values.length}`,
+      values,
+      function(err) {
+        if (err) {
+          res.status(500).json({ error: err.message });
+          return;
+        }
+        res.json({ message: 'Data updated successfully', id: id });
+      }
+    );
+  };
+
+  if (normalizedAuth !== null) {
+    loadActiveVendorMap((mapErr, vendorMap) => {
+      if (mapErr) {
+        return res.status(500).json({ error: mapErr.message });
+      }
+      if (!validateRowsVendorDigits(normalizedAuth, vendorMap, res)) {
         return;
       }
-      res.json({ message: 'Data updated successfully', id: id });
-    }
-  );
+      runUpdate();
+    });
+  } else {
+    runUpdate();
+  }
 });
 
 // PUT /api/production/cartridge/:id
 router.put('/cartridge/:id', (req, res) => {
   const { id } = req.params;
   const { pic, mo_number, sku_name, authenticity_data } = req.body;
-  
-  const updates = [];
-  const values = [];
-  
-  if (pic !== undefined) {
-    updates.push(`pic = $${values.length + 1}`);
-    values.push(pic);
-  }
-  if (mo_number !== undefined) {
-    updates.push(`mo_number = $${values.length + 1}`);
-    values.push(mo_number);
-  }
-  if (sku_name !== undefined) {
-    updates.push(`sku_name = $${values.length + 1}`);
-    values.push(sku_name);
-  }
-  if (authenticity_data !== undefined) {
-    updates.push(`authenticity_data = $${values.length + 1}`);
-    values.push(JSON.stringify(normalizeAuthenticityArray(authenticity_data)));
-  }
-  
-  if (updates.length === 0) {
-    return res.status(400).json({ error: 'No fields to update' });
-  }
-  
-  values.push(id);
-  
-  db.run(
-    `UPDATE production_cartridge SET ${updates.join(', ')} WHERE id = $${values.length}`,
-    values,
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
+
+  const normalizedAuth =
+    authenticity_data !== undefined ? normalizeAuthenticityArray(authenticity_data) : null;
+
+  const runUpdate = () => {
+    const updates = [];
+    const values = [];
+    if (pic !== undefined) {
+      updates.push(`pic = $${values.length + 1}`);
+      values.push(pic);
+    }
+    if (mo_number !== undefined) {
+      updates.push(`mo_number = $${values.length + 1}`);
+      values.push(mo_number);
+    }
+    if (sku_name !== undefined) {
+      updates.push(`sku_name = $${values.length + 1}`);
+      values.push(sku_name);
+    }
+    if (normalizedAuth !== null) {
+      updates.push(`authenticity_data = $${values.length + 1}`);
+      values.push(JSON.stringify(normalizedAuth));
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+    values.push(id);
+    db.run(
+      `UPDATE production_cartridge SET ${updates.join(', ')} WHERE id = $${values.length}`,
+      values,
+      function(err) {
+        if (err) {
+          res.status(500).json({ error: err.message });
+          return;
+        }
+        res.json({ message: 'Data updated successfully', id: id });
+      }
+    );
+  };
+
+  if (normalizedAuth !== null) {
+    loadActiveVendorMap((mapErr, vendorMap) => {
+      if (mapErr) {
+        return res.status(500).json({ error: mapErr.message });
+      }
+      if (!validateRowsVendorDigits(normalizedAuth, vendorMap, res)) {
         return;
       }
-      res.json({ message: 'Data updated successfully', id: id });
-    }
-  );
+      runUpdate();
+    });
+  } else {
+    runUpdate();
+  }
 });
 
 // GET /api/production/check-mo-used
@@ -1073,58 +1165,67 @@ router.post('/combined', (req, res) => {
     res.status(400).json({ error: 'Missing required fields: session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data' });
     return;
   }
-  
-  const authenticityRows = Array.isArray(authenticity_data) ? authenticity_data : [authenticity_data];
-  
-  const insertPromises = authenticityRows.map((row) => {
-    return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO production_combined (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+
+  const authenticityRows = normalizeAuthenticityArray(authenticity_data);
+
+  loadActiveVendorMap((mapErr, vendorMap) => {
+    if (mapErr) {
+      return res.status(500).json({ error: mapErr.message });
+    }
+    if (!validateRowsVendorDigits(authenticityRows, vendorMap, res)) {
+      return;
+    }
+
+    const insertPromises = authenticityRows.map((row) => {
+      return new Promise((resolve, reject) => {
+        db.run(
+          `INSERT INTO production_combined (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          production_type,
-          session_id,
-          leader_name,
-          shift_number,
-          pic,
-          mo_number,
-          sku_name,
-          JSON.stringify([row]),
-          status || 'active'
-        ],
-        function(err) {
-          if (err) {
-            reject(err);
-          } else {
-            resolve({ id: this.lastID, row });
+          [
+            production_type,
+            session_id,
+            leader_name,
+            shift_number,
+            pic,
+            mo_number,
+            sku_name,
+            JSON.stringify([row]),
+            status || 'active'
+          ],
+          function(err) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve({ id: this.lastID, row });
+            }
           }
-        }
-      );
-    });
-  });
-  
-  Promise.all(insertPromises)
-    .then((results) => {
-      res.json({ 
-        message: 'Data saved successfully',
-        saved_count: results.length,
-        data: results.map(r => ({
-          id: r.id,
-          production_type,
-          session_id,
-          leader_name,
-          shift_number,
-          pic,
-          mo_number,
-          sku_name,
-          authenticity_data: [r.row],
-          status: status || 'active'
-        }))
+        );
       });
-    })
-    .catch((err) => {
-      res.status(500).json({ error: err.message });
     });
+
+    Promise.all(insertPromises)
+      .then((results) => {
+        res.json({
+          message: 'Data saved successfully',
+          saved_count: results.length,
+          data: results.map(r => ({
+            id: r.id,
+            production_type,
+            session_id,
+            leader_name,
+            shift_number,
+            pic,
+            mo_number,
+            sku_name,
+            authenticity_data: [r.row],
+            status: status || 'active'
+          }))
+        });
+      })
+      .catch((err) => {
+        res.status(500).json({ error: err.message });
+      });
+  });
 });
 
 // POST /api/production/combined/sync

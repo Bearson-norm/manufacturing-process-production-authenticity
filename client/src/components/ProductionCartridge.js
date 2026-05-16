@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './Production.css';
+import { validateNumericDigitLength, buildVendorDigitMap, resolveDigitCountForVendorName } from '../utils/vendorAuthenticity';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
@@ -76,7 +77,7 @@ function ProductionCartridge() {
     pic: '',
     moNumber: '',
     skuName: '',
-    authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }]
+    authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }]
   });
   const [authenticityValidationStatus, setAuthenticityValidationStatus] = useState({});
   const [authenticityInvalidStatus, setAuthenticityInvalidStatus] = useState({});
@@ -115,10 +116,42 @@ function ProductionCartridge() {
   const [editingReject, setEditingReject] = useState(null);
   const [editBufferData, setEditBufferData] = useState(null);
   const [editRejectData, setEditRejectData] = useState(null);
+  const [activeVendors, setActiveVendors] = useState([]);
+  const [inputModalVendorId, setInputModalVendorId] = useState('');
+  const [bufferModalVendorId, setBufferModalVendorId] = useState('');
+  const [rejectModalVendorId, setRejectModalVendorId] = useState('');
+  const [editModalVendorId, setEditModalVendorId] = useState('');
+
+  const vendorDigitMap = useMemo(() => buildVendorDigitMap(activeVendors), [activeVendors]);
+
+  const getVendorNameById = (idStr) => {
+    if (idStr === undefined || idStr === null || String(idStr).trim() === '') return null;
+    const v = activeVendors.find((x) => String(x.id) === String(idStr));
+    return v ? v.name : null;
+  };
+
+  const getVendorDigitCountById = (idStr) => {
+    if (idStr === undefined || idStr === null || String(idStr).trim() === '') return null;
+    const v = activeVendors.find((x) => String(x.id) === String(idStr));
+    const n = v ? Number(v.digit_count) : NaN;
+    return !Number.isNaN(n) && n > 0 ? n : null;
+  };
+
+  const fetchActiveVendors = async () => {
+    try {
+      const response = await axios.get('/api/authenticity-vendors');
+      if (response.data.success) {
+        setActiveVendors(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching vendors:', error);
+    }
+  };
 
   useEffect(() => {
     fetchData();
     fetchPicList();
+    fetchActiveVendors();
     // Load session from localStorage
     const savedSession = localStorage.getItem('production_cartridge_session');
     if (savedSession) {
@@ -252,6 +285,7 @@ function ProductionCartridge() {
 
   const handleInputAuthenticity = async () => {
     setShowInputModal(true);
+    setInputModalVendorId('');
     setMoSearchTerm('');
     // Fetch MO list from cache (filtered by production type) when modal opens
     try {
@@ -300,6 +334,7 @@ function ProductionCartridge() {
 
   const handleInputBuffer = async () => {
     setShowBufferModal(true);
+    setBufferModalVendorId('');
     setBufferMoSearchTerm('');
     setSelectedBufferMo(null);
     // Fetch MO list from cache (filtered by production type) when modal opens
@@ -323,6 +358,7 @@ function ProductionCartridge() {
 
   const handleInputReject = async () => {
     setShowRejectModal(true);
+    setRejectModalVendorId('');
     setRejectMoSearchTerm('');
     setSelectedRejectMo(null);
     // Fetch MO list from cache (filtered by production type) when modal opens
@@ -405,13 +441,30 @@ function ProductionCartridge() {
       return;
     }
 
+    if (activeVendors.length > 0 && !bufferModalVendorId) {
+      alert('Pilih vendor terlebih dahulu.');
+      return;
+    }
+
+    const bufDc = getVendorDigitCountById(bufferModalVendorId);
+    if (bufDc) {
+      for (let i = 0; i < validNumbers.length; i++) {
+        const err = validateNumericDigitLength(validNumbers[i], bufDc, `Nomor authenticity #${i + 1}`);
+        if (err) {
+          alert(err);
+          return;
+        }
+      }
+    }
+
     try {
       await axios.post('/api/buffer/cartridge', {
         session_id: sessionId,
         pic: bufferData.pic,
         mo_number: bufferData.moNumber,
         sku_name: bufferData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_name: getVendorNameById(bufferModalVendorId)
       });
 
       // Reset form
@@ -421,6 +474,7 @@ function ProductionCartridge() {
         skuName: '',
         authenticityNumbers: ['']
       });
+      setBufferModalVendorId('');
       setShowBufferModal(false);
       fetchData();
     } catch (error) {
@@ -490,13 +544,30 @@ function ProductionCartridge() {
       return;
     }
 
+    if (activeVendors.length > 0 && !rejectModalVendorId) {
+      alert('Pilih vendor terlebih dahulu.');
+      return;
+    }
+
+    const rejDc = getVendorDigitCountById(rejectModalVendorId);
+    if (rejDc) {
+      for (let i = 0; i < validNumbers.length; i++) {
+        const err = validateNumericDigitLength(validNumbers[i], rejDc, `Nomor authenticity #${i + 1}`);
+        if (err) {
+          alert(err);
+          return;
+        }
+      }
+    }
+
     try {
       await axios.post('/api/reject/cartridge', {
         session_id: sessionId,
         pic: rejectData.pic,
         mo_number: rejectData.moNumber,
         sku_name: rejectData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_name: getVendorNameById(rejectModalVendorId)
       });
 
       // Reset form
@@ -506,6 +577,7 @@ function ProductionCartridge() {
         skuName: '',
         authenticityNumbers: ['']
       });
+      setRejectModalVendorId('');
       setShowRejectModal(false);
       fetchData();
     } catch (error) {
@@ -526,12 +598,28 @@ function ProductionCartridge() {
       return;
     }
 
+    if (activeVendors.length > 0 && !editBufferData.vendorId) {
+      alert('Pilih vendor terlebih dahulu.');
+      return;
+    }
+    const editBufDc = getVendorDigitCountById(editBufferData.vendorId);
+    if (editBufDc) {
+      for (let i = 0; i < validNumbers.length; i++) {
+        const err = validateNumericDigitLength(validNumbers[i], editBufDc, `Nomor authenticity #${i + 1}`);
+        if (err) {
+          alert(err);
+          return;
+        }
+      }
+    }
+
     try {
       await axios.put(`/api/buffer/cartridge/${editingBuffer.id}`, {
         pic: editBufferData.pic,
         mo_number: editBufferData.moNumber,
         sku_name: editBufferData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_name: getVendorNameById(editBufferData.vendorId)
       });
 
       setEditingBuffer(null);
@@ -556,12 +644,28 @@ function ProductionCartridge() {
       return;
     }
 
+    if (activeVendors.length > 0 && !editRejectData.vendorId) {
+      alert('Pilih vendor terlebih dahulu.');
+      return;
+    }
+    const editRejDc = getVendorDigitCountById(editRejectData.vendorId);
+    if (editRejDc) {
+      for (let i = 0; i < validNumbers.length; i++) {
+        const err = validateNumericDigitLength(validNumbers[i], editRejDc, `Nomor authenticity #${i + 1}`);
+        if (err) {
+          alert(err);
+          return;
+        }
+      }
+    }
+
     try {
       await axios.put(`/api/reject/cartridge/${editingReject.id}`, {
         pic: editRejectData.pic,
         mo_number: editRejectData.moNumber,
         sku_name: editRejectData.skuName,
-        authenticity_numbers: validNumbers
+        authenticity_numbers: validNumbers,
+        vendor_name: getVendorNameById(editRejectData.vendorId)
       });
 
       setEditingReject(null);
@@ -673,16 +777,17 @@ function ProductionCartridge() {
   };
 
   const handleAddRow = () => {
+    const vn = getVendorNameById(inputModalVendorId);
     setFormData({
       ...formData,
       authenticityRows: [
         ...formData.authenticityRows,
-        { firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }
+        { firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: vn }
       ]
     });
   };
 
-  const validateAuthenticityRow = (index, firstAuth, lastAuth, isEdit = false) => {
+  const validateAuthenticityRow = (index, firstAuth, lastAuth, isEdit = false, vendorDigitCount = null) => {
     // Skip validation if fields are empty
     if (!firstAuth || !lastAuth || firstAuth.trim() === '' || lastAuth.trim() === '') {
       // Clear invalid status for empty fields
@@ -694,6 +799,29 @@ function ProductionCartridge() {
         });
       }
       return { valid: true, message: '' }; // Allow empty fields
+    }
+
+    if (vendorDigitCount) {
+      const d1 = validateNumericDigitLength(firstAuth, vendorDigitCount, 'First Authenticity');
+      if (d1) {
+        if (!isEdit) {
+          setAuthenticityInvalidStatus(prev => ({
+            ...prev,
+            [index]: d1
+          }));
+        }
+        return { valid: false, message: d1 };
+      }
+      const d2 = validateNumericDigitLength(lastAuth, vendorDigitCount, 'Last Authenticity');
+      if (d2) {
+        if (!isEdit) {
+          setAuthenticityInvalidStatus(prev => ({
+            ...prev,
+            [index]: d2
+          }));
+        }
+        return { valid: false, message: d2 };
+      }
     }
 
     const first = parseInt(firstAuth);
@@ -772,10 +900,20 @@ function ProductionCartridge() {
   const handleValidateRow = (index, isEdit = false, showAlert = true) => {
     const rows = isEdit ? editFormData.authenticityRows : formData.authenticityRows;
     const row = rows[index];
-    
+
     if (!row) return;
 
-    const result = validateAuthenticityRow(index, row.firstAuthenticity, row.lastAuthenticity, isEdit);
+    const vendorDigitCount = isEdit
+      ? resolveDigitCountForVendorName(row.vendorName, vendorDigitMap)
+      : getVendorDigitCountById(inputModalVendorId);
+
+    const result = validateAuthenticityRow(
+      index,
+      row.firstAuthenticity,
+      row.lastAuthenticity,
+      isEdit,
+      vendorDigitCount
+    );
     
     if (!result.valid) {
       const key = `${isEdit ? 'edit' : 'main'}_${index}`;
@@ -865,25 +1003,68 @@ function ProductionCartridge() {
   const handleRowChange = (index, field, value) => {
     const newRows = [...formData.authenticityRows];
     newRows[index][field] = value;
-    
+
+    if (field === 'firstAuthenticity' && value.trim() !== '') {
+      const firstNum = parseInt(value);
+      if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+        const rollNum = parseInt(newRows[index].rollNumber);
+        const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0
+          ? firstNum + rollNum
+          : firstNum + 1;
+        newRows[index].lastAuthenticity = calculatedLast.toString();
+      }
+    }
+
+    if (field === 'rollNumber') {
+      const firstValue = newRows[index].firstAuthenticity;
+      if (firstValue && firstValue.trim() !== '') {
+        const firstNum = parseInt(firstValue);
+        if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+          const rollNum = parseInt(value);
+          const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0
+            ? firstNum + rollNum
+            : firstNum + 1;
+          newRows[index].lastAuthenticity = calculatedLast.toString();
+        }
+      }
+    }
+
     setFormData({
       ...formData,
       authenticityRows: newRows
     });
-    
-    // Reset validation status when field changes
+
     if (field === 'firstAuthenticity' || field === 'lastAuthenticity') {
       setAuthenticityValidationStatus(prev => ({
         ...prev,
         [index]: false
       }));
-      // Clear invalid status when field changes
       setAuthenticityInvalidStatus(prev => {
         const newStatus = { ...prev };
         delete newStatus[index];
         return newStatus;
       });
     }
+  };
+
+  const handleInputModalVendorSelect = (e) => {
+    const id = e.target.value;
+    setInputModalVendorId(id);
+    const name = getVendorNameById(id);
+    setFormData((prev) => ({
+      ...prev,
+      authenticityRows: prev.authenticityRows.map((r) => ({ ...r, vendorName: name }))
+    }));
+  };
+
+  const handleEditModalVendorSelect = (e) => {
+    const id = e.target.value;
+    setEditModalVendorId(id);
+    const name = getVendorNameById(id);
+    setEditFormData((prev) => ({
+      ...prev,
+      authenticityRows: (prev.authenticityRows || []).map((r) => ({ ...r, vendorName: name }))
+    }));
   };
 
   // Handle Enter key press for scanner input (auto-advance to next field)
@@ -978,7 +1159,7 @@ function ProductionCartridge() {
           pic: '',
           moNumber: '',
           skuName: '',
-          authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }]
+          authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }]
         });
         
         // Remove session from localStorage
@@ -1028,7 +1209,12 @@ function ProductionCartridge() {
       return;
     }
 
-    // Check if all non-empty rows are validated
+    if (activeVendors.length > 0 && !inputModalVendorId) {
+      alert('Pilih vendor terlebih dahulu.');
+      return;
+    }
+
+    const vendorNameToSave = getVendorNameById(inputModalVendorId);
     const rowsToValidate = formData.authenticityRows.filter((row, idx) => {
       const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
       const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
@@ -1069,6 +1255,10 @@ function ProductionCartridge() {
     }
 
     try {
+      const rowsPayload = formData.authenticityRows.map((r) => ({
+        ...r,
+        vendorName: vendorNameToSave || r.vendorName || null
+      }));
       await axios.post('/api/production/cartridge', {
         session_id: sessionId,
         leader_name: leaderName,
@@ -1076,7 +1266,7 @@ function ProductionCartridge() {
         pic: formData.pic,
         mo_number: formData.moNumber,
         sku_name: formData.skuName,
-        authenticity_data: formData.authenticityRows
+        authenticity_data: rowsPayload
       });
 
       // Reset form
@@ -1084,8 +1274,9 @@ function ProductionCartridge() {
         pic: '',
         moNumber: '',
         skuName: '',
-        authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }]
+        authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }]
       });
+      setInputModalVendorId('');
       setAuthenticityValidationStatus({});
       setSelectedMo(null);
       setMoSearchTerm('');
@@ -1125,7 +1316,19 @@ function ProductionCartridge() {
               message: `MO ${input.mo_number}: Ada authenticity data yang kosong. Pastikan semua First dan Last Authenticity sudah diisi.`
             };
           }
-          
+
+          const dc = resolveDigitCountForVendorName(auth.vendorName, vendorDigitMap);
+          if (dc) {
+            const e1 = validateNumericDigitLength(firstAuth, dc, 'First Authenticity');
+            if (e1) {
+              return { valid: false, message: `MO ${input.mo_number}: ${e1}` };
+            }
+            const e2 = validateNumericDigitLength(lastAuth, dc, 'Last Authenticity');
+            if (e2) {
+              return { valid: false, message: `MO ${input.mo_number}: ${e2}` };
+            }
+          }
+
           // Validate the authenticity values
           const first = parseInt(firstAuth);
           const last = parseInt(lastAuth);
@@ -1277,23 +1480,30 @@ function ProductionCartridge() {
           allAuthenticityRows.push({
             firstAuthenticity: auth.firstAuthenticity || '',
             lastAuthenticity: auth.lastAuthenticity || '',
-            rollNumber: auth.rollNumber || ''
+            rollNumber: auth.rollNumber || '',
+            vendorName: auth.vendorName != null && auth.vendorName !== '' ? auth.vendorName : null
           });
         });
       }
     });
-    
+
+    const firstNamedVendor = allAuthenticityRows.find((r) => r.vendorName)?.vendorName;
+    const vendorMatch =
+      firstNamedVendor && activeVendors.find((v) => v.name === firstNamedVendor);
+    const initialEditVendorId = vendorMatch ? String(vendorMatch.id) : '';
+
     // Use the first input as base for other fields
     const firstInput = inputsWithSameMo[0];
     
     setEditingMoNumber(moNumber);
     setEditingSessionId(sessionId);
     setEditingInput(inputsWithSameMo.map(input => input.id).join(','));
+    setEditModalVendorId(initialEditVendorId);
     setEditFormData({
       pic: Array.from(uniquePics).join(', '),
       moNumber: firstInput.mo_number,
       skuName: firstInput.sku_name,
-      authenticityRows: allAuthenticityRows.length > 0 ? allAuthenticityRows : [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }],
+      authenticityRows: allAuthenticityRows.length > 0 ? allAuthenticityRows : [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }],
       inputIds: inputsWithSameMo.map(input => input.id)
     });
     setEditAuthenticityValidationStatus({});
@@ -1305,11 +1515,17 @@ function ProductionCartridge() {
     setEditingMoNumber(null);
     setEditingSessionId(null);
     setEditAuthenticityValidationStatus({});
+    setEditModalVendorId('');
   };
 
   const handleSaveEdit = async () => {
     if (!editFormData.pic || !editFormData.moNumber || !editFormData.skuName) {
       alert('Silakan isi semua field yang wajib diisi');
+      return;
+    }
+
+    if (activeVendors.length > 0 && !editModalVendorId) {
+      alert('Pilih vendor terlebih dahulu.');
       return;
     }
 
@@ -1348,13 +1564,18 @@ function ProductionCartridge() {
     }
 
     try {
+      const vn = getVendorNameById(editModalVendorId);
+      const rowsForSave = editFormData.authenticityRows.map((r) => ({
+        ...r,
+        vendorName: vn || r.vendorName || null
+      }));
       // Update first input with all authenticity data, others with empty array to prevent duplication
       const updatePromises = editFormData.inputIds.map((inputId, index) => 
         axios.put(`/api/production/cartridge/${inputId}`, {
           pic: editFormData.pic.split(',')[0].trim(), // Use first PIC if multiple
           mo_number: editFormData.moNumber,
           sku_name: editFormData.skuName,
-          authenticity_data: index === 0 ? editFormData.authenticityRows : [] // Only first input gets all data
+          authenticity_data: index === 0 ? rowsForSave : [] // Only first input gets all data
         })
       );
       
@@ -1365,6 +1586,7 @@ function ProductionCartridge() {
       setEditingMoNumber(null);
       setEditingSessionId(null);
       setEditAuthenticityValidationStatus({});
+      setEditModalVendorId('');
       fetchData();
     } catch (error) {
       console.error('Error updating data:', error);
@@ -1375,7 +1597,32 @@ function ProductionCartridge() {
   const handleEditRowChange = (index, field, value) => {
     const newRows = [...editFormData.authenticityRows];
     newRows[index][field] = value;
-    
+
+    if (field === 'firstAuthenticity' && value.trim() !== '') {
+      const firstNum = parseInt(value);
+      if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+        const rollNum = parseInt(newRows[index].rollNumber);
+        const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0
+          ? firstNum + rollNum
+          : firstNum + 1;
+        newRows[index].lastAuthenticity = calculatedLast.toString();
+      }
+    }
+
+    if (field === 'rollNumber') {
+      const firstValue = newRows[index].firstAuthenticity;
+      if (firstValue && firstValue.trim() !== '') {
+        const firstNum = parseInt(firstValue);
+        if (!isNaN(firstNum) && (!newRows[index].lastAuthenticity || newRows[index].lastAuthenticity.trim() === '')) {
+          const rollNum = parseInt(value);
+          const calculatedLast = rollNum && !isNaN(rollNum) && rollNum > 0
+            ? firstNum + rollNum
+            : firstNum + 1;
+          newRows[index].lastAuthenticity = calculatedLast.toString();
+        }
+      }
+    }
+
     setEditFormData({
       ...editFormData,
       authenticityRows: newRows
@@ -1391,11 +1638,12 @@ function ProductionCartridge() {
   };
 
   const handleAddEditRow = () => {
+    const vn = getVendorNameById(editModalVendorId);
     setEditFormData({
       ...editFormData,
       authenticityRows: [
         ...editFormData.authenticityRows,
-        { firstAuthenticity: '', lastAuthenticity: '', rollNumber: '' }
+        { firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: vn }
       ]
     });
   };
@@ -1515,6 +1763,21 @@ function ProductionCartridge() {
 
                 const sessionStatus = allMoGroupsCompleted ? 'completed' : 'active';
 
+                const sessionVendorNameSet = new Set();
+                session.inputs.forEach((input) => {
+                  if (input.authenticity_data && Array.isArray(input.authenticity_data)) {
+                    input.authenticity_data.forEach((a) => {
+                      if (a.vendorName) sessionVendorNameSet.add(a.vendorName);
+                    });
+                  }
+                });
+                const sessionVendorSummary =
+                  sessionVendorNameSet.size === 0
+                    ? null
+                    : sessionVendorNameSet.size === 1
+                      ? [...sessionVendorNameSet][0]
+                      : `Campuran (${[...sessionVendorNameSet].join(', ')})`;
+
                 return (
                 <div key={session.session_id} className={`data-item ${sessionStatus === 'completed' ? 'completed' : 'active'}`}>
                   <div className="data-header">
@@ -1531,6 +1794,11 @@ function ProductionCartridge() {
                       <p><strong>Leader:</strong> {session.leader_name}</p>
                       <p><strong>Shift:</strong> {session.shift_number}</p>
                       <p><strong>Total Inputs:</strong> {session.inputs.length}</p>
+                      {sessionVendorSummary && (
+                        <p style={{ color: '#64748b' }}>
+                          <strong>Vendor authenticity:</strong> {sessionVendorSummary}
+                        </p>
+                      )}
                       {!allMoGroupsCompleted && (
                         <p><strong>Pending MOs:</strong> {pendingMoCount}</p>
                       )}
@@ -1582,6 +1850,17 @@ function ProductionCartridge() {
                           }
                         });
 
+                        const vendorNameSet = new Set();
+                        allAuthenticityData.forEach((a) => {
+                          if (a.vendorName) vendorNameSet.add(a.vendorName);
+                        });
+                        const vendorSummaryLabel =
+                          vendorNameSet.size === 0
+                            ? null
+                            : vendorNameSet.size === 1
+                              ? [...vendorNameSet][0]
+                              : `Campuran (${[...vendorNameSet].join(', ')})`;
+
                         // Check if this MO group is completed
                         const isMoGroupCompleted = inputs.every(input => input.status === 'completed');
                         const moGroupStatus = isMoGroupCompleted ? 'completed' : 'active';
@@ -1595,6 +1874,11 @@ function ProductionCartridge() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <strong>MO Number:</strong> {moNumber}
                                 <span className="mo-sku-badge">{inputs[0].sku_name}</span>
+                                {vendorSummaryLabel && (
+                                  <span className="mo-vendor-badge" style={{ fontSize: '12px', color: '#64748b' }}>
+                                    Vendor: {vendorSummaryLabel}
+                                  </span>
+                                )}
                               </div>
                               <span className={`status-badge ${moGroupStatus}`} style={{ marginLeft: 'auto' }}>
                                 {moGroupStatus === 'completed' ? 'Completed' : 'Active'}
@@ -1653,6 +1937,23 @@ function ProductionCartridge() {
                                           style={{ width: '100%', padding: '6px' }}
                                         />
                                       </div>
+                                      {activeVendors.length > 0 && (
+                                        <div className="form-group" style={{ marginBottom: '12px' }}>
+                                          <label>Vendor *</label>
+                                          <select
+                                            value={editModalVendorId}
+                                            onChange={handleEditModalVendorSelect}
+                                            style={{ width: '100%', padding: '6px' }}
+                                          >
+                                            <option value="">— Pilih vendor —</option>
+                                            {activeVendors.map((v) => (
+                                              <option key={v.id} value={String(v.id)}>
+                                                {v.name} ({v.digit_count} digit)
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      )}
                                       <div className="authenticity-section">
                                         <label>Authenticity Data</label>
                                         {editFormData.authenticityRows.map((row, rowIdx) => {
@@ -1767,6 +2068,7 @@ function ProductionCartridge() {
                                             <span>First: {row.firstAuthenticity}</span>
                                             <span>Last: {row.lastAuthenticity}</span>
                                             <span>Roll: {row.rollNumber}</span>
+                                            {row.vendorName ? <span>Vendor: {row.vendorName}</span> : null}
                                           </div>
                                         ))}
                                       </div>
@@ -1789,7 +2091,13 @@ function ProductionCartridge() {
                                           pic: firstBuffer.pic,
                                           moNumber: firstBuffer.mo_number,
                                           skuName: firstBuffer.sku_name,
-                                          authenticityNumbers: [...firstBuffer.authenticity_numbers]
+                                          authenticityNumbers: [...firstBuffer.authenticity_numbers],
+                                          vendorId: (() => {
+                                            const n = firstBuffer.vendor_name;
+                                            if (!n) return '';
+                                            const m = activeVendors.find((v) => v.name === n);
+                                            return m ? String(m.id) : '';
+                                          })()
                                         });
                                       }}
                                       title="Edit Buffer"
@@ -1803,6 +2111,9 @@ function ProductionCartridge() {
                                         <div className="buffer-info">
                                           <span><strong>PIC:</strong> {buffer.pic}</span>
                                           <span><strong>SKU:</strong> {buffer.sku_name}</span>
+                                          {buffer.vendor_name ? (
+                                            <span><strong>Vendor:</strong> {buffer.vendor_name}</span>
+                                          ) : null}
                                         </div>
                                         <div className="buffer-numbers">
                                           {buffer.authenticity_numbers.map((num, numIdx) => (
@@ -1827,7 +2138,13 @@ function ProductionCartridge() {
                                           pic: firstReject.pic,
                                           moNumber: firstReject.mo_number,
                                           skuName: firstReject.sku_name,
-                                          authenticityNumbers: [...firstReject.authenticity_numbers]
+                                          authenticityNumbers: [...firstReject.authenticity_numbers],
+                                          vendorId: (() => {
+                                            const n = firstReject.vendor_name;
+                                            if (!n) return '';
+                                            const m = activeVendors.find((v) => v.name === n);
+                                            return m ? String(m.id) : '';
+                                          })()
                                         });
                                       }}
                                       title="Edit Reject"
@@ -1841,6 +2158,9 @@ function ProductionCartridge() {
                                         <div className="reject-info">
                                           <span><strong>PIC:</strong> {reject.pic}</span>
                                           <span><strong>SKU:</strong> {reject.sku_name}</span>
+                                          {reject.vendor_name ? (
+                                            <span><strong>Vendor:</strong> {reject.vendor_name}</span>
+                                          ) : null}
                                         </div>
                                         <div className="reject-numbers">
                                           {reject.authenticity_numbers.map((num, numIdx) => (
@@ -1910,6 +2230,7 @@ function ProductionCartridge() {
       {showInputModal && (
         <div className="modal-overlay" onClick={() => {
           setShowInputModal(false);
+          setInputModalVendorId('');
           setMoSearchTerm('');
           setSelectedMo(null);
         }}>
@@ -2002,6 +2323,23 @@ function ProductionCartridge() {
                 readOnly={selectedMo !== null}
               />
             </div>
+            {activeVendors.length > 0 && (
+              <div className="form-group">
+                <label>Vendor *</label>
+                <select
+                  value={inputModalVendorId}
+                  onChange={handleInputModalVendorSelect}
+                  style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                  <option value="">— Pilih vendor —</option>
+                  {activeVendors.map((v) => (
+                    <option key={v.id} value={String(v.id)}>
+                      {v.name} ({v.digit_count} digit)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="authenticity-section">
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
                 <label style={{ margin: 0 }}>Authenticity Data</label>
@@ -2133,6 +2471,7 @@ function ProductionCartridge() {
             <div className="modal-buttons">
               <button onClick={() => {
                 setShowInputModal(false);
+                setInputModalVendorId('');
                 setMoSearchTerm('');
                 setSelectedMo(null);
               }} className="cancel-button">
@@ -2148,7 +2487,10 @@ function ProductionCartridge() {
 
       {/* Input Buffer Authenticity Modal */}
       {showBufferModal && (
-        <div className="modal-overlay" onClick={() => setShowBufferModal(false)}>
+        <div className="modal-overlay" onClick={() => {
+          setShowBufferModal(false);
+          setBufferModalVendorId('');
+        }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Input Buffer Authenticity</h2>
             <div className="form-group">
@@ -2229,6 +2571,23 @@ function ProductionCartridge() {
                 readOnly={selectedBufferMo !== null}
               />
             </div>
+            {activeVendors.length > 0 && (
+              <div className="form-group">
+                <label>Vendor *</label>
+                <select
+                  value={bufferModalVendorId}
+                  onChange={(e) => setBufferModalVendorId(e.target.value)}
+                  style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                  <option value="">— Pilih vendor —</option>
+                  {activeVendors.map((v) => (
+                    <option key={v.id} value={String(v.id)}>
+                      {v.name} ({v.digit_count} digit)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="authenticity-section">
               <label>Nomor Authenticity</label>
               {bufferData.authenticityNumbers.map((number, index) => (
@@ -2258,7 +2617,10 @@ function ProductionCartridge() {
               </button>
             </div>
             <div className="modal-buttons">
-              <button onClick={() => setShowBufferModal(false)} className="cancel-button">
+              <button onClick={() => {
+                setShowBufferModal(false);
+                setBufferModalVendorId('');
+              }} className="cancel-button">
                 Cancel
               </button>
               <button onClick={handleConfirmBuffer} className="confirm-button">
@@ -2271,7 +2633,10 @@ function ProductionCartridge() {
 
       {/* Input Reject Authenticity Modal */}
       {showRejectModal && (
-        <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
+        <div className="modal-overlay" onClick={() => {
+          setShowRejectModal(false);
+          setRejectModalVendorId('');
+        }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Input Reject Authenticity</h2>
             <div className="form-group">
@@ -2352,6 +2717,23 @@ function ProductionCartridge() {
                 readOnly={selectedRejectMo !== null}
               />
             </div>
+            {activeVendors.length > 0 && (
+              <div className="form-group">
+                <label>Vendor *</label>
+                <select
+                  value={rejectModalVendorId}
+                  onChange={(e) => setRejectModalVendorId(e.target.value)}
+                  style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                  <option value="">— Pilih vendor —</option>
+                  {activeVendors.map((v) => (
+                    <option key={v.id} value={String(v.id)}>
+                      {v.name} ({v.digit_count} digit)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="authenticity-section">
               <label>Nomor Authenticity</label>
               {rejectData.authenticityNumbers.map((number, index) => (
@@ -2381,7 +2763,10 @@ function ProductionCartridge() {
               </button>
             </div>
             <div className="modal-buttons">
-              <button onClick={() => setShowRejectModal(false)} className="cancel-button">
+              <button onClick={() => {
+                setShowRejectModal(false);
+                setRejectModalVendorId('');
+              }} className="cancel-button">
                 Cancel
               </button>
               <button onClick={handleConfirmReject} className="confirm-button">
@@ -2444,6 +2829,23 @@ function ProductionCartridge() {
                 style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
               />
             </div>
+            {activeVendors.length > 0 && (
+              <div className="form-group">
+                <label>Vendor *</label>
+                <select
+                  value={editBufferData.vendorId || ''}
+                  onChange={(e) => setEditBufferData({ ...editBufferData, vendorId: e.target.value })}
+                  style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                  <option value="">— Pilih vendor —</option>
+                  {activeVendors.map((v) => (
+                    <option key={v.id} value={String(v.id)}>
+                      {v.name} ({v.digit_count} digit)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="form-group">
               <label>Authenticity Numbers *</label>
               {editBufferData.authenticityNumbers.map((num, index) => (
@@ -2550,6 +2952,23 @@ function ProductionCartridge() {
                 style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
               />
             </div>
+            {activeVendors.length > 0 && (
+              <div className="form-group">
+                <label>Vendor *</label>
+                <select
+                  value={editRejectData.vendorId || ''}
+                  onChange={(e) => setEditRejectData({ ...editRejectData, vendorId: e.target.value })}
+                  style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                  <option value="">— Pilih vendor —</option>
+                  {activeVendors.map((v) => (
+                    <option key={v.id} value={String(v.id)}>
+                      {v.name} ({v.digit_count} digit)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="form-group">
               <label>Authenticity Numbers *</label>
               {editRejectData.authenticityNumbers.map((num, index) => (

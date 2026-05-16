@@ -70,6 +70,7 @@ app.use('/api/reject', require('./routes/reject.routes'));
 app.use('/api/external', require('./routes/external.routes'));
 app.use('/api/admin', require('./routes/admin.routes').router);
 app.use('/api/pic', require('./routes/pic.routes'));
+app.use('/api/authenticity-vendors', require('./routes/authenticity-vendor.routes'));
 app.use('/api/odoo', require('./routes/odoo.routes'));
 app.use('/api/statistics', require('./routes/statistics.routes'));
 app.use('/api/reports', require('./routes/reports.routes'));
