@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"call","params":{"model":"mrp.production","method":"search_read","args":[[["name","=","PROD/MO/35542"]]],"kwargs":{"fields":["id","name","product_id","product_qty","product_uom_id","note","create_date","state","date_start","date_finished","origin"],"limit":5}},"id":1}

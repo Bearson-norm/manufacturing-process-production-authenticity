@@ -363,14 +363,14 @@ function pushIdleManufacturingForLiquidMosFromCache(opts = {}) {
         const query = `
           SELECT mo_number, sku_name, quantity, uom, note, create_date
           FROM odoo_mo_cache
-          WHERE note ILIKE $1
+          WHERE (note ILIKE $1 OR note ILIKE $2 OR note IS NULL OR BTRIM(COALESCE(note, '')) = '')
             AND sku_name NOT ILIKE '%MIXING%'
             AND sku_name NOT ILIKE '%BRAY%'
           ORDER BY create_date DESC, mo_number ASC
-          LIMIT $2
+          LIMIT $3
         `;
 
-        db.all(query, ['%liquid%', limitUsed], (err, rows) => {
+        db.all(query, ['%liquid%', '%TEAM LIQUID%', limitUsed], (err, rows) => {
           if (err) {
             console.error('❌ [pushIdle] Query odoo_mo_cache failed:', err.message);
             return resolve(summary);

@@ -839,7 +839,7 @@ router.post('/sync-mo', async (req, res) => {
           if (noteFilter === 'cartridge') {
             combinedDomain = [
               '&',
-              '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
+              '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
               ['note', 'ilike', 'cartridge'],
               ['note', 'ilike', 'cartirdge'],
               ['note', 'ilike', 'cartrige'],
@@ -859,12 +859,14 @@ router.post('/sync-mo', async (req, res) => {
               ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
               ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
               ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
+              ['note', '=', false],
+              ['note', '=', ''],
               ["create_date", ">=", startDateStr]
             ];
           } else if (noteFilter === 'device') {
             combinedDomain = [
               '&',
-              '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
+              '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
               ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
               ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
               ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
@@ -877,14 +879,18 @@ router.post('/sync-mo', async (req, res) => {
               ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
               ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
               ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
+              ['note', '=', false],
+              ['note', '=', ''],
               ["create_date", ">=", startDateStr]
             ];
           } else if (noteFilter === 'liquid') {
             combinedDomain = [
               '&',
-              '|',
+              '|', '|', '|',
               ['note', 'ilike', 'TEAM LIQUID'],
               ['note', 'ilike', 'liquid'],
+              ['note', '=', false],
+              ['note', '=', ''],
               ["create_date", ">=", startDateStr]
             ];
           } else {

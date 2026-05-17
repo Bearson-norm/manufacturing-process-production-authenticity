@@ -3729,7 +3729,7 @@ app.get('/api/odoo/mo-list', async (req, res) => {
       query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6) OR LOWER(note) LIKE LOWER($7) OR LOWER(note) LIKE LOWER($8) OR LOWER(note) LIKE LOWER($9) OR LOWER(note) LIKE LOWER($10) OR LOWER(note) LIKE LOWER($11) OR LOWER(note) LIKE LOWER($12)`;
     }
 
-    query += `)`;
+    query += ` OR (note IS NULL OR BTRIM(COALESCE(note, '')) = ''))`;
     // MO dengan note tim device (CT atau non-CT) tapi SKU cartridge → hanya untuk halaman cartridge (bukan device)
     if (noteFilter === 'device') {
       query += ` AND COALESCE(sku_name,'') NOT ILIKE '%cartridge%'`;
@@ -4406,7 +4406,7 @@ async function updateMoDataFromOdoo() {
         
         if (noteFilter === 'cartridge') {
           domainFilter = [
-            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
+            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
             ['note', 'ilike', 'cartridge'],
             ['note', 'ilike', 'cartirdge'],
             ['note', 'ilike', 'cartrige'],
@@ -4425,13 +4425,17 @@ async function updateMoDataFromOdoo() {
             ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 3'],
             ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
             ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
-            ['note', 'ilike', 'TEAM DEVICE - SHIFT 3']
+            ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
+            ['note', '=', false],
+            ['note', '=', '']
           ];
         } else if (noteFilter === 'liquid') {
           // Use OR condition to catch "TEAM LIQUID" and "liquid" variations
-          domainFilter = ['|', 
+          domainFilter = ['|', '|', '|',
             ['note', 'ilike', 'TEAM LIQUID'],  // Primary filter: TEAM LIQUID
-            ['note', 'ilike', 'liquid']         // Fallback: any note with "liquid"
+            ['note', 'ilike', 'liquid'],         // Fallback: any note with "liquid"
+            ['note', '=', false],
+            ['note', '=', '']
           ];
         } else if (noteFilter !== 'device') {
           continue;
@@ -4447,7 +4451,7 @@ async function updateMoDataFromOdoo() {
         if (noteFilter === 'cartridge') {
           combinedDomain = [
             '&',
-            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
+            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
             ['note', 'ilike', 'cartridge'],
             ['note', 'ilike', 'cartirdge'],
             ['note', 'ilike', 'cartrige'],
@@ -4467,21 +4471,25 @@ async function updateMoDataFromOdoo() {
             ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
             ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
             ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
+            ['note', '=', false],
+            ['note', '=', ''],
             ["create_date", ">=", startDateStr]
           ];
         } else if (noteFilter === 'liquid') {
           // Need '&' operator to combine OR condition with date filter
           combinedDomain = [
             '&',  // AND operator
-            '|',  // OR for TEAM LIQUID and liquid
+            '|', '|', '|',  // OR: TEAM LIQUID / liquid / empty note
             ['note', 'ilike', 'TEAM LIQUID'],
             ['note', 'ilike', 'liquid'],
+            ['note', '=', false],
+            ['note', '=', ''],
             ["create_date", ">=", startDateStr]
           ];
         } else if (noteFilter === 'device') {
           combinedDomain = [
             '&',
-            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
+            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
             ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
@@ -4494,6 +4502,8 @@ async function updateMoDataFromOdoo() {
             ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
             ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
             ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
+            ['note', '=', false],
+            ['note', '=', ''],
             ["create_date", ">=", startDateStr]
           ];
         }

@@ -24,11 +24,11 @@ router.get('/mo-list', async (req, res) => {
       const typeLower = productionType.toLowerCase();
       if (typeLower === 'liquid') {
         const b = params.length;
-        query += ` AND (note ILIKE $${b + 1} OR note ILIKE $${b + 2})`;
+        query += ` AND (note ILIKE $${b + 1} OR note ILIKE $${b + 2} OR note IS NULL OR BTRIM(COALESCE(note, '')) = '')`;
         params.push('%TEAM LIQUID%', '%liquid%');
       } else if (typeLower === 'device') {
         const b = params.length;
-        query += ` AND (note ILIKE $${b + 1} OR note ILIKE $${b + 2} OR note ILIKE $${b + 3} OR note ILIKE $${b + 4} OR note ILIKE $${b + 5} OR note ILIKE $${b + 6} OR note ILIKE $${b + 7} OR note ILIKE $${b + 8} OR note ILIKE $${b + 9} OR note ILIKE $${b + 10} OR note ILIKE $${b + 11} OR note ILIKE $${b + 12})`;
+        query += ` AND (note ILIKE $${b + 1} OR note ILIKE $${b + 2} OR note ILIKE $${b + 3} OR note ILIKE $${b + 4} OR note ILIKE $${b + 5} OR note ILIKE $${b + 6} OR note ILIKE $${b + 7} OR note ILIKE $${b + 8} OR note ILIKE $${b + 9} OR note ILIKE $${b + 10} OR note ILIKE $${b + 11} OR note ILIKE $${b + 12} OR note IS NULL OR BTRIM(COALESCE(note, '')) = '')`;
         query += ` AND COALESCE(sku_name,'') NOT ILIKE '%cartridge%'`;
         params.push(
           '%TIM DEVICE CT - SHIFT 1%',
@@ -46,7 +46,7 @@ router.get('/mo-list', async (req, res) => {
         );
       } else if (typeLower === 'cartridge') {
         const b = params.length;
-        query += ` AND (note ILIKE $${b + 1} OR note ILIKE $${b + 2} OR note ILIKE $${b + 3} OR note ILIKE $${b + 4} OR note ILIKE $${b + 5} OR note ILIKE $${b + 6} OR note ILIKE $${b + 7} OR note ILIKE $${b + 8} OR note ILIKE $${b + 9} OR note ILIKE $${b + 10} OR note ILIKE $${b + 11} OR note ILIKE $${b + 12} OR note ILIKE $${b + 13} OR note ILIKE $${b + 14} OR note ILIKE $${b + 15} OR note ILIKE $${b + 16} OR note ILIKE $${b + 17} OR note ILIKE $${b + 18} OR note ILIKE $${b + 19})`;
+        query += ` AND (note ILIKE $${b + 1} OR note ILIKE $${b + 2} OR note ILIKE $${b + 3} OR note ILIKE $${b + 4} OR note ILIKE $${b + 5} OR note ILIKE $${b + 6} OR note ILIKE $${b + 7} OR note ILIKE $${b + 8} OR note ILIKE $${b + 9} OR note ILIKE $${b + 10} OR note ILIKE $${b + 11} OR note ILIKE $${b + 12} OR note ILIKE $${b + 13} OR note ILIKE $${b + 14} OR note ILIKE $${b + 15} OR note ILIKE $${b + 16} OR note ILIKE $${b + 17} OR note ILIKE $${b + 18} OR note ILIKE $${b + 19} OR note IS NULL OR BTRIM(COALESCE(note, '')) = '')`;
         params.push(
           '%cartridge%',
           '%cartirdge%',
