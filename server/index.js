@@ -4631,8 +4631,8 @@ async function updateMoDataFromOdoo() {
 }
 
 // Setup cron jobs
-// Update MO data from Odoo every 6 hours
-cron.schedule('0 */6 * * *', () => {
+// Update MO data from Odoo every minute
+cron.schedule('* * * * *', () => {
   console.log('⏰ [Scheduler] Triggered: Update MO data from Odoo');
   updateMoDataFromOdoo();
 });
@@ -4659,7 +4659,7 @@ cron.schedule('0 * * * *', () => {
 });
 
 console.log('📅 [Scheduler] Cron jobs configured:');
-console.log('   - Update MO data from Odoo: Every 6 hours (cron: 0 */6 * * *)');
+console.log('   - Update MO data from Odoo: Every 1 minute (cron: * * * * *)');
 console.log('   - External manufacturing idle POST (liquid): Daily at 06:00 (cron: 0 6 * * *)');
 console.log('   - Full production_results sync: Every 1 hour (cron: 0 * * * *)');
 
