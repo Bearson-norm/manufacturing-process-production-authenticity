@@ -2198,8 +2198,7 @@ function ProductionLiquid() {
                                                 row={row}
                                                 isRowEmpty={isRowEmpty}
                                                 isValidated={isValidated}
-                                                isInvalid={Boolean(isInvalid)}
-                                                invalidMessage={isInvalid}
+                                                isInvalid={false}
                                                 onValidate={() => handleValidateRow(rowIdx, true)}
                                               />
                                               <button
