@@ -123,16 +123,21 @@ function ReportDashboard() {
     let total = 0;
     authenticityData.forEach(row => {
       if (row.firstAuthenticity && row.lastAuthenticity) {
-        const first = parseInt(row.firstAuthenticity) || 0;
-        const last = parseInt(row.lastAuthenticity) || 0;
-        // Calculate difference: last - first
-        total += (last - first);
+        const firstMatch = String(row.firstAuthenticity).trim().match(/\d+/);
+        const lastMatch = String(row.lastAuthenticity).trim().match(/\d+/);
+        if (firstMatch && lastMatch) {
+          const first = parseInt(firstMatch[0], 10);
+          const last = parseInt(lastMatch[0], 10);
+          if (last >= first) {
+            total += (last - first + 1);
+          }
+        }
       }
     });
     return total;
   };
 
-  // Calculate net production: (last - first) - rejects + buffers
+  // Produk Dihasilkan = (Last - First + 1) - Reject + Buffer
   const calculateNetProduction = (authenticityCount, bufferCount, rejectCount) => {
     return authenticityCount - rejectCount + bufferCount;
   };
@@ -147,16 +152,18 @@ function ReportDashboard() {
     }
     
     data.forEach(item => {
-      const key = `${item.mo_number}`;
+      const key = `${item.production_type}::${item.mo_number}`;
       if (!grouped[key]) {
         grouped[key] = {
           mo_number: item.mo_number,
           sku_name: item.sku_name,
           production_type: item.production_type,
           sessions: [],
+          buffers: item.buffers || [],
+          rejects: item.rejects || [],
           totalAuthenticity: 0,
-          totalBuffer: 0,
-          totalReject: 0
+          totalBuffer: parseInt(item.buffer_count, 10) || 0,
+          totalReject: parseInt(item.reject_count, 10) || 0
         };
       }
       
@@ -168,9 +175,7 @@ function ReportDashboard() {
           leader_name: item.leader_name,
           shift_number: item.shift_number,
           created_at: item.created_at,
-          inputs: [],
-          buffers: [],
-          rejects: []
+          inputs: []
         };
         grouped[key].sessions.push(session);
       }
@@ -180,13 +185,6 @@ function ReportDashboard() {
       // Calculate totals
       const authCount = calculateTotalAuthenticity(item.authenticity_data);
       grouped[key].totalAuthenticity += authCount;
-      
-      if (item.buffer_count) {
-        grouped[key].totalBuffer += parseInt(item.buffer_count) || 0;
-      }
-      if (item.reject_count) {
-        grouped[key].totalReject += parseInt(item.reject_count) || 0;
-      }
     });
     
     return Object.values(grouped);
@@ -204,7 +202,7 @@ function ReportDashboard() {
           <h1>Laporan Hasil Proses Manufacturing</h1>
           <div className="formula-info">
             <p><strong>Rumus Perhitungan:</strong></p>
-            <p>Produk Dihasilkan = (Last Authenticity - First Authenticity) - Reject + Buffer</p>
+            <p>Produk Dihasilkan = (Last Authenticity - First Authenticity + 1) - Reject + Buffer</p>
           </div>
         </div>
       </div>
@@ -343,6 +341,60 @@ function ReportDashboard() {
                         </div>
                       </div>
                     ))}
+
+                    {moGroup.buffers && moGroup.buffers.length > 0 && (
+                      <div className="report-buffer-card">
+                        <div className="report-buffer-card-header">
+                          <strong>Buffer Authenticity</strong>
+                          <span className="report-card-count">{moGroup.totalBuffer} item</span>
+                        </div>
+                        <div className="report-buffer-card-body">
+                          {moGroup.buffers.map((buffer) => (
+                            <div key={buffer.id} className="report-buffer-item">
+                              <div className="report-buffer-info">
+                                <span><strong>PIC:</strong> {buffer.pic}</span>
+                                <span><strong>SKU:</strong> {buffer.sku_name}</span>
+                                {buffer.vendor_name ? (
+                                  <span><strong>Vendor:</strong> {buffer.vendor_name}</span>
+                                ) : null}
+                              </div>
+                              <div className="report-buffer-numbers">
+                                {(buffer.authenticity_numbers || []).map((num, numIdx) => (
+                                  <span key={numIdx} className="report-buffer-number">{num}</span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {moGroup.rejects && moGroup.rejects.length > 0 && (
+                      <div className="report-reject-card">
+                        <div className="report-reject-card-header">
+                          <strong>Reject Authenticity</strong>
+                          <span className="report-card-count">{moGroup.totalReject} item</span>
+                        </div>
+                        <div className="report-reject-card-body">
+                          {moGroup.rejects.map((reject) => (
+                            <div key={reject.id} className="report-reject-item">
+                              <div className="report-reject-info">
+                                <span><strong>PIC:</strong> {reject.pic}</span>
+                                <span><strong>SKU:</strong> {reject.sku_name}</span>
+                                {reject.vendor_name ? (
+                                  <span><strong>Vendor:</strong> {reject.vendor_name}</span>
+                                ) : null}
+                              </div>
+                              <div className="report-reject-numbers">
+                                {(reject.authenticity_numbers || []).map((num, numIdx) => (
+                                  <span key={numIdx} className="report-reject-number">{num}</span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

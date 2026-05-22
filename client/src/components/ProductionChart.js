@@ -479,8 +479,8 @@ function ProductionChart() {
         </p>
         <ul style={{ marginTop: '8px', marginBottom: 0, paddingLeft: '24px', lineHeight: '1.8' }}>
           <li><strong>Jumlah Input:</strong> Berapa kali leader melakukan input manufacturing process</li>
-          <li><strong>Hasil Produksi (Gross):</strong> Total produksi berdasarkan authenticity (Last - First)</li>
-          <li><strong>Hasil Produksi (Net):</strong> Hasil produksi aktual (Gross - Reject + Buffer)</li>
+          <li><strong>Hasil Produksi (Gross):</strong> Total produksi berdasarkan authenticity (Last - First + 1)</li>
+          <li><strong>Hasil Produksi (Net):</strong> Hasil produksi aktual ((Last - First + 1) - Reject + Buffer)</li>
         </ul>
         <p style={{ marginTop: '8px', marginBottom: 0 }}>
           Setiap jenis produksi (Liquid, Device, Cartridge) ditampilkan dalam warna berbeda untuk memudahkan analisis.
