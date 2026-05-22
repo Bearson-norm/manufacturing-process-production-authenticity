@@ -3,6 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './Production.css';
 import { validateNumericDigitLength, buildVendorDigitMap, resolveDigitCountForVendorName } from '../utils/vendorAuthenticity';
+import {
+  calculateTotalAuthenticity,
+  countAuthenticityNumbers,
+  calculateNetProduction,
+  calculateSingleAuthenticityRow
+} from '../utils/productionCalculations';
+import MoListToolbar from './MoListToolbar';
+import MoPickerField from './MoPickerField';
+import AuthenticityRowActionCell from './AuthenticityRowActionCell';
+import { buildPaginatedSavedMoKeys } from '../utils/moListHelpers';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
@@ -105,6 +115,12 @@ function ProductionDevice() {
   const [moSearchTerm, setMoSearchTerm] = useState('');
   const [bufferMoSearchTerm, setBufferMoSearchTerm] = useState('');
   const [rejectMoSearchTerm, setRejectMoSearchTerm] = useState('');
+  const [savedMoSearch, setSavedMoSearch] = useState('');
+  const [savedMoPage, setSavedMoPage] = useState(1);
+  const [inputMoPage, setInputMoPage] = useState(1);
+  const [bufferMoPage, setBufferMoPage] = useState(1);
+  const [rejectMoPage, setRejectMoPage] = useState(1);
+  const SAVED_MO_PAGE_SIZE = 5;
   const [selectedBufferMo, setSelectedBufferMo] = useState(null);
   const [selectedRejectMo, setSelectedRejectMo] = useState(null);
   const [picList, setPicList] = useState([]);
@@ -123,6 +139,31 @@ function ProductionDevice() {
   const [editModalVendorId, setEditModalVendorId] = useState('');
 
   const vendorDigitMap = useMemo(() => buildVendorDigitMap(activeVendors), [activeVendors]);
+
+  const savedMoPagination = useMemo(
+    () => buildPaginatedSavedMoKeys(savedData, savedMoSearch, savedMoPage, SAVED_MO_PAGE_SIZE),
+    [savedData, savedMoSearch, savedMoPage]
+  );
+
+  const handleSavedMoSearchChange = (value) => {
+    setSavedMoSearch(value);
+    setSavedMoPage(1);
+  };
+
+  const handleMoSearchTermChange = (value) => {
+    setMoSearchTerm(value);
+    setInputMoPage(1);
+  };
+
+  const handleBufferMoSearchTermChange = (value) => {
+    setBufferMoSearchTerm(value);
+    setBufferMoPage(1);
+  };
+
+  const handleRejectMoSearchTermChange = (value) => {
+    setRejectMoSearchTerm(value);
+    setRejectMoPage(1);
+  };
 
   const getVendorNameById = (idStr) => {
     if (idStr === undefined || idStr === null || String(idStr).trim() === '') return null;
@@ -277,6 +318,7 @@ function ProductionDevice() {
     setShowInputModal(true);
     setInputModalVendorId('');
     setMoSearchTerm('');
+    setInputMoPage(1);
     // Fetch MO list from cache (filtered by production type) when modal opens
     try {
       const response = await axios.get('/api/odoo/mo-list', {
@@ -326,6 +368,7 @@ function ProductionDevice() {
     setShowBufferModal(true);
     setBufferModalVendorId('');
     setBufferMoSearchTerm('');
+    setBufferMoPage(1);
     setSelectedBufferMo(null);
     // Fetch MO list from cache (filtered by production type) when modal opens
     try {
@@ -350,6 +393,7 @@ function ProductionDevice() {
     setShowRejectModal(true);
     setRejectModalVendorId('');
     setRejectMoSearchTerm('');
+    setRejectMoPage(1);
     setSelectedRejectMo(null);
     // Fetch MO list from cache (filtered by production type) when modal opens
     try {
@@ -1732,6 +1776,20 @@ function ProductionDevice() {
           {savedData.length === 0 ? (
             <p className="no-data">No data available</p>
           ) : (
+            <>
+              <MoListToolbar
+                searchTerm={savedMoSearch}
+                onSearchChange={handleSavedMoSearchChange}
+                page={savedMoPagination.safePage}
+                onPageChange={setSavedMoPage}
+                totalItems={savedMoPagination.totalItems}
+                totalPages={savedMoPagination.totalPages}
+              />
+              {savedMoPagination.totalItems === 0 ? (
+                <div className="saved-data-empty-filter">
+                  Tidak ada MO ditemukan{savedMoSearch ? ` untuk "${savedMoSearch}"` : ''}
+                </div>
+              ) : (
             <div className="data-items">
               {savedData.map((session) => {
                 // Group inputs by MO Number to check status
@@ -1742,6 +1800,11 @@ function ProductionDevice() {
                   }
                   groupedByMo[input.mo_number].push(input);
                 });
+
+                const sessionHasVisibleMo = Object.keys(groupedByMo).some((moNumber) =>
+                  savedMoPagination.pageKeySet.has(`${session.session_id}::${moNumber}`)
+                );
+                if (!sessionHasVisibleMo) return null;
 
                 // Check if all MO groups are completed
                 const allMoGroupsCompleted = Object.entries(groupedByMo).every(([moNumber, inputs]) => 
@@ -1819,6 +1882,9 @@ function ProductionDevice() {
                     
                     <div className="inputs-container">
                       {Object.entries(groupedByMo).map(([moNumber, inputs], moIdx) => {
+                        if (!savedMoPagination.pageKeySet.has(`${session.session_id}::${moNumber}`)) {
+                          return null;
+                        }
                         // Collect all authenticity data from all inputs in this MO group
                         const allAuthenticityData = [];
                         const activeInputs = [];
@@ -1861,6 +1927,11 @@ function ProductionDevice() {
                         // Check if this MO group is being edited
                         const isEditing = editingMoNumber === moNumber && editingSessionId === session.session_id;
 
+                        const totalAuthenticity = calculateTotalAuthenticity(allAuthenticityData);
+                        const totalBuffer = countAuthenticityNumbers(bufferDataMap[moNumber] || []);
+                        const totalReject = countAuthenticityNumbers(rejectDataMap[moNumber] || []);
+                        const totalHasil = calculateNetProduction(totalAuthenticity, totalBuffer, totalReject);
+
                         return (
                           <div key={moNumber} className="mo-group-card">
                             <div className="mo-group-header" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -1876,6 +1947,20 @@ function ProductionDevice() {
                               <span className={`status-badge ${moGroupStatus}`} style={{ marginLeft: 'auto' }}>
                                 {moGroupStatus === 'completed' ? 'Completed' : 'Active'}
                               </span>
+                            </div>
+                            <div className="mo-calculation-summary">
+                              <div className="mo-calculation-item">
+                                <span className="mo-calculation-label">Hasil</span>
+                                <span className="mo-calculation-value net">{totalHasil}</span>
+                              </div>
+                              <div className="mo-calculation-item">
+                                <span className="mo-calculation-label">Reject</span>
+                                <span className="mo-calculation-value reject">{totalReject}</span>
+                              </div>
+                              <div className="mo-calculation-item">
+                                <span className="mo-calculation-label">Buffer</span>
+                                <span className="mo-calculation-value buffer">{totalBuffer}</span>
+                              </div>
                             </div>
                             <div className="input-card">
                               <div className="input-card-header">
@@ -1984,40 +2069,13 @@ function ProductionDevice() {
                                                 }}
                                                 style={{ padding: '6px' }}
                                               />
-                                              {isValidated ? (
-                                                <div
-                                                  className="validation-status-indicator"
-                                                  style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    padding: '6px 12px',
-                                                    background: '#10b981',
-                                                    color: 'white',
-                                                    borderRadius: '4px',
-                                                    fontSize: '14px',
-                                                    fontWeight: '500',
-                                                    minWidth: '80px'
-                                                  }}
-                                                  title="Validated"
-                                                >
-                                                  ✓ Valid
-                                                </div>
-                                              ) : (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => !isRowEmpty && handleValidateRow(rowIdx, true)}
-                                                  className={`validate-button ${isRowEmpty ? 'hidden' : ''}`}
-                                                  style={{
-                                                    background: '#3b82f6',
-                                                    color: 'white'
-                                                  }}
-                                                  title="Validate row"
-                                                  disabled={isRowEmpty}
-                                                >
-                                                  Validate
-                                                </button>
-                                              )}
+                                              <AuthenticityRowActionCell
+                                                row={row}
+                                                isRowEmpty={isRowEmpty}
+                                                isValidated={isValidated}
+                                                isInvalid={false}
+                                                onValidate={() => handleValidateRow(rowIdx, true)}
+                                              />
                                               <button
                                                 type="button"
                                                 onClick={() => handleDeleteEditRow(rowIdx)}
@@ -2056,14 +2114,27 @@ function ProductionDevice() {
                                       </div>
                                       <div className="authenticity-list">
                                         <strong>Authenticity Data:</strong>
-                                        {allAuthenticityData.map((row, rowIdx) => (
+                                        {allAuthenticityData.map((row, rowIdx) => {
+                                          const rowHasil = calculateSingleAuthenticityRow(row);
+                                          return (
                                           <div key={rowIdx} className="authenticity-row">
                                             <span>First: {row.firstAuthenticity}</span>
                                             <span>Last: {row.lastAuthenticity}</span>
                                             <span>Roll: {row.rollNumber}</span>
                                             {row.vendorName ? <span>Vendor: {row.vendorName}</span> : null}
+                                            <span
+                                              className="authenticity-row-hasil"
+                                              title={
+                                                rowHasil > 0
+                                                  ? `(${row.lastAuthenticity} - ${row.firstAuthenticity} + 1) = ${rowHasil}`
+                                                  : 'Last - First + 1'
+                                              }
+                                            >
+                                              Hasil: {rowHasil}
+                                            </span>
                                           </div>
-                                        ))}
+                                          );
+                                        })}
                                       </div>
                                     </>
                                   )}
@@ -2174,6 +2245,8 @@ function ProductionDevice() {
                 );
               })}
             </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -2261,43 +2334,17 @@ function ProductionDevice() {
             </div>
             <div className="form-group">
               <label>MO Number *</label>
-              <input
-                type="text"
-                list="mo-datalist"
-                value={moSearchTerm}
-                onChange={(e) => {
-                  setMoSearchTerm(e.target.value);
-                  // Auto-select if exact match
-                  const exactMatch = moList.find(mo => 
-                    mo.mo_number === e.target.value || 
-                    `${mo.mo_number} - ${mo.sku_name}` === e.target.value
-                  );
-                  if (exactMatch) {
-                    handleMoChange(exactMatch.mo_number);
-                  } else {
-                    setSelectedMo(null);
-                    setFormData({ ...formData, moNumber: '', skuName: '' });
-                  }
-                }}
-                placeholder="Type to search MO Number or SKU Name..."
-                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              <MoPickerField
+                moList={moList}
+                searchTerm={moSearchTerm}
+                onSearchChange={handleMoSearchTermChange}
+                selectedMoNumber={formData.moNumber}
+                onSelect={(mo) => handleMoChange(mo.mo_number)}
+                page={inputMoPage}
+                onPageChange={setInputMoPage}
               />
-              <datalist id="mo-datalist">
-                {moList
-                  .filter(mo => 
-                    moSearchTerm === '' ||
-                    mo.mo_number.toLowerCase().includes(moSearchTerm.toLowerCase()) ||
-                    mo.sku_name.toLowerCase().includes(moSearchTerm.toLowerCase())
-                  )
-                  .map((mo) => (
-                    <option key={mo.mo_number} value={mo.mo_number}>
-                      {mo.mo_number} - {mo.sku_name}
-                    </option>
-                  ))
-                }
-              </datalist>
               <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
-                Input MO yang mau diinput
+                Pilih MO dari daftar. Gunakan kotak pencarian untuk menyaring banyak MO.
               </small>
               {selectedMo && (
                 <div className="mo-info-display">
@@ -2394,59 +2441,14 @@ function ProductionDevice() {
                       }}
                       onKeyDown={(e) => handleScannerKeyDown(e, index, 'rollNumber')}
                     />
-                    {isValidated ? (
-                      <div
-                        className="validation-status-indicator"
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '8px 16px',
-                          background: '#10b981',
-                          color: 'white',
-                          borderRadius: '4px',
-                          fontSize: '14px',
-                          fontWeight: '500',
-                          minWidth: '100px'
-                        }}
-                        title="Validated"
-                      >
-                        ✓ Valid
-                      </div>
-                    ) : isInvalid ? (
-                      <div
-                        className="validation-status-indicator"
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '8px 16px',
-                          background: '#ef4444',
-                          color: 'white',
-                          borderRadius: '4px',
-                          fontSize: '14px',
-                          fontWeight: '500',
-                          minWidth: '100px'
-                        }}
-                        title={isInvalid}
-                      >
-                        ✗ Invalid
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => !isRowEmpty && handleValidateRow(index, false)}
-                        className={`validate-button ${isRowEmpty ? 'hidden' : ''}`}
-                        style={{
-                          background: '#3b82f6',
-                          color: 'white'
-                        }}
-                        title="Validate row"
-                        disabled={isRowEmpty}
-                      >
-                        Validate
-                      </button>
-                    )}
+                    <AuthenticityRowActionCell
+                      row={row}
+                      isRowEmpty={isRowEmpty}
+                      isValidated={isValidated}
+                      isInvalid={Boolean(isInvalid)}
+                      invalidMessage={isInvalid}
+                      onValidate={() => handleValidateRow(index, false)}
+                    />
                     <button
                       type="button"
                       onClick={() => handleDeleteRow(index)}
@@ -2512,41 +2514,15 @@ function ProductionDevice() {
             </div>
             <div className="form-group">
               <label>MO Number *</label>
-              <input
-                type="text"
-                list="mo-datalist-buffer-device"
-                value={bufferMoSearchTerm}
-                onChange={(e) => {
-                  setBufferMoSearchTerm(e.target.value);
-                  // Auto-select if exact match
-                  const exactMatch = moList.find(mo => 
-                    mo.mo_number === e.target.value || 
-                    `${mo.mo_number} - ${mo.sku_name}` === e.target.value
-                  );
-                  if (exactMatch) {
-                    handleBufferMoChange(exactMatch.mo_number);
-                  } else {
-                    setSelectedBufferMo(null);
-                    setBufferData({ ...bufferData, moNumber: '', skuName: '' });
-                  }
-                }}
-                placeholder="Type to search MO Number or SKU Name..."
-                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              <MoPickerField
+                moList={moList}
+                searchTerm={bufferMoSearchTerm}
+                onSearchChange={handleBufferMoSearchTermChange}
+                selectedMoNumber={bufferData.moNumber}
+                onSelect={(mo) => handleBufferMoChange(mo.mo_number)}
+                page={bufferMoPage}
+                onPageChange={setBufferMoPage}
               />
-              <datalist id="mo-datalist-buffer-device">
-                {moList
-                  .filter(mo => 
-                    bufferMoSearchTerm === '' ||
-                    mo.mo_number.toLowerCase().includes(bufferMoSearchTerm.toLowerCase()) ||
-                    mo.sku_name.toLowerCase().includes(bufferMoSearchTerm.toLowerCase())
-                  )
-                  .map((mo) => (
-                    <option key={mo.mo_number} value={mo.mo_number}>
-                      {mo.mo_number} - {mo.sku_name}
-                    </option>
-                  ))
-                }
-              </datalist>
               {selectedBufferMo && (
                 <div className="mo-info-display">
                   <p><strong>SKU Name:</strong> {selectedBufferMo.sku_name}</p>
@@ -2658,41 +2634,15 @@ function ProductionDevice() {
             </div>
             <div className="form-group">
               <label>MO Number *</label>
-              <input
-                type="text"
-                list="mo-datalist-reject-device"
-                value={rejectMoSearchTerm}
-                onChange={(e) => {
-                  setRejectMoSearchTerm(e.target.value);
-                  // Auto-select if exact match
-                  const exactMatch = moList.find(mo => 
-                    mo.mo_number === e.target.value || 
-                    `${mo.mo_number} - ${mo.sku_name}` === e.target.value
-                  );
-                  if (exactMatch) {
-                    handleRejectMoChange(exactMatch.mo_number);
-                  } else {
-                    setSelectedRejectMo(null);
-                    setRejectData({ ...rejectData, moNumber: '', skuName: '' });
-                  }
-                }}
-                placeholder="Type to search MO Number or SKU Name..."
-                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+              <MoPickerField
+                moList={moList}
+                searchTerm={rejectMoSearchTerm}
+                onSearchChange={handleRejectMoSearchTermChange}
+                selectedMoNumber={rejectData.moNumber}
+                onSelect={(mo) => handleRejectMoChange(mo.mo_number)}
+                page={rejectMoPage}
+                onPageChange={setRejectMoPage}
               />
-              <datalist id="mo-datalist-reject-device">
-                {moList
-                  .filter(mo => 
-                    rejectMoSearchTerm === '' ||
-                    mo.mo_number.toLowerCase().includes(rejectMoSearchTerm.toLowerCase()) ||
-                    mo.sku_name.toLowerCase().includes(rejectMoSearchTerm.toLowerCase())
-                  )
-                  .map((mo) => (
-                    <option key={mo.mo_number} value={mo.mo_number}>
-                      {mo.mo_number} - {mo.sku_name}
-                    </option>
-                  ))
-                }
-              </datalist>
               {selectedRejectMo && (
                 <div className="mo-info-display">
                   <p><strong>SKU Name:</strong> {selectedRejectMo.sku_name}</p>
