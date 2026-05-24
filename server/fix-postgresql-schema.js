@@ -36,6 +36,7 @@ async function fixSchema() {
       { name: 'quantity', type: 'REAL', default: null },
       { name: 'uom', type: 'TEXT', default: null },
       { name: 'note', type: 'TEXT', default: null },
+      { name: 'team_name', type: 'TEXT', default: null },
       { name: 'create_date', type: 'TIMESTAMP', default: null },
       { name: 'last_updated', type: 'TIMESTAMP', default: 'CURRENT_TIMESTAMP' },
     ];

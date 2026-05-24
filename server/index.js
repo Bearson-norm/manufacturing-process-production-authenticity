@@ -5,8 +5,13 @@ const cron = require('node-cron');
 const PORT = process.env.PORT || 1234;
 
 // Initialize database tables using PostgreSQL
-initializeTables().then(() => {
+initializeTables().then(async () => {
   console.log('\n✅ Database initialized and ready');
+  try {
+    await backfillMoCacheTeamNames(pool);
+  } catch (backfillErr) {
+    console.warn('⚠️  team_name backfill skipped:', backfillErr.message);
+  }
   console.log('🚀 Server starting...\n');
 }).catch(err => {
   console.error('\n❌ Failed to initialize database:', err);
@@ -25,6 +30,14 @@ const { db, pool } = require('./database');
 const { sendToExternalAPIWithUrl, sendToExternalAPI } = require('./services/external-api.service');
 const { pushIdleManufacturingForLiquidMosFromCache } = require('./services/liquid-external-manufacturing.service');
 const { apiKeyAuth } = require('./middleware/auth.middleware');
+const {
+  ODOO_MO_SYNC_FIELDS,
+  ODOO_MO_CACHE_UPSERT_SQL,
+  resolveTeamName,
+  mapOdooMoToCacheParams,
+  backfillMoCacheTeamNames,
+  buildCachedMoListQuery,
+} = require('./utils/odoo-mo.helpers');
 
 // Helper function to parse authenticity data
 function parseAuthenticityData(row) {
@@ -3698,100 +3711,22 @@ app.post('/api/admin/update-production-results', async (req, res) => {
 
 // Odoo API Integration - Get MO data filtered by production type from cache
 app.get('/api/odoo/mo-list', async (req, res) => {
-  const { productionType } = req.query; // 'liquid', 'device', or 'cartridge'
-  
+  const { productionType } = req.query;
+
   if (!productionType) {
     return res.status(400).json({ error: 'productionType is required (liquid, device, or cartridge)' });
   }
 
-  // Map production type to note filter (case-insensitive search)
-  const noteFilter = productionType.toLowerCase();
-  
-  if (!['cartridge', 'liquid', 'device'].includes(noteFilter)) {
+  const typeLower = productionType.toLowerCase();
+  if (!['cartridge', 'liquid', 'device'].includes(typeLower)) {
     return res.status(400).json({ error: 'Invalid productionType. Must be: liquid, device, or cartridge' });
   }
 
   try {
-    // Get MO data from cache filtered by note and create_date (last 30 days)
-    // Use case-insensitive search for note field with typo tolerance
-    // Note: PostgreSQL LOWER() function for case-insensitive comparison
-    let query = `
-      SELECT mo_number, sku_name, quantity, uom, note, create_date
-      FROM odoo_mo_cache
-      WHERE (LOWER(note) LIKE LOWER($1)`;
-    
-    // Add OR conditions for variations
-    if (noteFilter === 'cartridge') {
-      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6) OR LOWER(note) LIKE LOWER($7) OR LOWER(note) LIKE LOWER($8) OR LOWER(note) LIKE LOWER($9) OR LOWER(note) LIKE LOWER($10) OR LOWER(note) LIKE LOWER($11) OR LOWER(note) LIKE LOWER($12) OR LOWER(note) LIKE LOWER($13) OR LOWER(note) LIKE LOWER($14) OR LOWER(note) LIKE LOWER($15) OR LOWER(note) LIKE LOWER($16) OR LOWER(note) LIKE LOWER($17) OR LOWER(note) LIKE LOWER($18) OR LOWER(note) LIKE LOWER($19)`;
-    } else if (noteFilter === 'liquid') {
-      query += ` OR LOWER(note) LIKE LOWER($2)`;
-    } else if (noteFilter === 'device') {
-      query += ` OR LOWER(note) LIKE LOWER($2) OR LOWER(note) LIKE LOWER($3) OR LOWER(note) LIKE LOWER($4) OR LOWER(note) LIKE LOWER($5) OR LOWER(note) LIKE LOWER($6) OR LOWER(note) LIKE LOWER($7) OR LOWER(note) LIKE LOWER($8) OR LOWER(note) LIKE LOWER($9) OR LOWER(note) LIKE LOWER($10) OR LOWER(note) LIKE LOWER($11) OR LOWER(note) LIKE LOWER($12)`;
-    }
+    const { query, params, filterDescription } = buildCachedMoListQuery(typeLower);
+    console.log(`🔍 [MO List] Querying cache for ${productionType} (${filterDescription})`);
 
-    query += ` OR (note IS NULL OR BTRIM(COALESCE(note, '')) = ''))`;
-    // MO dengan note tim device (CT atau non-CT) tapi SKU cartridge → hanya untuk halaman cartridge (bukan device)
-    if (noteFilter === 'device') {
-      query += ` AND COALESCE(sku_name,'') NOT ILIKE '%cartridge%'`;
-    }
-
-    query += `
-        AND create_date::TIMESTAMP >= NOW() - INTERVAL '30 days'
-      ORDER BY create_date DESC
-      LIMIT 1000
-    `;
-
-    // Search pattern with wildcards for case-insensitive match
-    const searchPattern = `%${noteFilter}%`;
-    
-    // Additional patterns for variations
-    let queryParams = [searchPattern];
-    if (noteFilter === 'cartridge') {
-      queryParams.push(
-        '%cartirdge%',
-        '%cartrige%',
-        '%cartrdige%',
-        '%TIM CARTRIDGE - SHIFT 1%',
-        '%TIM CARTRIDGE - SHIFT 2%',
-        '%TIM CARTRIDGE - SHIFT 3%',
-        '%TIM DEVICE CT - SHIFT 1%',
-        '%TIM DEVICE CT - SHIFT 2%',
-        '%TIM DEVICE CT - SHIFT 3%',
-        '%TIM DEVICE - SHIFT 1%',
-        '%TIM DEVICE - SHIFT 2%',
-        '%TIM DEVICE - SHIFT 3%',
-        '%TEAM DEVICE CT - SHIFT 1%',
-        '%TEAM DEVICE CT - SHIFT 2%',
-        '%TEAM DEVICE CT - SHIFT 3%',
-        '%TEAM DEVICE - SHIFT 1%',
-        '%TEAM DEVICE - SHIFT 2%',
-        '%TEAM DEVICE - SHIFT 3%'
-      );
-      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: cartridge + TIM/TEAM CARTRIDGE + TIM/TEAM DEVICE CT / DEVICE SHIFT 1/2/3`);
-    } else if (noteFilter === 'liquid') {
-      queryParams.push('%TEAM LIQUID%');
-      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TEAM LIQUID, liquid`);
-    } else if (noteFilter === 'device') {
-      queryParams = [
-        '%TIM DEVICE CT - SHIFT 1%',
-        '%TIM DEVICE CT - SHIFT 2%',
-        '%TIM DEVICE CT - SHIFT 3%',
-        '%TIM DEVICE - SHIFT 1%',
-        '%TIM DEVICE - SHIFT 2%',
-        '%TIM DEVICE - SHIFT 3%',
-        '%TEAM DEVICE CT - SHIFT 1%',
-        '%TEAM DEVICE CT - SHIFT 2%',
-        '%TEAM DEVICE CT - SHIFT 3%',
-        '%TEAM DEVICE - SHIFT 1%',
-        '%TEAM DEVICE - SHIFT 2%',
-        '%TEAM DEVICE - SHIFT 3%'
-      ];
-      console.log(`🔍 [MO List] Querying cache for ${productionType} with patterns: TIM/TEAM DEVICE CT + TIM/TEAM DEVICE - SHIFT 1/2/3`);
-    } else {
-      console.log(`🔍 [MO List] Querying cache for ${productionType} with pattern: ${searchPattern}`);
-    }
-
-    db.all(query, queryParams, (err, rows) => {
+    db.all(query, params, (err, rows) => {
       if (err) {
         console.error('Error fetching MO data from cache:', err);
         return res.status(500).json({
@@ -3816,7 +3751,8 @@ app.get('/api/odoo/mo-list', async (req, res) => {
         quantity: row.quantity || 0,
         uom: row.uom || '',
         create_date: row.create_date,
-        note: row.note || ''
+        note: row.note || '',
+        team_name: row.team_name || ''
       }));
 
       console.log(`✅ [MO List] Found ${moList.length} MO records for ${productionType} from cache`);
@@ -3824,7 +3760,8 @@ app.get('/api/odoo/mo-list', async (req, res) => {
       res.json({
         success: true,
         count: moList.length,
-        data: moList
+        data: moList,
+        filter: filterDescription
       });
     });
   } catch (error) {
@@ -4025,10 +3962,10 @@ app.get('/api/odoo/debug/query-mo', async (req, res) => {
           "model": "mrp.production",
           "method": "search_read",
           "args": [[["name", "=", moNumber]]],
-          "kwargs": {
-            "fields": ["id", "name", "product_id", "product_qty", "product_uom_id", "note", "create_date", "state"],
-            "limit": 1
-          }
+            "kwargs": {
+              "fields": [...ODOO_MO_SYNC_FIELDS, "state"],
+              "limit": 1
+            }
         }
       };
       
@@ -4092,6 +4029,7 @@ app.get('/api/odoo/debug/query-mo', async (req, res) => {
           quantity: mo.product_qty || 0,
           uom: mo.product_uom_id ? mo.product_uom_id[1] : '',
           note: mo.note || '',
+          team_name: resolveTeamName(mo),
           create_date: mo.create_date,
           state: mo.state,
           raw_data: mo
@@ -4519,7 +4457,7 @@ async function updateMoDataFromOdoo() {
             "method": "search_read",
             "args": [combinedDomain],
             "kwargs": {
-              "fields": ["id", "name", "product_id", "product_qty", "product_uom_id", "note", "create_date"],
+              "fields": ODOO_MO_SYNC_FIELDS,
               "limit": 1000,
               "order": "create_date desc"
             }
@@ -4584,27 +4522,9 @@ async function updateMoDataFromOdoo() {
               chunk.map(
                 (mo) =>
                   new Promise((resolve, reject) => {
-                    const moCreateDate = mo.create_date || new Date().toISOString();
-                    const productName = mo.product_id ? mo.product_id[1] : 'N/A';
-                    const productQty = mo.product_qty || 0;
-                    const productUom = mo.product_uom_id ? mo.product_uom_id[1] : '';
-                    const moNote = mo.note || '';
-
                     db.run(
-                      `INSERT INTO odoo_mo_cache 
-                 (mo_number, sku_name, quantity, uom, note, create_date, fetched_at, last_updated) 
-                 VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                 ON CONFLICT (mo_number) DO UPDATE SET 
-                   sku_name = $2, quantity = $3, uom = $4, note = $5, 
-                   create_date = $6, last_updated = CURRENT_TIMESTAMP`,
-                      [
-                        mo.name,
-                        productName,
-                        productQty,
-                        productUom,
-                        moNote,
-                        moCreateDate
-                      ],
+                      ODOO_MO_CACHE_UPSERT_SQL,
+                      mapOdooMoToCacheParams(mo),
                       function (insertErr) {
                         if (insertErr) {
                           reject(insertErr);
@@ -4627,6 +4547,11 @@ async function updateMoDataFromOdoo() {
     }
 
     console.log(`✅ [Scheduler] MO data update completed. Total updated: ${totalUpdated}`);
+    try {
+      await backfillMoCacheTeamNames(pool);
+    } catch (backfillErr) {
+      console.warn('⚠️  [Scheduler] team_name backfill failed:', backfillErr.message);
+    }
   });
 }
 

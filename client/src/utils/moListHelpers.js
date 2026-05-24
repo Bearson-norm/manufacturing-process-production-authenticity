@@ -1,20 +1,86 @@
 export const DEFAULT_MO_PAGE_SIZE = 10;
 
-export function filterMoListBySearch(list, term) {
+export function getMoTeamName(mo) {
+  return String(mo?.team_name ?? '').trim();
+}
+
+export function getMoNote(mo) {
+  return String(mo?.note ?? '').trim();
+}
+
+function stripMoNoteText(note) {
+  return String(note ?? '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function matchesCartridgeNote(note) {
+  const text = stripMoNoteText(note).toUpperCase();
+  if (!text) {
+    return false;
+  }
+
+  const cartridgeWords = [
+    'CARTRIDGE',
+    'CARTIRDGE',
+    'CARTRDIGE',
+    'CARTRIGE',
+    'CARTDIGE',
+  ];
+  const hasCartridgeWord = cartridgeWords.some((word) => text.includes(word));
+
+  const hasTeamCartridge =
+    (text.includes('TEAM') || text.includes('TIM')) &&
+    (hasCartridgeWord || text.includes(' DEVICE CT'));
+
+  const hasCtShift =
+    text.includes(' DEVICE CT - SHIFT ') ||
+    (text.includes(' CT - SHIFT ') && (text.includes('TEAM') || text.includes('TIM')));
+
+  return hasTeamCartridge || hasCtShift || hasCartridgeWord;
+}
+
+export function getMoDisplayTag(mo, productionType = 'liquid') {
+  if (productionType === 'cartridge') {
+    return getMoNote(mo);
+  }
+  return getMoTeamName(mo);
+}
+
+export function getMoDisplayTagLabel(productionType = 'liquid') {
+  return productionType === 'cartridge' ? 'Note' : 'Team';
+}
+
+export function formatMoSearchLabel(mo, productionType = 'liquid') {
+  if (!mo) return '';
+  const tag = getMoDisplayTag(mo, productionType);
+  const base = `${mo.mo_number} - ${mo.sku_name || 'N/A'}`;
+  return tag ? `${base} · ${tag}` : base;
+}
+
+export function filterMoListBySearch(list, term, productionType = 'liquid') {
   const t = (term || '').toLowerCase();
   return (list || []).filter((mo) => {
     const num = String(mo.mo_number ?? '');
     const sku = String(mo.sku_name ?? '');
-    return t === '' || num.toLowerCase().includes(t) || sku.toLowerCase().includes(t);
+    const tag = getMoDisplayTag(mo, productionType).toLowerCase();
+    return (
+      t === '' ||
+      num.toLowerCase().includes(t) ||
+      sku.toLowerCase().includes(t) ||
+      tag.includes(t)
+    );
   });
 }
 
-export function matchesMoSearch(moNumber, skuName, term) {
+export function matchesMoSearch(moNumber, skuName, term, teamName = '') {
   const t = (term || '').toLowerCase();
   if (t === '') return true;
   const num = String(moNumber ?? '').toLowerCase();
   const sku = String(skuName ?? '').toLowerCase();
-  return num.includes(t) || sku.includes(t);
+  const team = String(teamName ?? '').toLowerCase();
+  return num.includes(t) || sku.includes(t) || team.includes(t);
 }
 
 export function paginateList(items, page, pageSize = DEFAULT_MO_PAGE_SIZE) {

@@ -420,10 +420,21 @@ async function initializeTables() {
         quantity REAL,
         uom TEXT,
         note TEXT,
+        team_name TEXT,
         create_date TIMESTAMP,
         fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
+    `);
+
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_schema = 'public' AND table_name = 'odoo_mo_cache' AND column_name = 'team_name') THEN
+          ALTER TABLE odoo_mo_cache ADD COLUMN team_name TEXT;
+        END IF;
+      END $$;
     `);
 
     // Receiver Logs table (for external API receiver endpoint)

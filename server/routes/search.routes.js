@@ -16,9 +16,9 @@ router.get('/mo', (req, res) => {
   const searchTerm = `%${q.trim()}%`;
   
   db.all(
-    `SELECT mo_number, sku_name, quantity, uom, note, create_date 
+    `SELECT mo_number, sku_name, quantity, uom, note, team_name, create_date 
      FROM odoo_mo_cache 
-     WHERE mo_number ILIKE $1 OR sku_name ILIKE $1
+     WHERE mo_number ILIKE $1 OR sku_name ILIKE $1 OR team_name ILIKE $1
      ORDER BY mo_number ASC
      LIMIT 50`,
     [searchTerm],

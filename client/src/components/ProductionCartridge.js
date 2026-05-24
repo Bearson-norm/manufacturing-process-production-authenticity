@@ -11,8 +11,9 @@ import {
 } from '../utils/productionCalculations';
 import MoListToolbar from './MoListToolbar';
 import MoPickerField from './MoPickerField';
+import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
-import { buildPaginatedSavedMoKeys } from '../utils/moListHelpers';
+import { buildPaginatedSavedMoKeys, formatMoSearchLabel, matchesCartridgeNote } from '../utils/moListHelpers';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
@@ -336,11 +337,12 @@ function ProductionCartridge() {
         
         // Filter out SKU names that start with "MIXING" and MO numbers that have already been used
         const filteredMoData = moData.filter(mo => {
-          // Exclude MIXING SKU
+          if (!matchesCartridgeNote(mo.note)) {
+            return false;
+          }
           if (mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING')) {
             return false;
           }
-          // Exclude MO numbers that have already been input
           if (usedMoNumbers.has(mo.mo_number)) {
             return false;
           }
@@ -378,6 +380,9 @@ function ProductionCartridge() {
         const moData = response.data.data || [];
         // Filter out SKU names that start with "MIXING"
         const filteredMoData = moData.filter(mo => {
+          if (!matchesCartridgeNote(mo.note)) {
+            return false;
+          }
           return !(mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING'));
         });
         setMoList(filteredMoData);
@@ -403,6 +408,9 @@ function ProductionCartridge() {
         const moData = response.data.data || [];
         // Filter out SKU names that start with "MIXING"
         const filteredMoData = moData.filter(mo => {
+          if (!matchesCartridgeNote(mo.note)) {
+            return false;
+          }
           return !(mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING'));
         });
         setMoList(filteredMoData);
@@ -1206,33 +1214,51 @@ function ProductionCartridge() {
     }
   };
 
-  const handleMoChange = (moNumber) => {
-    const mo = moList.find(m => m.mo_number === moNumber);
-    setSelectedMo(mo || null);
+  const handleMoChange = (mo) => {
+    if (!mo) {
+      setSelectedMo(null);
+      setMoSearchTerm('');
+      setFormData({ ...formData, moNumber: '', skuName: '' });
+      return;
+    }
+    setSelectedMo(mo);
+    setMoSearchTerm(formatMoSearchLabel(mo, 'cartridge'));
     setFormData({
       ...formData,
-      moNumber: moNumber || '',
-      skuName: mo ? mo.sku_name : ''
+      moNumber: mo.mo_number,
+      skuName: mo.sku_name || ''
     });
   };
 
-  const handleBufferMoChange = (moNumber) => {
-    const mo = moList.find(m => m.mo_number === moNumber);
-    setSelectedBufferMo(mo || null);
+  const handleBufferMoChange = (mo) => {
+    if (!mo) {
+      setSelectedBufferMo(null);
+      setBufferMoSearchTerm('');
+      setBufferData({ ...bufferData, moNumber: '', skuName: '' });
+      return;
+    }
+    setSelectedBufferMo(mo);
+    setBufferMoSearchTerm(formatMoSearchLabel(mo, 'cartridge'));
     setBufferData({
       ...bufferData,
-      moNumber: moNumber || '',
-      skuName: mo ? mo.sku_name : ''
+      moNumber: mo.mo_number,
+      skuName: mo.sku_name || ''
     });
   };
 
-  const handleRejectMoChange = (moNumber) => {
-    const mo = moList.find(m => m.mo_number === moNumber);
-    setSelectedRejectMo(mo || null);
+  const handleRejectMoChange = (mo) => {
+    if (!mo) {
+      setSelectedRejectMo(null);
+      setRejectMoSearchTerm('');
+      setRejectData({ ...rejectData, moNumber: '', skuName: '' });
+      return;
+    }
+    setSelectedRejectMo(mo);
+    setRejectMoSearchTerm(formatMoSearchLabel(mo, 'cartridge'));
     setRejectData({
       ...rejectData,
-      moNumber: moNumber || '',
-      skuName: mo ? mo.sku_name : ''
+      moNumber: mo.mo_number,
+      skuName: mo.sku_name || ''
     });
   };
 
@@ -2334,20 +2360,15 @@ function ProductionCartridge() {
                 searchTerm={moSearchTerm}
                 onSearchChange={handleMoSearchTermChange}
                 selectedMoNumber={formData.moNumber}
-                onSelect={(mo) => handleMoChange(mo.mo_number)}
+                onSelect={handleMoChange}
                 page={inputMoPage}
                 onPageChange={setInputMoPage}
+                productionType="cartridge"
               />
               <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
                 Pilih MO dari daftar. Gunakan kotak pencarian untuk menyaring banyak MO.
               </small>
-              {selectedMo && (
-                <div className="mo-info-display">
-                  <p><strong>SKU Name:</strong> {selectedMo.sku_name}</p>
-                  <p><strong>Quantity:</strong> {selectedMo.quantity} {selectedMo.uom}</p>
-                  <p><strong>Created:</strong> {formatDateIndonesia(selectedMo.create_date)}</p>
-                </div>
-              )}
+              <MoInfoDisplay mo={selectedMo} formatDateIndonesia={formatDateIndonesia} productionType="cartridge" />
             </div>
             <div className="form-group">
               <label>SKU Name *</label>
@@ -2514,17 +2535,12 @@ function ProductionCartridge() {
                 searchTerm={bufferMoSearchTerm}
                 onSearchChange={handleBufferMoSearchTermChange}
                 selectedMoNumber={bufferData.moNumber}
-                onSelect={(mo) => handleBufferMoChange(mo.mo_number)}
+                onSelect={handleBufferMoChange}
                 page={bufferMoPage}
                 onPageChange={setBufferMoPage}
+                productionType="cartridge"
               />
-              {selectedBufferMo && (
-                <div className="mo-info-display">
-                  <p><strong>SKU Name:</strong> {selectedBufferMo.sku_name}</p>
-                  <p><strong>Quantity:</strong> {selectedBufferMo.quantity} {selectedBufferMo.uom}</p>
-                  <p><strong>Created:</strong> {formatDateIndonesia(selectedBufferMo.create_date)}</p>
-                </div>
-              )}
+              <MoInfoDisplay mo={selectedBufferMo} formatDateIndonesia={formatDateIndonesia} productionType="cartridge" />
             </div>
             <div className="form-group">
               <label>SKU Name *</label>
@@ -2634,17 +2650,12 @@ function ProductionCartridge() {
                 searchTerm={rejectMoSearchTerm}
                 onSearchChange={handleRejectMoSearchTermChange}
                 selectedMoNumber={rejectData.moNumber}
-                onSelect={(mo) => handleRejectMoChange(mo.mo_number)}
+                onSelect={handleRejectMoChange}
                 page={rejectMoPage}
                 onPageChange={setRejectMoPage}
+                productionType="cartridge"
               />
-              {selectedRejectMo && (
-                <div className="mo-info-display">
-                  <p><strong>SKU Name:</strong> {selectedRejectMo.sku_name}</p>
-                  <p><strong>Quantity:</strong> {selectedRejectMo.quantity} {selectedRejectMo.uom}</p>
-                  <p><strong>Created:</strong> {formatDateIndonesia(selectedRejectMo.create_date)}</p>
-                </div>
-              )}
+              <MoInfoDisplay mo={selectedRejectMo} formatDateIndonesia={formatDateIndonesia} productionType="cartridge" />
             </div>
             <div className="form-group">
               <label>SKU Name *</label>

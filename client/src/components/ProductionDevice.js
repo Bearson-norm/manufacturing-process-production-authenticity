@@ -11,8 +11,9 @@ import {
 } from '../utils/productionCalculations';
 import MoListToolbar from './MoListToolbar';
 import MoPickerField from './MoPickerField';
+import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
-import { buildPaginatedSavedMoKeys } from '../utils/moListHelpers';
+import { buildPaginatedSavedMoKeys, formatMoSearchLabel } from '../utils/moListHelpers';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
@@ -1207,36 +1208,51 @@ function ProductionDevice() {
     }
   };
 
-  const handleMoChange = (moNumber) => {
-    const mo = moList.find(m => m.mo_number === moNumber);
+  const handleMoChange = (mo) => {
+    if (!mo) {
+      setSelectedMo(null);
+      setMoSearchTerm('');
+      setFormData({ ...formData, moNumber: '', skuName: '' });
+      return;
+    }
     setSelectedMo(mo);
-    setMoSearchTerm(mo ? `${mo.mo_number} - ${mo.sku_name}` : '');
+    setMoSearchTerm(formatMoSearchLabel(mo, 'device'));
     setFormData({
       ...formData,
-      moNumber: moNumber,
-      skuName: mo ? mo.sku_name : ''
+      moNumber: mo.mo_number,
+      skuName: mo.sku_name || ''
     });
   };
 
-  const handleBufferMoChange = (moNumber) => {
-    const mo = moList.find(m => m.mo_number === moNumber);
+  const handleBufferMoChange = (mo) => {
+    if (!mo) {
+      setSelectedBufferMo(null);
+      setBufferMoSearchTerm('');
+      setBufferData({ ...bufferData, moNumber: '', skuName: '' });
+      return;
+    }
     setSelectedBufferMo(mo);
-    setBufferMoSearchTerm(mo ? `${mo.mo_number} - ${mo.sku_name}` : '');
+    setBufferMoSearchTerm(formatMoSearchLabel(mo, 'device'));
     setBufferData({
       ...bufferData,
-      moNumber: moNumber,
-      skuName: mo ? mo.sku_name : ''
+      moNumber: mo.mo_number,
+      skuName: mo.sku_name || ''
     });
   };
 
-  const handleRejectMoChange = (moNumber) => {
-    const mo = moList.find(m => m.mo_number === moNumber);
+  const handleRejectMoChange = (mo) => {
+    if (!mo) {
+      setSelectedRejectMo(null);
+      setRejectMoSearchTerm('');
+      setRejectData({ ...rejectData, moNumber: '', skuName: '' });
+      return;
+    }
     setSelectedRejectMo(mo);
-    setRejectMoSearchTerm(mo ? `${mo.mo_number} - ${mo.sku_name}` : '');
+    setRejectMoSearchTerm(formatMoSearchLabel(mo, 'device'));
     setRejectData({
       ...rejectData,
-      moNumber: moNumber,
-      skuName: mo ? mo.sku_name : ''
+      moNumber: mo.mo_number,
+      skuName: mo.sku_name || ''
     });
   };
 
@@ -2339,20 +2355,15 @@ function ProductionDevice() {
                 searchTerm={moSearchTerm}
                 onSearchChange={handleMoSearchTermChange}
                 selectedMoNumber={formData.moNumber}
-                onSelect={(mo) => handleMoChange(mo.mo_number)}
+                onSelect={handleMoChange}
                 page={inputMoPage}
                 onPageChange={setInputMoPage}
+                productionType="device"
               />
               <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
                 Pilih MO dari daftar. Gunakan kotak pencarian untuk menyaring banyak MO.
               </small>
-              {selectedMo && (
-                <div className="mo-info-display">
-                  <p><strong>SKU Name:</strong> {selectedMo.sku_name}</p>
-                  <p><strong>Quantity:</strong> {selectedMo.quantity} {selectedMo.uom}</p>
-                  <p><strong>Created:</strong> {formatDateIndonesia(selectedMo.create_date)}</p>
-                </div>
-              )}
+              <MoInfoDisplay mo={selectedMo} formatDateIndonesia={formatDateIndonesia} productionType="device" />
             </div>
             <div className="form-group">
               <label>SKU Name *</label>
@@ -2519,17 +2530,12 @@ function ProductionDevice() {
                 searchTerm={bufferMoSearchTerm}
                 onSearchChange={handleBufferMoSearchTermChange}
                 selectedMoNumber={bufferData.moNumber}
-                onSelect={(mo) => handleBufferMoChange(mo.mo_number)}
+                onSelect={handleBufferMoChange}
                 page={bufferMoPage}
                 onPageChange={setBufferMoPage}
+                productionType="device"
               />
-              {selectedBufferMo && (
-                <div className="mo-info-display">
-                  <p><strong>SKU Name:</strong> {selectedBufferMo.sku_name}</p>
-                  <p><strong>Quantity:</strong> {selectedBufferMo.quantity} {selectedBufferMo.uom}</p>
-                  <p><strong>Created:</strong> {formatDateIndonesia(selectedBufferMo.create_date)}</p>
-                </div>
-              )}
+              <MoInfoDisplay mo={selectedBufferMo} formatDateIndonesia={formatDateIndonesia} productionType="device" />
             </div>
             <div className="form-group">
               <label>SKU Name *</label>
@@ -2639,17 +2645,12 @@ function ProductionDevice() {
                 searchTerm={rejectMoSearchTerm}
                 onSearchChange={handleRejectMoSearchTermChange}
                 selectedMoNumber={rejectData.moNumber}
-                onSelect={(mo) => handleRejectMoChange(mo.mo_number)}
+                onSelect={handleRejectMoChange}
                 page={rejectMoPage}
                 onPageChange={setRejectMoPage}
+                productionType="device"
               />
-              {selectedRejectMo && (
-                <div className="mo-info-display">
-                  <p><strong>SKU Name:</strong> {selectedRejectMo.sku_name}</p>
-                  <p><strong>Quantity:</strong> {selectedRejectMo.quantity} {selectedRejectMo.uom}</p>
-                  <p><strong>Created:</strong> {formatDateIndonesia(selectedRejectMo.create_date)}</p>
-                </div>
-              )}
+              <MoInfoDisplay mo={selectedRejectMo} formatDateIndonesia={formatDateIndonesia} productionType="device" />
             </div>
             <div className="form-group">
               <label>SKU Name *</label>

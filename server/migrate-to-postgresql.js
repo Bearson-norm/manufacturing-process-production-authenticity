@@ -249,6 +249,7 @@ async function createPostgreSQLTables(client) {
       quantity REAL,
       uom TEXT,
       note TEXT,
+      team_name TEXT,
       create_date TEXT,
       fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
