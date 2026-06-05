@@ -89,6 +89,78 @@ function mapOdooMoToCacheParams(mo) {
   ];
 }
 
+const DEVICE_NOTE_ILIKE_VALUES = [
+  'TIM DEVICE - SHIFT 1',
+  'TIM DEVICE - SHIFT 2',
+  'TIM DEVICE - SHIFT 3',
+  'TEAM DEVICE - SHIFT 1',
+  'TEAM DEVICE - SHIFT 2',
+  'TEAM DEVICE - SHIFT 3',
+  'TIM DEVICE SHIFT 1',
+  'TIM DEVICE SHIFT 2',
+  'TIM DEVICE SHIFT 3',
+  'TEAM DEVICE SHIFT 1',
+  'TEAM DEVICE SHIFT 2',
+  'TEAM DEVICE SHIFT 3',
+];
+
+const DEVICE_SYNC_NOTE_ILIKE_VALUES = [
+  ...DEVICE_NOTE_ILIKE_VALUES,
+  'TIM DEVICE CT - SHIFT 1',
+  'TIM DEVICE CT - SHIFT 2',
+  'TIM DEVICE CT - SHIFT 3',
+  'TEAM DEVICE CT - SHIFT 1',
+  'TEAM DEVICE CT - SHIFT 2',
+  'TEAM DEVICE CT - SHIFT 3',
+];
+
+const DEVICE_NOTE_SQL_PATTERNS = DEVICE_NOTE_ILIKE_VALUES.map((value) => `%${value}%`);
+
+function buildOdooOrDomain(noteValues, startDateStr) {
+  const branches = [
+    ...noteValues.map((value) => ['note', 'ilike', value]),
+    ['note', '=', false],
+    ['note', '=', ''],
+  ];
+  const orOperators = Array(Math.max(0, branches.length - 1)).fill('|');
+  return ['&', ...orOperators, ...branches, ['create_date', '>=', startDateStr]];
+}
+
+function buildDeviceSyncDomain(startDateStr) {
+  return buildOdooOrDomain(DEVICE_SYNC_NOTE_ILIKE_VALUES, startDateStr);
+}
+
+function buildDeviceNoteFilterSql(params) {
+  const conditions = DEVICE_NOTE_SQL_PATTERNS.map((pattern) => {
+    params.push(pattern);
+    return `note ILIKE $${params.length}`;
+  });
+  return `(${conditions.join(' OR ')})`;
+}
+
+function matchesDeviceNote(note) {
+  const text = stripNoteText(note).toUpperCase();
+  if (!text) {
+    return false;
+  }
+
+  if (text.includes(' DEVICE CT')) {
+    return false;
+  }
+
+  const cartridgeWords = ['CARTRIDGE', 'CARTIRDGE', 'CARTRDIGE', 'CARTRIGE', 'CARTDIGE'];
+  if (cartridgeWords.some((word) => text.includes(word))) {
+    return false;
+  }
+
+  const hasTeamTim = text.includes('TEAM') || text.includes('TIM');
+  if (!hasTeamTim || !text.includes(' DEVICE ') || !text.includes(' SHIFT ')) {
+    return false;
+  }
+
+  return true;
+}
+
 const CARTRIDGE_NOTE_PATTERNS = [
   '%TEAM CARTRIDGE%',
   '%TEAM CARTIRDGE%',
@@ -168,12 +240,17 @@ function buildCachedMoListQuery(productionType) {
   }
 
   if (type === 'device') {
-    query += ` AND UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'DEV%'`;
+    const deviceNoteSql = buildDeviceNoteFilterSql(params);
+    query += ` AND (
+      UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'DEV%'
+      OR ${deviceNoteSql}
+    )`;
     query += ` AND COALESCE(sku_name, '') NOT ILIKE '%cartridge%'`;
+    query += ` AND NOT (note ILIKE '%DEVICE CT%')`;
     return {
       query: `${query} ORDER BY create_date DESC, mo_number ASC LIMIT 1000`,
       params,
-      filterDescription: 'team_name prefix DEV',
+      filterDescription: 'team_name DEV% or note TEAM/TIM DEVICE SHIFT (with/without dash)',
     };
   }
 
@@ -237,6 +314,10 @@ module.exports = {
   mapOdooMoToCacheParams,
   backfillMoCacheTeamNames,
   buildCachedMoListQuery,
-  CARTRIDGE_NOTE_PATTERNS,
+  buildDeviceSyncDomain,
+  buildDeviceNoteFilterSql,
+  matchesDeviceNote,
   matchesCartridgeNote,
+  CARTRIDGE_NOTE_PATTERNS,
+  DEVICE_NOTE_ILIKE_VALUES,
 };

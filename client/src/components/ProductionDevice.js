@@ -13,7 +13,7 @@ import MoListToolbar from './MoListToolbar';
 import MoPickerField from './MoPickerField';
 import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
-import { buildPaginatedSavedMoKeys, formatMoSearchLabel } from '../utils/moListHelpers';
+import { buildPaginatedSavedMoKeys, formatMoSearchLabel, getMoTeamName, matchesDeviceNote } from '../utils/moListHelpers';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
@@ -315,6 +315,17 @@ function ProductionDevice() {
     }
   };
 
+  const isDeviceMoEligible = (mo) => {
+    if (mo.sku_name && mo.sku_name.toUpperCase().startsWith('MIXING')) {
+      return false;
+    }
+    const team = getMoTeamName(mo).toUpperCase();
+    if (team.startsWith('DEV')) {
+      return true;
+    }
+    return matchesDeviceNote(mo.note);
+  };
+
   const handleInputAuthenticity = async () => {
     setShowInputModal(true);
     setInputModalVendorId('');
@@ -338,11 +349,9 @@ function ProductionDevice() {
         
         // Filter out SKU names that start with "MIXING" and MO numbers that have already been used
         const filteredMoData = moData.filter(mo => {
-          // Exclude MIXING SKU
-          if (mo.sku_name && mo.sku_name.toUpperCase().startsWith('MIXING')) {
+          if (!isDeviceMoEligible(mo)) {
             return false;
           }
-          // Exclude MO numbers that have already been input
           if (usedMoNumbers.has(mo.mo_number)) {
             return false;
           }
@@ -379,9 +388,7 @@ function ProductionDevice() {
       if (response.data.success) {
         const moData = response.data.data || [];
         // Filter out SKU names that start with "MIXING"
-        const filteredMoData = moData.filter(mo => {
-          return !(mo.sku_name && mo.sku_name.toUpperCase().startsWith('MIXING'));
-        });
+        const filteredMoData = moData.filter((mo) => isDeviceMoEligible(mo));
         setMoList(filteredMoData);
       }
     } catch (error) {
@@ -404,9 +411,7 @@ function ProductionDevice() {
       if (response.data.success) {
         const moData = response.data.data || [];
         // Filter out SKU names that start with "MIXING"
-        const filteredMoData = moData.filter(mo => {
-          return !(mo.sku_name && mo.sku_name.toUpperCase().startsWith('MIXING'));
-        });
+        const filteredMoData = moData.filter((mo) => isDeviceMoEligible(mo));
         setMoList(filteredMoData);
       }
     } catch (error) {

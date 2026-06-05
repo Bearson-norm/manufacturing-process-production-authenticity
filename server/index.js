@@ -37,6 +37,7 @@ const {
   mapOdooMoToCacheParams,
   backfillMoCacheTeamNames,
   buildCachedMoListQuery,
+  buildDeviceSyncDomain,
 } = require('./utils/odoo-mo.helpers');
 
 // Helper function to parse authenticity data
@@ -4425,25 +4426,7 @@ async function updateMoDataFromOdoo() {
             ["create_date", ">=", startDateStr]
           ];
         } else if (noteFilter === 'device') {
-          combinedDomain = [
-            '&',
-            '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
-            ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
-            ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
-            ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
-            ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
-            ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
-            ['note', 'ilike', 'TIM DEVICE - SHIFT 3'],
-            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 1'],
-            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 2'],
-            ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 3'],
-            ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
-            ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
-            ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
-            ['note', '=', false],
-            ['note', '=', ''],
-            ["create_date", ">=", startDateStr]
-          ];
+          combinedDomain = buildDeviceSyncDomain(startDateStr);
         }
 
         const ODOO_URL = `${config.odooBaseUrl}/web/dataset/call_kw/mrp.production/search_read`;

@@ -41,15 +41,54 @@ export function matchesCartridgeNote(note) {
   return hasTeamCartridge || hasCtShift || hasCartridgeWord;
 }
 
+export function matchesDeviceNote(note) {
+  const text = stripMoNoteText(note).toUpperCase();
+  if (!text) {
+    return false;
+  }
+
+  if (text.includes(' DEVICE CT')) {
+    return false;
+  }
+
+  const cartridgeWords = ['CARTRIDGE', 'CARTIRDGE', 'CARTRDIGE', 'CARTRIGE', 'CARTDIGE'];
+  if (cartridgeWords.some((word) => text.includes(word))) {
+    return false;
+  }
+
+  const hasTeamTim = text.includes('TEAM') || text.includes('TIM');
+  if (!hasTeamTim || !text.includes(' DEVICE ') || !text.includes(' SHIFT ')) {
+    return false;
+  }
+
+  return true;
+}
+
 export function getMoDisplayTag(mo, productionType = 'liquid') {
   if (productionType === 'cartridge') {
     return getMoNote(mo);
+  }
+  if (productionType === 'device') {
+    const team = getMoTeamName(mo);
+    if (team) {
+      return team;
+    }
+    if (matchesDeviceNote(mo?.note)) {
+      return getMoNote(mo);
+    }
+    return '';
   }
   return getMoTeamName(mo);
 }
 
 export function getMoDisplayTagLabel(productionType = 'liquid') {
-  return productionType === 'cartridge' ? 'Note' : 'Team';
+  if (productionType === 'cartridge') {
+    return 'Note';
+  }
+  if (productionType === 'device') {
+    return 'Team / Note';
+  }
+  return 'Team';
 }
 
 export function formatMoSearchLabel(mo, productionType = 'liquid') {

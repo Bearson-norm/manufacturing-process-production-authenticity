@@ -8,6 +8,7 @@ const {
   ODOO_MO_CACHE_UPSERT_SQL,
   mapOdooMoToCacheParams,
   backfillMoCacheTeamNames,
+  buildDeviceSyncDomain,
 } = require('../utils/odoo-mo.helpers');
 
 // Helper function to get admin config
@@ -870,25 +871,7 @@ router.post('/sync-mo', async (req, res) => {
               ["create_date", ">=", startDateStr]
             ];
           } else if (noteFilter === 'device') {
-            combinedDomain = [
-              '&',
-              '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|', '|',
-              ['note', 'ilike', 'TIM DEVICE CT - SHIFT 1'],
-              ['note', 'ilike', 'TIM DEVICE CT - SHIFT 2'],
-              ['note', 'ilike', 'TIM DEVICE CT - SHIFT 3'],
-              ['note', 'ilike', 'TIM DEVICE - SHIFT 1'],
-              ['note', 'ilike', 'TIM DEVICE - SHIFT 2'],
-              ['note', 'ilike', 'TIM DEVICE - SHIFT 3'],
-              ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 1'],
-              ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 2'],
-              ['note', 'ilike', 'TEAM DEVICE CT - SHIFT 3'],
-              ['note', 'ilike', 'TEAM DEVICE - SHIFT 1'],
-              ['note', 'ilike', 'TEAM DEVICE - SHIFT 2'],
-              ['note', 'ilike', 'TEAM DEVICE - SHIFT 3'],
-              ['note', '=', false],
-              ['note', '=', ''],
-              ["create_date", ">=", startDateStr]
-            ];
+            combinedDomain = buildDeviceSyncDomain(startDateStr);
           } else if (noteFilter === 'liquid') {
             combinedDomain = [
               '&',
