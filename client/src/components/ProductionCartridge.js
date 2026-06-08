@@ -134,10 +134,8 @@ function ProductionCartridge() {
   const [editBufferData, setEditBufferData] = useState(null);
   const [editRejectData, setEditRejectData] = useState(null);
   const [activeVendors, setActiveVendors] = useState([]);
-  const [inputModalVendorId, setInputModalVendorId] = useState('');
   const [bufferModalVendorId, setBufferModalVendorId] = useState('');
   const [rejectModalVendorId, setRejectModalVendorId] = useState('');
-  const [editModalVendorId, setEditModalVendorId] = useState('');
 
   const vendorDigitMap = useMemo(() => buildVendorDigitMap(activeVendors), [activeVendors]);
 
@@ -177,6 +175,12 @@ function ProductionCartridge() {
     const v = activeVendors.find((x) => String(x.id) === String(idStr));
     const n = v ? Number(v.digit_count) : NaN;
     return !Number.isNaN(n) && n > 0 ? n : null;
+  };
+
+  const getVendorIdByName = (name) => {
+    if (!name) return '';
+    const v = activeVendors.find((x) => x.name === name);
+    return v ? String(v.id) : '';
   };
 
   const fetchActiveVendors = async () => {
@@ -316,7 +320,6 @@ function ProductionCartridge() {
 
   const handleInputAuthenticity = async () => {
     setShowInputModal(true);
-    setInputModalVendorId('');
     setMoSearchTerm('');
     setInputMoPage(1);
     // Fetch MO list from cache (filtered by production type) when modal opens
@@ -818,12 +821,11 @@ function ProductionCartridge() {
   };
 
   const handleAddRow = () => {
-    const vn = getVendorNameById(inputModalVendorId);
     setFormData({
       ...formData,
       authenticityRows: [
         ...formData.authenticityRows,
-        { firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: vn }
+        { firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }
       ]
     });
   };
@@ -944,9 +946,7 @@ function ProductionCartridge() {
 
     if (!row) return;
 
-    const vendorDigitCount = isEdit
-      ? resolveDigitCountForVendorName(row.vendorName, vendorDigitMap)
-      : getVendorDigitCountById(inputModalVendorId);
+    const vendorDigitCount = resolveDigitCountForVendorName(row.vendorName, vendorDigitMap);
 
     const result = validateAuthenticityRow(
       index,
@@ -1088,24 +1088,24 @@ function ProductionCartridge() {
     }
   };
 
-  const handleInputModalVendorSelect = (e) => {
-    const id = e.target.value;
-    setInputModalVendorId(id);
-    const name = getVendorNameById(id);
-    setFormData((prev) => ({
-      ...prev,
-      authenticityRows: prev.authenticityRows.map((r) => ({ ...r, vendorName: name }))
-    }));
-  };
-
-  const handleEditModalVendorSelect = (e) => {
-    const id = e.target.value;
-    setEditModalVendorId(id);
-    const name = getVendorNameById(id);
-    setEditFormData((prev) => ({
-      ...prev,
-      authenticityRows: (prev.authenticityRows || []).map((r) => ({ ...r, vendorName: name }))
-    }));
+  const handleRowVendorChange = (index, vendorId, isEdit = false) => {
+    const name = getVendorNameById(vendorId);
+    if (isEdit) {
+      const newRows = [...editFormData.authenticityRows];
+      newRows[index] = { ...newRows[index], vendorName: name };
+      setEditFormData({ ...editFormData, authenticityRows: newRows });
+      setEditAuthenticityValidationStatus((prev) => ({ ...prev, [index]: false }));
+    } else {
+      const newRows = [...formData.authenticityRows];
+      newRows[index] = { ...newRows[index], vendorName: name };
+      setFormData({ ...formData, authenticityRows: newRows });
+      setAuthenticityValidationStatus((prev) => ({ ...prev, [index]: false }));
+      setAuthenticityInvalidStatus((prev) => {
+        const newStatus = { ...prev };
+        delete newStatus[index];
+        return newStatus;
+      });
+    }
   };
 
   // Handle Enter key press for scanner input (auto-advance to next field)
@@ -1268,12 +1268,6 @@ function ProductionCartridge() {
       return;
     }
 
-    if (activeVendors.length > 0 && !inputModalVendorId) {
-      alert('Pilih vendor terlebih dahulu.');
-      return;
-    }
-
-    const vendorNameToSave = getVendorNameById(inputModalVendorId);
     const rowsToValidate = formData.authenticityRows.filter((row, idx) => {
       const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
       const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
@@ -1281,6 +1275,14 @@ function ProductionCartridge() {
     });
 
     if (rowsToValidate.length > 0) {
+      if (activeVendors.length > 0) {
+        const rowsWithMissingVendor = rowsToValidate.filter((row) => !row.vendorName);
+        if (rowsWithMissingVendor.length > 0) {
+          alert('Pilih vendor untuk setiap row authenticity yang diisi.');
+          return;
+        }
+      }
+
       // Check if roll number is filled for rows with authenticity data
       const rowsWithMissingRollNumber = rowsToValidate.filter((row, idx) => {
         return !row.rollNumber || row.rollNumber.trim() === '';
@@ -1316,7 +1318,7 @@ function ProductionCartridge() {
     try {
       const rowsPayload = formData.authenticityRows.map((r) => ({
         ...r,
-        vendorName: vendorNameToSave || r.vendorName || null
+        vendorName: r.vendorName || null
       }));
       await axios.post('/api/production/cartridge', {
         session_id: sessionId,
@@ -1335,7 +1337,6 @@ function ProductionCartridge() {
         skuName: '',
         authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }]
       });
-      setInputModalVendorId('');
       setAuthenticityValidationStatus({});
       setSelectedMo(null);
       setMoSearchTerm('');
@@ -1546,18 +1547,12 @@ function ProductionCartridge() {
       }
     });
 
-    const firstNamedVendor = allAuthenticityRows.find((r) => r.vendorName)?.vendorName;
-    const vendorMatch =
-      firstNamedVendor && activeVendors.find((v) => v.name === firstNamedVendor);
-    const initialEditVendorId = vendorMatch ? String(vendorMatch.id) : '';
-
     // Use the first input as base for other fields
     const firstInput = inputsWithSameMo[0];
     
     setEditingMoNumber(moNumber);
     setEditingSessionId(sessionId);
     setEditingInput(inputsWithSameMo.map(input => input.id).join(','));
-    setEditModalVendorId(initialEditVendorId);
     setEditFormData({
       pic: Array.from(uniquePics).join(', '),
       moNumber: firstInput.mo_number,
@@ -1574,17 +1569,11 @@ function ProductionCartridge() {
     setEditingMoNumber(null);
     setEditingSessionId(null);
     setEditAuthenticityValidationStatus({});
-    setEditModalVendorId('');
   };
 
   const handleSaveEdit = async () => {
     if (!editFormData.pic || !editFormData.moNumber || !editFormData.skuName) {
       alert('Silakan isi semua field yang wajib diisi');
-      return;
-    }
-
-    if (activeVendors.length > 0 && !editModalVendorId) {
-      alert('Pilih vendor terlebih dahulu.');
       return;
     }
 
@@ -1601,6 +1590,14 @@ function ProductionCartridge() {
     });
 
     if (rowsToValidate.length > 0) {
+      if (activeVendors.length > 0) {
+        const rowsWithMissingVendor = rowsToValidate.filter((row) => !row.vendorName);
+        if (rowsWithMissingVendor.length > 0) {
+          alert('Pilih vendor untuk setiap row authenticity yang diisi.');
+          return;
+        }
+      }
+
       // Check if roll number is filled for rows with authenticity data
       const rowsWithMissingRollNumber = rowsToValidate.filter((row, idx) => {
         return !row.rollNumber || row.rollNumber.trim() === '';
@@ -1623,10 +1620,9 @@ function ProductionCartridge() {
     }
 
     try {
-      const vn = getVendorNameById(editModalVendorId);
       const rowsForSave = editFormData.authenticityRows.map((r) => ({
         ...r,
-        vendorName: vn || r.vendorName || null
+        vendorName: r.vendorName || null
       }));
       // Update first input with all authenticity data, others with empty array to prevent duplication
       const updatePromises = editFormData.inputIds.map((inputId, index) => 
@@ -1645,7 +1641,6 @@ function ProductionCartridge() {
       setEditingMoNumber(null);
       setEditingSessionId(null);
       setEditAuthenticityValidationStatus({});
-      setEditModalVendorId('');
       fetchData();
     } catch (error) {
       console.error('Error updating data:', error);
@@ -1697,12 +1692,11 @@ function ProductionCartridge() {
   };
 
   const handleAddEditRow = () => {
-    const vn = getVendorNameById(editModalVendorId);
     setEditFormData({
       ...editFormData,
       authenticityRows: [
         ...editFormData.authenticityRows,
-        { firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: vn }
+        { firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }
       ]
     });
   };
@@ -2037,23 +2031,6 @@ function ProductionCartridge() {
                                           style={{ width: '100%', padding: '6px' }}
                                         />
                                       </div>
-                                      {activeVendors.length > 0 && (
-                                        <div className="form-group" style={{ marginBottom: '12px' }}>
-                                          <label>Vendor *</label>
-                                          <select
-                                            value={editModalVendorId}
-                                            onChange={handleEditModalVendorSelect}
-                                            style={{ width: '100%', padding: '6px' }}
-                                          >
-                                            <option value="">— Pilih vendor —</option>
-                                            {activeVendors.map((v) => (
-                                              <option key={v.id} value={String(v.id)}>
-                                                {v.name} ({v.digit_count} digit)
-                                              </option>
-                                            ))}
-                                          </select>
-                                        </div>
-                                      )}
                                       <div className="authenticity-section">
                                         <label>Authenticity Data</label>
                                         {editFormData.authenticityRows.map((row, rowIdx) => {
@@ -2063,7 +2040,21 @@ function ProductionCartridge() {
                                           const isValidated = editAuthenticityValidationStatus[rowIdx] === true;
                                           
                                           return (
-                                            <div key={rowIdx} className="authenticity-row-input">
+                                            <div key={rowIdx} className={`authenticity-row-input${activeVendors.length > 0 ? ' with-vendor' : ''}`}>
+                                              {activeVendors.length > 0 && (
+                                                <select
+                                                  value={getVendorIdByName(row.vendorName)}
+                                                  onChange={(e) => handleRowVendorChange(rowIdx, e.target.value, true)}
+                                                  style={{ padding: '6px' }}
+                                                >
+                                                  <option value="">— Vendor —</option>
+                                                  {activeVendors.map((v) => (
+                                                    <option key={v.id} value={String(v.id)}>
+                                                      {v.name} ({v.digit_count} digit)
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              )}
                                               <input
                                                 type="text"
                                                 placeholder="First Authenticity"
@@ -2318,7 +2309,6 @@ function ProductionCartridge() {
       {showInputModal && (
         <div className="modal-overlay" onClick={() => {
           setShowInputModal(false);
-          setInputModalVendorId('');
           setMoSearchTerm('');
           setSelectedMo(null);
         }}>
@@ -2380,23 +2370,6 @@ function ProductionCartridge() {
                 readOnly={selectedMo !== null}
               />
             </div>
-            {activeVendors.length > 0 && (
-              <div className="form-group">
-                <label>Vendor *</label>
-                <select
-                  value={inputModalVendorId}
-                  onChange={handleInputModalVendorSelect}
-                  style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
-                >
-                  <option value="">— Pilih vendor —</option>
-                  {activeVendors.map((v) => (
-                    <option key={v.id} value={String(v.id)}>
-                      {v.name} ({v.digit_count} digit)
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
             <div className="authenticity-section">
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
                 <label style={{ margin: 0 }}>Authenticity Data</label>
@@ -2429,7 +2402,20 @@ function ProductionCartridge() {
                 const isInvalid = authenticityInvalidStatus[index];
                 
                 return (
-                  <div key={index} className="authenticity-row-input">
+                  <div key={index} className={`authenticity-row-input${activeVendors.length > 0 ? ' with-vendor' : ''}`}>
+                    {activeVendors.length > 0 && (
+                      <select
+                        value={getVendorIdByName(row.vendorName)}
+                        onChange={(e) => handleRowVendorChange(index, e.target.value, false)}
+                      >
+                        <option value="">— Vendor —</option>
+                        {activeVendors.map((v) => (
+                          <option key={v.id} value={String(v.id)}>
+                            {v.name} ({v.digit_count} digit)
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <input
                       type="text"
                       placeholder="First Authenticity at"
@@ -2483,7 +2469,6 @@ function ProductionCartridge() {
             <div className="modal-buttons">
               <button onClick={() => {
                 setShowInputModal(false);
-                setInputModalVendorId('');
                 setMoSearchTerm('');
                 setSelectedMo(null);
               }} className="cancel-button">

@@ -916,6 +916,10 @@
   align-items: center;
 }
 
+.authenticity-row-input.with-vendor {
+  grid-template-columns: minmax(130px, 0.9fr) 1fr 1fr 1fr minmax(140px, auto) 40px;
+}
+
 .authenticity-row-action {
   display: flex;
   flex-direction: column;
@@ -1016,7 +1020,8 @@
   visibility: hidden;
 }
 
-.authenticity-row-input input {
+.authenticity-row-input input,
+.authenticity-row-input select {
   padding: 10px;
   background: #0f172a;
   border: 1px solid #1f2937;
@@ -1026,7 +1031,8 @@
   transition: border-color 0.3s;
 }
 
-.authenticity-row-input input:focus {
+.authenticity-row-input input:focus,
+.authenticity-row-input select:focus {
   outline: none;
   border-color: #2563eb;
 }
