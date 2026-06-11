@@ -2278,6 +2278,7 @@ function ProductionCartridge() {
               >
                 <option value="">Select leader name</option>
                 <option value="Farhan Rizky Wahyudi">Farhan Rizky Wahyudi</option>
+                <option value="Rocy Vernando">Rocy Vernando</option>
               </select>
             </div>
             <div className="form-group">
@@ -2314,6 +2315,18 @@ function ProductionCartridge() {
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Input Authenticity Label Process</h2>
+            <div className="form-group">
+              <label>Leader Name</label>
+              <input
+                type="text"
+                value={leaderName}
+                readOnly
+                style={{ width: '100%', padding: '8px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc', backgroundColor: '#f5f5f5' }}
+              />
+              <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                Leader dari session manufacturing yang sedang aktif
+              </small>
+            </div>
             <div className="form-group">
               <label>PIC *</label>
               <input
