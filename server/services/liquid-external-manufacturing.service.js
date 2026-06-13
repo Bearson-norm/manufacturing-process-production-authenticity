@@ -16,10 +16,12 @@ const {
 const LIQUID_PRODUCTION_TYPE = 'liquid';
 const IDLE_LEADER_PLACEHOLDER = '-';
 
+const LIQUID_SKU_EXTERNAL_EXCLUDE = ['MIXING', 'BRAY', 'BUNDLING'];
+
 /** SKU / product names that must not be synced to external manufacturing. */
 function isExcludedFromExternalLiquidManufacturing(skuName) {
   const s = String(skuName || '').toUpperCase();
-  return s.includes('MIXING') || s.includes('BRAY');
+  return LIQUID_SKU_EXTERNAL_EXCLUDE.some((key) => s.includes(key));
 }
 
 function upsertExternalManufacturingMap(moNumber, externalId, callback) {
@@ -152,7 +154,7 @@ function resolveOrCreateExternalManufacturingId(moRow, cfg, options, callback) {
     }
 
     if (isExcludedFromExternalLiquidManufacturing(moRow.sku_name)) {
-      return callback(new Error('SKU excluded from external manufacturing (MIXING or BRAY)'));
+      return callback(new Error('SKU excluded from external manufacturing (MIXING, BRAY, or BUNDLING)'));
     }
 
     const postIdle = () => {
@@ -207,7 +209,7 @@ function resolveOrCreateExternalManufacturingId(moRow, cfg, options, callback) {
  */
 function ensureLiquidExternalIdAndPatchStarted(moNumber, skuName, targetQty, leaderName, callback) {
   if (isExcludedFromExternalLiquidManufacturing(skuName)) {
-    console.log(`⚠️  [External API] Skip confirm sync for MO ${moNumber} — SKU excluded (MIXING or BRAY)`);
+    console.log(`⚠️  [External API] Skip confirm sync for MO ${moNumber} — SKU excluded (MIXING, BRAY, or BUNDLING)`);
     return callback();
   }
 
@@ -264,7 +266,7 @@ function ensureLiquidExternalIdAndPatchStarted(moNumber, skuName, targetQty, lea
 function finalizeLiquidManufacturingExternal(moNumber, formattedPutBody, callback) {
   const skuLabel = (formattedPutBody && (formattedPutBody.sku_name || formattedPutBody.sku)) || '';
   if (isExcludedFromExternalLiquidManufacturing(skuLabel)) {
-    console.log(`⚠️  [External API] Skip finalize for MO ${moNumber} — SKU excluded (MIXING or BRAY)`);
+    console.log(`⚠️  [External API] Skip finalize for MO ${moNumber} — SKU excluded (MIXING, BRAY, or BUNDLING)`);
     return callback();
   }
 
@@ -366,6 +368,7 @@ function pushIdleManufacturingForLiquidMosFromCache(opts = {}) {
           WHERE (note ILIKE $1 OR note ILIKE $2 OR note IS NULL OR BTRIM(COALESCE(note, '')) = '')
             AND sku_name NOT ILIKE '%MIXING%'
             AND sku_name NOT ILIKE '%BRAY%'
+            AND sku_name NOT ILIKE '%bundling%'
           ORDER BY create_date DESC, mo_number ASC
           LIMIT $3
         `;

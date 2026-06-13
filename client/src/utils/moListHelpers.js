@@ -1,5 +1,12 @@
 export const DEFAULT_MO_PAGE_SIZE = 10;
 
+const LIQUID_SKU_PRODUCTION_EXCLUDE = ['MIXING', 'BRAY', 'BUNDLING'];
+
+export function isExcludedLiquidProductionSku(skuName) {
+  const s = String(skuName || '').toUpperCase();
+  return LIQUID_SKU_PRODUCTION_EXCLUDE.some((key) => s.includes(key));
+}
+
 export function getMoTeamName(mo) {
   return String(mo?.team_name ?? '').trim();
 }
