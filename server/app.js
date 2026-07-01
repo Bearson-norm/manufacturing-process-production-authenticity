@@ -76,6 +76,7 @@ app.use('/api/statistics', require('./routes/statistics.routes'));
 app.use('/api/reports', require('./routes/reports.routes'));
 app.use('/api/search', require('./routes/search.routes'));
 app.use('/api/receiver', require('./routes/receiver.routes'));
+app.use('/api/wms', require('./routes/wms.routes'));
 
 // Alias for backward compatibility - /api/combined-production
 // This endpoint combines data from all production types (liquid, device, cartridge)

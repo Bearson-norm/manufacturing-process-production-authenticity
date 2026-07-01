@@ -27,6 +27,12 @@ function Admin() {
   const [newVendorName, setNewVendorName] = useState('');
   const [newVendorDigitCount, setNewVendorDigitCount] = useState('');
   const [editingVendor, setEditingVendor] = useState(null);
+  const [wmsApiBaseUrl, setWmsApiBaseUrl] = useState('https://wms.foom.id/api');
+  const [wmsAccessTokenInput, setWmsAccessTokenInput] = useState('');
+  const [wmsAccessTokenConfigured, setWmsAccessTokenConfigured] = useState(false);
+  const [wmsUsername, setWmsUsername] = useState('');
+  const [wmsCompanyId, setWmsCompanyId] = useState('FOOM');
+  const [wmsSite, setWmsSite] = useState('PROD');
 
   useEffect(() => {
     fetchConfig();
@@ -46,6 +52,12 @@ function Admin() {
         setExternalApiBearerConfigured(!!response.data.config.externalApiBearerTokenConfigured);
         setApiKey(response.data.config.apiKey || '');
         setApiKeyConfigured(response.data.config.apiKeyConfigured || false);
+        setWmsApiBaseUrl(response.data.config.wmsApiBaseUrl || 'https://wms.foom.id/api');
+        setWmsAccessTokenInput('');
+        setWmsAccessTokenConfigured(!!response.data.config.wmsAccessTokenConfigured);
+        setWmsUsername(response.data.config.wmsUsername || '');
+        setWmsCompanyId(response.data.config.wmsCompanyId || 'FOOM');
+        setWmsSite(response.data.config.wmsSite || 'PROD');
       }
     } catch (error) {
       console.error('Error fetching config:', error);
@@ -256,11 +268,19 @@ function Admin() {
       if (externalApiBearerTokenInput.trim() !== '') {
         payload.externalApiBearerToken = externalApiBearerTokenInput.trim();
       }
+      payload.wmsApiBaseUrl = wmsApiBaseUrl.trim() || 'https://wms.foom.id/api';
+      payload.wmsUsername = wmsUsername.trim();
+      payload.wmsCompanyId = wmsCompanyId.trim() || 'FOOM';
+      payload.wmsSite = wmsSite.trim() || 'PROD';
+      if (wmsAccessTokenInput.trim() !== '') {
+        payload.wmsAccessToken = wmsAccessTokenInput.trim();
+      }
       const response = await axios.put('/api/admin/config', payload);
 
       if (response.data.success) {
         setMessage({ type: 'success', text: 'Configuration saved successfully!' });
         setExternalApiBearerTokenInput('');
+        setWmsAccessTokenInput('');
         await fetchConfig();
         await testConnection();
       } else {
@@ -284,6 +304,50 @@ function Admin() {
       }
     } catch (error) {
       setMessage({ type: 'warning', text: 'Configuration saved but connection test failed' });
+    }
+  };
+
+  const testWmsConnectionHandler = async () => {
+    setLoading(true);
+    setMessage({ type: '', text: '' });
+
+    try {
+      const payload = {
+        wmsApiBaseUrl: wmsApiBaseUrl.trim() || 'https://wms.foom.id/api',
+        wmsUsername: wmsUsername.trim(),
+        wmsCompanyId: wmsCompanyId.trim() || 'FOOM',
+        wmsSite: wmsSite.trim() || 'PROD'
+      };
+
+      const token = wmsAccessTokenInput.trim();
+      if (token) {
+        payload.wmsAccessToken = token;
+      } else if (!wmsAccessTokenConfigured) {
+        setMessage({
+          type: 'error',
+          text: 'Masukkan WMS Access Token terlebih dahulu, lalu klik Test WMS Connection (token akan disimpan otomatis).'
+        });
+        return;
+      }
+
+      if (token) {
+        await axios.put('/api/admin/wms-config', payload);
+        setWmsAccessTokenConfigured(true);
+        setWmsAccessTokenInput('');
+      } else {
+        await axios.put('/api/admin/wms-config', payload);
+      }
+
+      const response = await axios.post('/api/wms/test-connection', payload);
+      if (response.data.success) {
+        setMessage({ type: 'success', text: 'WMS connection test successful!' });
+      } else {
+        setMessage({ type: 'error', text: response.data.error || 'WMS connection test failed' });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.response?.data?.error || 'WMS connection test failed' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -461,6 +525,91 @@ function Admin() {
             />
             <small style={{ color: '#94a3b8', fontSize: '12px' }}>
               Authorization: Bearer … untuk <code>POST/GET/PUT /api/v1/manufacturing</code>.
+            </small>
+          </div>
+
+          <div className="form-group" style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #334155' }}>
+            <label style={{ fontSize: '16px', fontWeight: '600', color: '#e2e8f0', marginBottom: '12px' }}>
+              WMS Prieds Configuration
+            </label>
+            <div className="form-group">
+              <label>WMS API Base URL</label>
+              <input
+                type="text"
+                value={wmsApiBaseUrl}
+                onChange={(e) => setWmsApiBaseUrl(e.target.value)}
+                placeholder="https://wms.foom.id/api"
+                style={{ width: '100%', padding: '8px', fontSize: '14px' }}
+              />
+            </div>
+            <div className="form-group">
+              <label>WMS Access Token (JWT)</label>
+              {wmsAccessTokenConfigured && (
+                <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '8px' }}>
+                  Token tersimpan. Isi field di bawah hanya jika ingin mengganti token.
+                </p>
+              )}
+              <input
+                type="password"
+                value={wmsAccessTokenInput}
+                onChange={(e) => setWmsAccessTokenInput(e.target.value)}
+                placeholder={wmsAccessTokenConfigured ? '•••••••• (kosongkan jika tidak diubah)' : 'JWT x-access-token dari Prieds WMS'}
+                autoComplete="off"
+                style={{ width: '100%', padding: '8px', fontSize: '14px' }}
+              />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+              <div className="form-group">
+                <label>Username</label>
+                <input
+                  type="text"
+                  value={wmsUsername}
+                  onChange={(e) => setWmsUsername(e.target.value)}
+                  placeholder="puput"
+                  style={{ width: '100%', padding: '8px', fontSize: '14px' }}
+                />
+              </div>
+              <div className="form-group">
+                <label>Company ID</label>
+                <input
+                  type="text"
+                  value={wmsCompanyId}
+                  onChange={(e) => setWmsCompanyId(e.target.value)}
+                  placeholder="FOOM"
+                  style={{ width: '100%', padding: '8px', fontSize: '14px' }}
+                />
+              </div>
+              <div className="form-group">
+                <label>Site</label>
+                <input
+                  type="text"
+                  value={wmsSite}
+                  onChange={(e) => setWmsSite(e.target.value)}
+                  placeholder="PROD"
+                  style={{ width: '100%', padding: '8px', fontSize: '14px' }}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={testWmsConnectionHandler}
+              disabled={loading}
+              style={{
+                padding: '8px 16px',
+                fontSize: '13px',
+                fontWeight: '600',
+                background: '#334155',
+                color: '#e2e8f0',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                marginTop: '8px'
+              }}
+            >
+              Test WMS Connection
+            </button>
+            <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginTop: '8px' }}>
+              Token dari field di atas akan disimpan otomatis saat test. Tidak perlu klik Save Configuration terlebih dahulu.
             </small>
           </div>
 
@@ -680,7 +829,7 @@ function Admin() {
             {loading ? 'Processing...' : 'Push external manufacturing (idle, liquid MOs)'}
           </button>
           <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginTop: '8px' }}>
-            Same job as the daily 06:00 scheduler: one FOOM list prefetch per run, then up to 400 liquid MO rows from cache per click (<code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>limit</code> query on <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>POST /api/admin/push-external-manufacturing-idle</code>). Cross-checks <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>external_manufacturing_map</code>, then POST idle when needed. A 504 from the gateway usually means the reverse proxy gave up before the Node handler finished—increase <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>proxy_read_timeout</code> (or equivalent) for that route, or lower <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>limit</code> and run again.
+            Same job as the daily 06:00 scheduler: one FOOM list prefetch per run, then up to 400 eligible liquid MO rows from cache per click (<code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>POST /api/admin/push-external-manufacturing-idle</code>). Only MO with <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>team_name</code> prefix LIQ, excluding SKU MIXING/BRAY/bundling/15 ML and cartridge/device notes; <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>create_date</code> within ±6 days (not before 2026-07-01). Cross-checks <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>external_manufacturing_map</code>, then POST idle when needed.
           </small>
         </div>
 

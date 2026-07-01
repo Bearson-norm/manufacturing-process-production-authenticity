@@ -83,6 +83,11 @@ function Dashboard({ setIsAuthenticated }) {
                 <h3>Grafik Statistik Produksi Pabrik</h3>
                 <p>Analisis performa produksi per leader dengan grafik interaktif</p>
               </div>
+              <div className="production-card" onClick={() => navigate('/wms-explorer')}>
+                <div className="card-icon">🔍</div>
+                <h3>WMS vs Production Explorer</h3>
+                <p>Bandingkan data repacking WMS dengan production_results per MO</p>
+              </div>
             </div>
           </>
         )}

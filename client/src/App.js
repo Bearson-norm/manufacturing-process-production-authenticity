@@ -8,6 +8,7 @@ import ProductionCartridge from './components/ProductionCartridge';
 import Admin from './components/Admin';
 import ReportDashboard from './components/ReportDashboard';
 import ProductionChart from './components/ProductionChart';
+import WmsExplorer from './components/WmsExplorer';
 import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 
@@ -81,6 +82,14 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <ProductionChart />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/wms-explorer" 
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <WmsExplorer />
               </ProtectedRoute>
             } 
           />

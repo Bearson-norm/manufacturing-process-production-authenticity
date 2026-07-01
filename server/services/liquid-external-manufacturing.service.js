@@ -1,6 +1,7 @@
 'use strict';
 
 const { db } = require('../database');
+const { buildExternalManufacturingIdlePushQuery } = require('../utils/odoo-mo.helpers');
 const {
   sendToExternalAPIWithUrl,
   getExternalManufacturingConfig,
@@ -18,9 +19,19 @@ const IDLE_LEADER_PLACEHOLDER = '-';
 
 const LIQUID_SKU_EXTERNAL_EXCLUDE = ['MIXING', 'BRAY', 'BUNDLING'];
 
+function normalizeSkuForExternalExclusion(skuName) {
+  return String(skuName || '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** SKU / product names that must not be synced to external manufacturing. */
 function isExcludedFromExternalLiquidManufacturing(skuName) {
-  const s = String(skuName || '').toUpperCase();
+  const s = normalizeSkuForExternalExclusion(skuName);
+  if (s.includes('15 ML') || s.includes('15ML')) {
+    return true;
+  }
   return LIQUID_SKU_EXTERNAL_EXCLUDE.some((key) => s.includes(key));
 }
 
@@ -154,7 +165,7 @@ function resolveOrCreateExternalManufacturingId(moRow, cfg, options, callback) {
     }
 
     if (isExcludedFromExternalLiquidManufacturing(moRow.sku_name)) {
-      return callback(new Error('SKU excluded from external manufacturing (MIXING, BRAY, or BUNDLING)'));
+      return callback(new Error('SKU excluded from external manufacturing (MIXING, BRAY, BUNDLING, or 15 ML)'));
     }
 
     const postIdle = () => {
@@ -209,7 +220,7 @@ function resolveOrCreateExternalManufacturingId(moRow, cfg, options, callback) {
  */
 function ensureLiquidExternalIdAndPatchStarted(moNumber, skuName, targetQty, leaderName, callback) {
   if (isExcludedFromExternalLiquidManufacturing(skuName)) {
-    console.log(`⚠️  [External API] Skip confirm sync for MO ${moNumber} — SKU excluded (MIXING, BRAY, or BUNDLING)`);
+    console.log(`⚠️  [External API] Skip confirm sync for MO ${moNumber} — SKU excluded (MIXING, BRAY, BUNDLING, or 15 ML)`);
     return callback();
   }
 
@@ -266,7 +277,7 @@ function ensureLiquidExternalIdAndPatchStarted(moNumber, skuName, targetQty, lea
 function finalizeLiquidManufacturingExternal(moNumber, formattedPutBody, callback) {
   const skuLabel = (formattedPutBody && (formattedPutBody.sku_name || formattedPutBody.sku)) || '';
   if (isExcludedFromExternalLiquidManufacturing(skuLabel)) {
-    console.log(`⚠️  [External API] Skip finalize for MO ${moNumber} — SKU excluded (MIXING, BRAY, or BUNDLING)`);
+    console.log(`⚠️  [External API] Skip finalize for MO ${moNumber} — SKU excluded (MIXING, BRAY, BUNDLING, or 15 ML)`);
     return callback();
   }
 
@@ -338,10 +349,11 @@ function finalizeLiquidManufacturingExternal(moNumber, formattedPutBody, callbac
  * @returns {Promise<{ posted: number, skipped: number, linkedFromRemote: number, limitUsed: number, errors: Array<{ mo_number: string, message: string }> }>}
  */
 function pushIdleManufacturingForLiquidMosFromCache(opts = {}) {
-  const limitUsed = Math.min(2000, Math.max(1, parseInt(String(opts.limit), 10) || 200));
+  const { query, params, limitUsed, dateWindow, filterDescription } =
+    buildExternalManufacturingIdlePushQuery(opts);
 
   return new Promise((resolve) => {
-    const summary = { posted: 0, skipped: 0, linkedFromRemote: 0, limitUsed, errors: [] };
+    const summary = { posted: 0, skipped: 0, linkedFromRemote: 0, limitUsed, dateWindow, errors: [] };
 
     getExternalManufacturingConfig((cfgErr, cfg) => {
       if (cfgErr || !cfg.baseUrl) {
@@ -362,23 +374,17 @@ function pushIdleManufacturingForLiquidMosFromCache(opts = {}) {
         const resolveOpts =
           preloadedRows != null && Array.isArray(preloadedRows) ? { preloadedListRows: preloadedRows } : {};
 
-        const query = `
-          SELECT mo_number, sku_name, quantity, uom, note, create_date
-          FROM odoo_mo_cache
-          WHERE (note ILIKE $1 OR note ILIKE $2 OR note IS NULL OR BTRIM(COALESCE(note, '')) = '')
-            AND sku_name NOT ILIKE '%MIXING%'
-            AND sku_name NOT ILIKE '%BRAY%'
-            AND sku_name NOT ILIKE '%bundling%'
-          ORDER BY create_date DESC, mo_number ASC
-          LIMIT $3
-        `;
+        console.log(
+          `🔍 [pushIdle] ${filterDescription}; create_date window: >= GREATEST(today-${dateWindow.daysBack}d, ${dateWindow.minCreateDate}) .. today+${dateWindow.daysForward}d; limit=${limitUsed}`
+        );
 
-        db.all(query, ['%liquid%', '%TEAM LIQUID%', limitUsed], (err, rows) => {
+        db.all(query, params, (err, rows) => {
           if (err) {
             console.error('❌ [pushIdle] Query odoo_mo_cache failed:', err.message);
             return resolve(summary);
           }
           if (!rows || rows.length === 0) {
+            console.log('ℹ️  [pushIdle] No eligible MO rows in cache for current filters');
             return resolve(summary);
           }
 

@@ -106,20 +106,62 @@ router.get('/config', (req, res) => {
                         maskedApiKey = '********';
                       }
 
-                      res.json({
-                        success: true,
-                        config: {
-                          sessionId: sessionId,
-                          odooBaseUrl: odooBaseUrl,
-                          externalApiBaseUrl: externalApiBaseUrl,
-                          externalApiBearerToken: maskedBearer,
-                          externalApiBearerTokenConfigured: !!bearerRaw,
-                          externalApiUrl: externalApiUrl,
-                          externalApiUrlActive: externalApiUrlActive,
-                          externalApiUrlCompleted: externalApiUrlCompleted,
-                          apiKey: maskedApiKey,
-                          apiKeyConfigured: !!apiKey
-                        }
+                      db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_api_base_url'], (wmsUrlErr, wmsUrlRow) => {
+                        const wmsApiBaseUrl = wmsUrlRow && wmsUrlRow.config_value
+                          ? wmsUrlRow.config_value
+                          : (process.env.WMS_API_BASE_URL || 'https://wms.foom.id/api');
+
+                        db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_access_token'], (wmsTokErr, wmsTokRow) => {
+                          const wmsTokenRaw = wmsTokRow && wmsTokRow.config_value
+                            ? String(wmsTokRow.config_value)
+                            : (process.env.WMS_ACCESS_TOKEN || '');
+                          let maskedWmsToken = null;
+                          if (wmsTokenRaw && wmsTokenRaw.length > 8) {
+                            maskedWmsToken = wmsTokenRaw.substring(0, wmsTokenRaw.length - 8) + '********';
+                          } else if (wmsTokenRaw) {
+                            maskedWmsToken = '********';
+                          }
+
+                          db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_username'], (wmsUserErr, wmsUserRow) => {
+                            const wmsUsername = wmsUserRow && wmsUserRow.config_value
+                              ? wmsUserRow.config_value
+                              : (process.env.WMS_USERNAME || '');
+
+                            db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_company_id'], (wmsCoErr, wmsCoRow) => {
+                              const wmsCompanyId = wmsCoRow && wmsCoRow.config_value
+                                ? wmsCoRow.config_value
+                                : (process.env.WMS_COMPANY_ID || 'FOOM');
+
+                              db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_site'], (wmsSiteErr, wmsSiteRow) => {
+                                const wmsSite = wmsSiteRow && wmsSiteRow.config_value
+                                  ? wmsSiteRow.config_value
+                                  : (process.env.WMS_SITE || 'PROD');
+
+                                res.json({
+                                  success: true,
+                                  config: {
+                                    sessionId: sessionId,
+                                    odooBaseUrl: odooBaseUrl,
+                                    externalApiBaseUrl: externalApiBaseUrl,
+                                    externalApiBearerToken: maskedBearer,
+                                    externalApiBearerTokenConfigured: !!bearerRaw,
+                                    externalApiUrl: externalApiUrl,
+                                    externalApiUrlActive: externalApiUrlActive,
+                                    externalApiUrlCompleted: externalApiUrlCompleted,
+                                    apiKey: maskedApiKey,
+                                    apiKeyConfigured: !!apiKey,
+                                    wmsApiBaseUrl,
+                                    wmsAccessToken: maskedWmsToken,
+                                    wmsAccessTokenConfigured: !!wmsTokenRaw,
+                                    wmsUsername,
+                                    wmsCompanyId,
+                                    wmsSite
+                                  }
+                                });
+                              });
+                            });
+                          });
+                        });
                       });
                     });
                   });
@@ -149,7 +191,12 @@ router.put('/config', (req, res) => {
     externalApiUrl,
     externalApiUrlActive,
     externalApiUrlCompleted,
-    apiKey
+    apiKey,
+    wmsApiBaseUrl,
+    wmsAccessToken,
+    wmsUsername,
+    wmsCompanyId,
+    wmsSite
   } = req.body;
   
   if (sessionId && sessionId.length < 20) {
@@ -318,14 +365,114 @@ router.put('/config', (req, res) => {
             if (err6) {
               return res.status(500).json({ success: false, error: err6.message });
             }
-            res.json({ success: true, message: 'Configuration saved successfully' });
+            saveWmsConfig();
           }
         );
       } else {
-        res.json({ success: true, message: 'Configuration saved successfully' });
+        saveWmsConfig();
       }
     }
+
+    function saveWmsConfig() {
+      const saveKey = (key, value, next) => {
+        if (value === undefined) return next();
+        db.run(
+          `INSERT INTO admin_config (config_key, config_value, updated_at)
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+          [key, value == null ? '' : String(value)],
+          (err) => {
+            if (err) return res.status(500).json({ success: false, error: err.message });
+            next();
+          }
+        );
+      };
+
+      saveKey('wms_api_base_url', wmsApiBaseUrl, () => {
+        saveKey('wms_access_token', wmsAccessToken, () => {
+          saveKey('wms_username', wmsUsername, () => {
+            saveKey('wms_company_id', wmsCompanyId, () => {
+              saveKey('wms_site', wmsSite, () => {
+                res.json({ success: true, message: 'Configuration saved successfully' });
+              });
+            });
+          });
+        });
+      });
+    }
   }
+});
+
+function persistWmsConfig(res, { wmsApiBaseUrl, wmsAccessToken, wmsUsername, wmsCompanyId, wmsSite }) {
+  const { enrichConfigFromToken, normalizeAccessToken } = require('../services/prieds-wms.service');
+
+  const token = wmsAccessToken !== undefined ? normalizeAccessToken(wmsAccessToken) : undefined;
+  let username = wmsUsername;
+  let companyId = wmsCompanyId;
+  if (token) {
+    const enriched = enrichConfigFromToken({
+      accessToken: token,
+      username: wmsUsername,
+      companyId: wmsCompanyId,
+      apiBaseUrl: wmsApiBaseUrl || '',
+      site: wmsSite || 'PROD'
+    });
+    if (!String(username || '').trim() && enriched.username) {
+      username = enriched.username;
+    }
+    if (!String(companyId || '').trim() && enriched.companyId) {
+      companyId = enriched.companyId;
+    }
+  }
+
+  const saveKey = (key, value, next) => {
+    if (value === undefined) return next();
+    db.run(
+      `INSERT INTO admin_config (config_key, config_value, updated_at)
+       VALUES ($1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+      [key, value == null ? '' : String(value)],
+      (err) => {
+        if (err) return res.status(500).json({ success: false, error: err.message });
+        next();
+      }
+    );
+  };
+
+  saveKey('wms_api_base_url', wmsApiBaseUrl, () => {
+    saveKey('wms_access_token', token, () => {
+      saveKey('wms_username', username, () => {
+        saveKey('wms_company_id', companyId, () => {
+          saveKey('wms_site', wmsSite, () => {
+            res.json({ success: true, message: 'WMS configuration saved successfully' });
+          });
+        });
+      });
+    });
+  });
+}
+
+// PUT /api/admin/wms-config — save WMS Prieds settings only (no Odoo session requirement)
+router.put('/wms-config', (req, res) => {
+  const { wmsApiBaseUrl, wmsAccessToken, wmsUsername, wmsCompanyId, wmsSite } = req.body;
+
+  db.get("SELECT table_name as name FROM information_schema.tables WHERE table_schema='public' AND table_name='admin_config'", (tableErr, tableRow) => {
+    if (tableErr || !tableRow) {
+      db.run(`CREATE TABLE IF NOT EXISTS admin_config (
+        id SERIAL PRIMARY KEY,
+        config_key TEXT UNIQUE NOT NULL,
+        config_value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )`, (createErr) => {
+        if (createErr) {
+          return res.status(500).json({ success: false, error: createErr.message });
+        }
+        persistWmsConfig(res, { wmsApiBaseUrl, wmsAccessToken, wmsUsername, wmsCompanyId, wmsSite });
+      });
+    } else {
+      persistWmsConfig(res, { wmsApiBaseUrl, wmsAccessToken, wmsUsername, wmsCompanyId, wmsSite });
+    }
+  });
 });
 
 // POST /api/admin/generate-api-key
@@ -794,6 +941,7 @@ router.post('/push-external-manufacturing-idle', async (req, res) => {
       skipped: summary.skipped,
       linkedFromRemote: summary.linkedFromRemote,
       limitUsed: summary.limitUsed,
+      dateWindow: summary.dateWindow,
       errors: summary.errors.slice(0, 50),
       errorCount: summary.errors.length
     });

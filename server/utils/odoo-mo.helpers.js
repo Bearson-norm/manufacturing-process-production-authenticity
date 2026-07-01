@@ -270,6 +270,76 @@ function buildCachedMoListQuery(productionType) {
   };
 }
 
+const EXTERNAL_MFG_MIN_CREATE_DATE = process.env.EXTERNAL_MFG_MIN_CREATE_DATE || '2026-07-01';
+const EXTERNAL_MFG_WINDOW_DAYS_BACK = Math.max(
+  0,
+  parseInt(String(process.env.EXTERNAL_MFG_WINDOW_DAYS_BACK || '6'), 10) || 6
+);
+const EXTERNAL_MFG_WINDOW_DAYS_FORWARD = Math.max(
+  0,
+  parseInt(String(process.env.EXTERNAL_MFG_WINDOW_DAYS_FORWARD || '6'), 10) || 6
+);
+
+/**
+ * MO rows eligible for external manufacturing idle POST (liquid only).
+ * @param {{ limit?: number }} [opts]
+ * @returns {{ query: string, params: unknown[], limitUsed: number, dateWindow: { from: string, to: string, minCreateDate: string }, filterDescription: string }}
+ */
+function buildExternalManufacturingIdlePushQuery(opts = {}) {
+  const limitUsed = Math.min(2000, Math.max(1, parseInt(String(opts.limit), 10) || 200));
+  const params = [];
+  const cartridgeNoteSql = buildCartridgeNoteFilterSql(params);
+  const deviceNoteSql = buildDeviceNoteFilterSql(params);
+
+  params.push(EXTERNAL_MFG_MIN_CREATE_DATE);
+  const minDateParam = params.length;
+
+  params.push(EXTERNAL_MFG_WINDOW_DAYS_BACK);
+  const daysBackParam = params.length;
+
+  params.push(EXTERNAL_MFG_WINDOW_DAYS_FORWARD);
+  const daysForwardParam = params.length;
+
+  params.push(limitUsed);
+  const limitParam = params.length;
+
+  const query = `
+    SELECT mo_number, sku_name, quantity, uom, note, create_date
+    FROM odoo_mo_cache
+    WHERE UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'LIQ%'
+      AND sku_name NOT ILIKE '%MIXING%'
+      AND sku_name NOT ILIKE '%BRAY%'
+      AND sku_name NOT ILIKE '%bundling%'
+      AND sku_name NOT ILIKE '%15 ML%'
+      AND sku_name NOT ILIKE '%15ML%'
+      AND NOT (${cartridgeNoteSql})
+      AND NOT (
+        UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'DEV%'
+        OR ${deviceNoteSql}
+      )
+      AND DATE(create_date::TIMESTAMP) >= GREATEST(
+        DATE(NOW() - ($${daysBackParam} || ' days')::INTERVAL),
+        DATE($${minDateParam}::TIMESTAMP)
+      )
+      AND DATE(create_date::TIMESTAMP) <= DATE(NOW() + ($${daysForwardParam} || ' days')::INTERVAL)
+    ORDER BY create_date DESC, mo_number ASC
+    LIMIT $${limitParam}
+  `;
+
+  return {
+    query,
+    params,
+    limitUsed,
+    dateWindow: {
+      minCreateDate: EXTERNAL_MFG_MIN_CREATE_DATE,
+      daysBack: EXTERNAL_MFG_WINDOW_DAYS_BACK,
+      daysForward: EXTERNAL_MFG_WINDOW_DAYS_FORWARD,
+    },
+    filterDescription:
+      'team_name LIQ%, exclude MIXING/BRAY/bundling/15ML, exclude cartridge/device notes, create_date rolling window',
+  };
+}
+
 async function backfillMoCacheTeamNames(pool) {
   const client = await pool.connect();
   try {
@@ -314,6 +384,7 @@ module.exports = {
   mapOdooMoToCacheParams,
   backfillMoCacheTeamNames,
   buildCachedMoListQuery,
+  buildExternalManufacturingIdlePushQuery,
   buildDeviceSyncDomain,
   buildDeviceNoteFilterSql,
   matchesDeviceNote,

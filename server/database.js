@@ -491,6 +491,66 @@ async function initializeTables() {
       )
     `);
 
+    // WMS repacking production (Prieds) — separate from manufacturing_identity
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS wms_repacking_carton (
+        id SERIAL PRIMARY KEY,
+        prieds_id TEXT UNIQUE NOT NULL,
+        manufacturing_order_id TEXT NOT NULL,
+        stock_transfer_order_id TEXT,
+        company_id TEXT,
+        site TEXT,
+        barcode TEXT,
+        carton_label TEXT,
+        sku TEXT,
+        sku_number TEXT,
+        description TEXT,
+        production_date TIMESTAMP,
+        expired_date TIMESTAMP,
+        created_time TIMESTAMP,
+        inbound_time TIMESTAMP,
+        counting INTEGER,
+        total_carton INTEGER,
+        qty INTEGER,
+        uom TEXT,
+        status INTEGER,
+        team_name TEXT,
+        sloc TEXT,
+        line TEXT,
+        cost REAL,
+        sku_count TEXT,
+        custom_field JSONB,
+        attribute_list JSONB,
+        raw_payload JSONB,
+        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS wms_repacking_qr (
+        id SERIAL PRIMARY KEY,
+        carton_id INTEGER NOT NULL REFERENCES wms_repacking_carton(id) ON DELETE CASCADE,
+        prieds_qr_id TEXT,
+        barcode TEXT,
+        qty INTEGER DEFAULT 1,
+        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (carton_id, prieds_qr_id)
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS wms_sync_log (
+        id SERIAL PRIMARY KEY,
+        manufacturing_order_id TEXT NOT NULL,
+        cartons_upserted INTEGER DEFAULT 0,
+        qr_upserted INTEGER DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'success',
+        error_message TEXT,
+        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // PIC List table
     await client.query(`
       CREATE TABLE IF NOT EXISTS pic_list (
@@ -563,6 +623,12 @@ async function initializeTables() {
       'CREATE INDEX IF NOT EXISTS idx_external_mfg_map_mo ON external_manufacturing_map(mo_number)',
       'CREATE INDEX IF NOT EXISTS idx_external_mfg_map_type ON external_manufacturing_map(production_type)',
       'CREATE INDEX IF NOT EXISTS idx_authenticity_vendor_active ON authenticity_vendor(is_active)',
+      'CREATE INDEX IF NOT EXISTS idx_wms_carton_mo ON wms_repacking_carton(manufacturing_order_id)',
+      'CREATE INDEX IF NOT EXISTS idx_wms_carton_prieds_id ON wms_repacking_carton(prieds_id)',
+      'CREATE INDEX IF NOT EXISTS idx_wms_carton_barcode ON wms_repacking_carton(barcode)',
+      'CREATE INDEX IF NOT EXISTS idx_wms_carton_created_time ON wms_repacking_carton(created_time)',
+      'CREATE INDEX IF NOT EXISTS idx_wms_qr_carton_id ON wms_repacking_qr(carton_id)',
+      'CREATE INDEX IF NOT EXISTS idx_wms_sync_log_mo ON wms_sync_log(manufacturing_order_id)',
     ];
 
     for (const indexQuery of indexes) {
