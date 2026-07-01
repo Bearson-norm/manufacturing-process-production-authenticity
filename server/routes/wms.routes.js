@@ -5,13 +5,49 @@ const {
   syncMoFromWms,
   testWmsConnection
 } = require('../services/prieds-wms.service');
-const { findMatchingRanges } = require('../utils/authenticity-range.utils');
+const { findMatchingRanges, verifyMoQrAgainstProduction } = require('../utils/authenticity-range.utils');
 
 function parsePagination(query) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 10));
   const offset = (page - 1) * limit;
   return { page, limit, offset };
+}
+
+const MAX_CARTONS_VERIFY = 500;
+
+async function getAllCartonsWithQrByMo(moNumber) {
+  const cartonsResult = await pool.query(
+    `SELECT c.*
+     FROM wms_repacking_carton c
+     WHERE c.manufacturing_order_id = $1
+     ORDER BY c.created_time DESC NULLS LAST, c.id DESC
+     LIMIT $2`,
+    [moNumber, MAX_CARTONS_VERIFY]
+  );
+
+  if (cartonsResult.rows.length === 0) {
+    return [];
+  }
+
+  const cartonIds = cartonsResult.rows.map((r) => r.id);
+  const qrResult = await pool.query(
+    `SELECT * FROM wms_repacking_qr
+     WHERE carton_id = ANY($1::int[])
+     ORDER BY carton_id ASC, id ASC`,
+    [cartonIds]
+  );
+
+  const qrByCarton = qrResult.rows.reduce((acc, qr) => {
+    if (!acc[qr.carton_id]) acc[qr.carton_id] = [];
+    acc[qr.carton_id].push(qr);
+    return acc;
+  }, {});
+
+  return cartonsResult.rows.map((row) => ({
+    ...row,
+    qr_list: qrByCarton[row.id] || []
+  }));
 }
 
 async function getProductionRowsByMo(moNumber) {
@@ -320,6 +356,34 @@ router.post('/verify-authenticity', async (req, res) => {
     });
   } catch (error) {
     console.error('POST /api/wms/verify-authenticity:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/wms/verify-all-qr — bulk verify every QR in every carton vs production_results
+router.post('/verify-all-qr', async (req, res) => {
+  try {
+    const moNumber = (req.body.mo_number || req.body.moNumber || req.query.mo_number || '').trim();
+    if (!moNumber) {
+      return res.status(400).json({ success: false, error: 'mo_number is required' });
+    }
+
+    const [productionRows, cartonsWithQr] = await Promise.all([
+      getProductionRowsByMo(moNumber),
+      getAllCartonsWithQrByMo(moNumber)
+    ]);
+
+    const { summary, cartons, all_ranges } = verifyMoQrAgainstProduction(productionRows, cartonsWithQr);
+
+    res.json({
+      success: true,
+      mo_number: moNumber,
+      summary,
+      cartons,
+      all_ranges
+    });
+  } catch (error) {
+    console.error('POST /api/wms/verify-all-qr:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

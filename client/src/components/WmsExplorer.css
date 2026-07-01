@@ -291,6 +291,58 @@
   color: #fca5a5;
 }
 
+.wms-bulk-verify-section {
+  max-width: 1600px;
+  margin: 16px auto 0;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.wms-bulk-verify-section h2 {
+  margin: 0 0 8px;
+  color: #e2e8f0;
+  font-size: 16px;
+}
+
+.wms-bulk-desc {
+  margin: 0 0 12px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.wms-bulk-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wms-bulk-carton-list {
+  margin-top: 12px;
+}
+
+.wms-bulk-carton-ok {
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.wms-bulk-carton-fail {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.wms-qr-status-ok {
+  color: #6ee7b7;
+  font-weight: 600;
+}
+
+.wms-qr-status-fail {
+  color: #fca5a5;
+  font-weight: 600;
+}
+
 .wms-message {
   max-width: 1600px;
   margin: 0 auto 12px;

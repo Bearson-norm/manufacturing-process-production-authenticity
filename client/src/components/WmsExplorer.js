@@ -61,6 +61,12 @@ function WmsExplorer() {
   const [highlightProdIds, setHighlightProdIds] = useState(new Set());
   const [highlightRangeKeys, setHighlightRangeKeys] = useState(new Set());
 
+  const [bulkVerifyLoading, setBulkVerifyLoading] = useState(false);
+  const [bulkVerifyResult, setBulkVerifyResult] = useState(null);
+  const [expandedBulkCartons, setExpandedBulkCartons] = useState({});
+  const [showFailedCartonsOnly, setShowFailedCartonsOnly] = useState(false);
+  const [showFailedQrOnly, setShowFailedQrOnly] = useState(false);
+
   const loadData = useCallback(async (moNumber, pageOverride) => {
     if (!moNumber) return;
 
@@ -69,6 +75,8 @@ function WmsExplorer() {
     setLoading(true);
     setMessage({ type: '', text: '' });
     setVerifyResult(null);
+    setBulkVerifyResult(null);
+    setExpandedBulkCartons({});
     setHighlightProdIds(new Set());
     setHighlightRangeKeys(new Set());
 
@@ -221,6 +229,50 @@ function WmsExplorer() {
       setVerifyLoading(false);
     }
   };
+
+  const handleBulkVerify = async () => {
+    if (!activeMo) {
+      setMessage({ type: 'error', text: 'Cari MO terlebih dahulu' });
+      return;
+    }
+
+    setBulkVerifyLoading(true);
+    setBulkVerifyResult(null);
+    setExpandedBulkCartons({});
+
+    try {
+      const response = await axios.post('/api/wms/verify-all-qr', { mo_number: activeMo });
+      if (response.data.success) {
+        setBulkVerifyResult(response.data);
+      } else {
+        setMessage({ type: 'error', text: response.data.error || 'Verifikasi bulk gagal' });
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.error || 'Verifikasi bulk gagal'
+      });
+    } finally {
+      setBulkVerifyLoading(false);
+    }
+  };
+
+  const formatMatchedRange = (ranges) => {
+    if (!ranges || ranges.length === 0) return '-';
+    const r = ranges[0];
+    return `Roll ${r.rollNumber || '-'} | ${r.firstAuthenticity} – ${r.lastAuthenticity}`;
+  };
+
+  const formatMatchedMeta = (ranges) => {
+    if (!ranges || ranges.length === 0) return '-';
+    const r = ranges[0];
+    return `${r.pic || '-'} / ${r.production_type || '-'}`;
+  };
+
+  const bulkCartons = (bulkVerifyResult?.cartons || []).filter((carton) => {
+    if (!showFailedCartonsOnly) return true;
+    return carton.unmatched > 0 || (carton.qr_total === 0 && !carton.all_ok);
+  });
 
   const prodTotal = productionRows.length;
   const prodPageRows = productionRows.slice((prodPage - 1) * PAGE_SIZE, prodPage * PAGE_SIZE);
@@ -558,6 +610,185 @@ function WmsExplorer() {
 
         {verifyResult?.error && (
           <div className="wms-verify-result wms-verify-error">{verifyResult.error}</div>
+        )}
+      </div>
+
+      <div className="wms-bulk-verify-section">
+        <h2>Verifikasi Semua QR Carton</h2>
+        <p className="wms-bulk-desc">
+          Periksa setiap QR barcode di semua carton WMS terhadap range authenticity di production_results.
+        </p>
+        <div className="wms-verify-form">
+          <button
+            type="button"
+            className="wms-btn wms-btn-primary"
+            onClick={handleBulkVerify}
+            disabled={bulkVerifyLoading || !activeMo}
+          >
+            {bulkVerifyLoading ? 'Memverifikasi...' : 'Verifikasi Semua QR'}
+          </button>
+          {bulkVerifyResult && (
+            <>
+              <label className="wms-bulk-toggle">
+                <input
+                  type="checkbox"
+                  checked={showFailedCartonsOnly}
+                  onChange={(e) => setShowFailedCartonsOnly(e.target.checked)}
+                />
+                Hanya carton ada QR gagal
+              </label>
+              <label className="wms-bulk-toggle">
+                <input
+                  type="checkbox"
+                  checked={showFailedQrOnly}
+                  onChange={(e) => setShowFailedQrOnly(e.target.checked)}
+                />
+                Saat expand, hanya QR gagal
+              </label>
+            </>
+          )}
+        </div>
+
+        {bulkVerifyResult && (
+          <>
+            <div
+              className={`wms-verify-result ${
+                bulkVerifyResult.summary?.all_ok ? 'wms-verify-success' : 'wms-verify-error'
+              }`}
+            >
+              <div>
+                Carton: <strong>{bulkVerifyResult.summary?.total_cartons || 0}</strong>
+                {' '}| QR: <strong>{bulkVerifyResult.summary?.total_qr || 0}</strong>
+                {' '}| OK: <strong>{bulkVerifyResult.summary?.matched || 0}</strong>
+                {' '}| Gagal: <strong>{bulkVerifyResult.summary?.unmatched || 0}</strong>
+              </div>
+              {bulkVerifyResult.summary?.message && (
+                <div style={{ marginTop: '8px' }}>{bulkVerifyResult.summary.message}</div>
+              )}
+              {!bulkVerifyResult.summary?.message &&
+                bulkVerifyResult.summary?.all_ok &&
+                bulkVerifyResult.summary?.total_qr > 0 && (
+                  <div style={{ marginTop: '8px' }}>Semua QR dalam range production_results.</div>
+                )}
+            </div>
+
+            {bulkCartons.length > 0 ? (
+              <div className="wms-table-wrap wms-bulk-carton-list">
+                <table className="wms-table">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>Carton Barcode</th>
+                      <th>SFP</th>
+                      <th>Count</th>
+                      <th>QR OK</th>
+                      <th>QR Gagal</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkCartons.map((carton) => {
+                      const qrItems = (carton.qr_items || []).filter((qr) => {
+                        if (!showFailedQrOnly) return true;
+                        return !qr.in_range;
+                      });
+
+                      return (
+                        <React.Fragment key={carton.carton_id}>
+                          <tr className={carton.all_ok ? 'wms-bulk-carton-ok' : 'wms-bulk-carton-fail'}>
+                            <td>
+                              <button
+                                type="button"
+                                className="wms-expand-btn"
+                                onClick={() =>
+                                  setExpandedBulkCartons((prev) => ({
+                                    ...prev,
+                                    [carton.carton_id]: !prev[carton.carton_id]
+                                  }))
+                                }
+                              >
+                                {expandedBulkCartons[carton.carton_id] ? '−' : '+'} QR
+                              </button>
+                            </td>
+                            <td>{carton.barcode || '-'}</td>
+                            <td>{carton.stock_transfer_order_id || '-'}</td>
+                            <td>{carton.counting ?? '-'} / {carton.total_carton ?? '-'}</td>
+                            <td>{carton.matched}</td>
+                            <td>{carton.unmatched}</td>
+                            <td>
+                              {carton.qr_total === 0 ? (
+                                <span className="wms-qr-status-fail">Tidak ada QR</span>
+                              ) : carton.all_ok ? (
+                                <span className="wms-qr-status-ok">Semua OK</span>
+                              ) : (
+                                <span className="wms-qr-status-fail">Ada gagal</span>
+                              )}
+                            </td>
+                          </tr>
+                          {expandedBulkCartons[carton.carton_id] && (
+                            <tr>
+                              <td colSpan={7}>
+                                <table className="wms-subtable">
+                                  <thead>
+                                    <tr>
+                                      <th>QR Barcode</th>
+                                      <th>Qty</th>
+                                      <th>Status</th>
+                                      <th>Range cocok</th>
+                                      <th>PIC / Type</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {qrItems.map((qr) => (
+                                      <tr
+                                        key={`${carton.carton_id}-${qr.prieds_qr_id || qr.barcode}`}
+                                        className={qr.in_range ? 'wms-bulk-carton-ok' : 'wms-bulk-carton-fail'}
+                                      >
+                                        <td>{qr.barcode || '-'}</td>
+                                        <td>{qr.qty ?? 1}</td>
+                                        <td>
+                                          {qr.in_range ? (
+                                            <span className="wms-qr-status-ok">Dalam range</span>
+                                          ) : (
+                                            <span className="wms-qr-status-fail">
+                                              {qr.reason === 'invalid_barcode'
+                                                ? 'Barcode invalid'
+                                                : qr.reason === 'no_production_ranges'
+                                                  ? 'Tidak ada range'
+                                                  : 'Di luar range'}
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td>{formatMatchedRange(qr.matched_ranges)}</td>
+                                        <td>{formatMatchedMeta(qr.matched_ranges)}</td>
+                                      </tr>
+                                    ))}
+                                    {qrItems.length === 0 && (
+                                      <tr>
+                                        <td colSpan={5}>
+                                          {showFailedQrOnly
+                                            ? 'Tidak ada QR gagal di carton ini'
+                                            : 'Tidak ada QR'}
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : bulkVerifyResult.summary?.total_cartons === 0 ? (
+              <div className="wms-empty">Belum ada data WMS — sync dari WMS terlebih dahulu.</div>
+            ) : (
+              <div className="wms-empty">Tidak ada carton yang cocok dengan filter.</div>
+            )}
+          </>
         )}
       </div>
     </div>
