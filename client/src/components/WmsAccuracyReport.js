@@ -63,6 +63,8 @@ function WmsAccuracyReport() {
 
   useEffect(() => {
     loadReport(1);
+    // Mount-only initial load; filters applied via Muat Ulang button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const totalPages = Math.max(1, Math.ceil((report?.total || 0) / PAGE_SIZE));
