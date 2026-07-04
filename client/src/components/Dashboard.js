@@ -88,6 +88,11 @@ function Dashboard({ setIsAuthenticated }) {
                 <h3>WMS vs Production Explorer</h3>
                 <p>Bandingkan data repacking WMS dengan production_results per MO</p>
               </div>
+              <div className="production-card" onClick={() => navigate('/wms-accuracy-report')}>
+                <div className="card-icon">📋</div>
+                <h3>Laporan Keakuratan QR WMS</h3>
+                <p>Semua MO production dengan persentase error QR dan status compare WMS</p>
+              </div>
             </div>
           </>
         )}

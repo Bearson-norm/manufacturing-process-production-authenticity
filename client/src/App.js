@@ -9,6 +9,7 @@ import Admin from './components/Admin';
 import ReportDashboard from './components/ReportDashboard';
 import ProductionChart from './components/ProductionChart';
 import WmsExplorer from './components/WmsExplorer';
+import WmsAccuracyReport from './components/WmsAccuracyReport';
 import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 
@@ -92,6 +93,14 @@ function App() {
                 <WmsExplorer />
               </ProtectedRoute>
             } 
+          />
+          <Route
+            path="/wms-accuracy-report"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <WmsAccuracyReport />
+              </ProtectedRoute>
+            }
           />
           <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
         </Routes>

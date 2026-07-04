@@ -96,6 +96,30 @@ function normalizeCartonQrList(carton) {
   return [];
 }
 
+function roundPercent(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function buildQtyAccuracyMetrics(totalWmsQty, matchedQty, failedQty) {
+  if (totalWmsQty <= 0) {
+    return {
+      total_wms_qty: totalWmsQty,
+      matched_qty: matchedQty,
+      failed_qty: failedQty,
+      accuracy_percent: null,
+      error_rate_percent: null
+    };
+  }
+
+  return {
+    total_wms_qty: totalWmsQty,
+    matched_qty: matchedQty,
+    failed_qty: failedQty,
+    accuracy_percent: roundPercent((matchedQty / totalWmsQty) * 100),
+    error_rate_percent: roundPercent((failedQty / totalWmsQty) * 100)
+  };
+}
+
 /**
  * Verify all QR barcodes in WMS cartons against production_results ranges.
  * @param {Array<object>} productionRows
@@ -108,35 +132,51 @@ function verifyMoQrAgainstProduction(productionRows, cartonsWithQr) {
   let totalQr = 0;
   let matched = 0;
   let unmatched = 0;
+  let totalWmsQty = 0;
+  let matchedQty = 0;
+  let failedQty = 0;
 
   const cartons = (cartonsWithQr || []).map((carton) => {
     const qrList = normalizeCartonQrList(carton);
     let cartonMatched = 0;
     let cartonUnmatched = 0;
+    let cartonWmsQty = 0;
+    let cartonMatchedQty = 0;
+    let cartonFailedQty = 0;
 
     const qrItems = qrList.map((qr) => {
       const verification = noProductionRanges
         ? { in_range: false, reason: 'no_production_ranges', matched_ranges: [] }
         : verifyQrBarcodeAgainstProduction(productionRows, qr.barcode);
 
+      const qty = qr.qty != null ? Number(qr.qty) : 1;
       totalQr += 1;
+      totalWmsQty += qty;
+      cartonWmsQty += qty;
+
       if (verification.in_range) {
         matched += 1;
         cartonMatched += 1;
+        matchedQty += qty;
+        cartonMatchedQty += qty;
       } else {
         unmatched += 1;
         cartonUnmatched += 1;
+        failedQty += qty;
+        cartonFailedQty += qty;
       }
 
       return {
         prieds_qr_id: qr.prieds_qr_id || qr.id || null,
         barcode: qr.barcode || '',
-        qty: qr.qty != null ? Number(qr.qty) : 1,
+        qty,
         in_range: verification.in_range,
         reason: verification.reason || null,
         matched_ranges: verification.matched_ranges || []
       };
     });
+
+    const cartonQtyMetrics = buildQtyAccuracyMetrics(cartonWmsQty, cartonMatchedQty, cartonFailedQty);
 
     return {
       carton_id: carton.id,
@@ -148,9 +188,12 @@ function verifyMoQrAgainstProduction(productionRows, cartonsWithQr) {
       matched: cartonMatched,
       unmatched: cartonUnmatched,
       all_ok: cartonUnmatched === 0 && qrItems.length > 0,
+      ...cartonQtyMetrics,
       qr_items: qrItems
     };
   });
+
+  const qtyMetrics = buildQtyAccuracyMetrics(totalWmsQty, matchedQty, failedQty);
 
   const summary = {
     total_cartons: cartons.length,
@@ -160,6 +203,7 @@ function verifyMoQrAgainstProduction(productionRows, cartonsWithQr) {
     production_range_count: allRanges.length,
     no_production_ranges: noProductionRanges,
     all_ok: unmatched === 0 && totalQr > 0,
+    ...qtyMetrics,
     message: null
   };
 
@@ -182,5 +226,6 @@ module.exports = {
   collectAllRangesFromProduction,
   findMatchingRanges,
   verifyQrBarcodeAgainstProduction,
-  verifyMoQrAgainstProduction
+  verifyMoQrAgainstProduction,
+  buildQtyAccuracyMetrics
 };

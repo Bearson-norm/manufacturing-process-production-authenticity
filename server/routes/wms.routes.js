@@ -71,7 +71,8 @@ async function getWmsSummary(moNumber) {
        COALESCE(SUM(qty), 0)::int AS total_qty,
        MAX(sku) AS sku,
        MAX(description) AS description,
-       MAX(stock_transfer_order_id) AS sfp
+       MAX(stock_transfer_order_id) AS sfp,
+       MAX(synced_at) AS last_synced_at
      FROM wms_repacking_carton
      WHERE manufacturing_order_id = $1`,
     [moNumber]
@@ -82,7 +83,74 @@ async function getWmsSummary(moNumber) {
     total_qty: 0,
     sku: null,
     description: null,
-    sfp: null
+    sfp: null,
+    last_synced_at: null
+  };
+}
+
+function parseOptionalDate(value, endOfDay) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  if (endOfDay) {
+    parsed.setHours(23, 59, 59, 999);
+  } else {
+    parsed.setHours(0, 0, 0, 0);
+  }
+  return parsed.toISOString();
+}
+
+async function buildMoAccuracyReportRow(moNumber, baseRow) {
+  const hasWmsData = (baseRow.wms_carton_count || 0) > 0;
+  const hasProduction = (baseRow.session_count || 0) > 0;
+
+  let wmsStatus = 'production_only';
+  if (hasWmsData && hasProduction) wmsStatus = 'both';
+  else if (hasWmsData) wmsStatus = 'wms_only';
+
+  if (!hasWmsData) {
+    return {
+      mo_number: moNumber,
+      session_count: baseRow.session_count,
+      first_completed_at: baseRow.first_completed_at,
+      last_completed_at: baseRow.last_completed_at,
+      sku_name: baseRow.sku_name,
+      wms_status: wmsStatus,
+      has_wms_data: false,
+      wms_carton_count: 0,
+      last_synced_at: null,
+      total_wms_qty: 0,
+      matched_qty: 0,
+      failed_qty: 0,
+      accuracy_percent: null,
+      error_rate_percent: null,
+      verify_message: 'Belum sync WMS'
+    };
+  }
+
+  const [productionRows, cartonsWithQr] = await Promise.all([
+    getProductionRowsByMo(moNumber),
+    getAllCartonsWithQrByMo(moNumber)
+  ]);
+
+  const { summary } = verifyMoQrAgainstProduction(productionRows, cartonsWithQr);
+
+  return {
+    mo_number: moNumber,
+    session_count: baseRow.session_count,
+    first_completed_at: baseRow.first_completed_at,
+    last_completed_at: baseRow.last_completed_at,
+    sku_name: baseRow.sku_name,
+    wms_status: wmsStatus,
+    has_wms_data: true,
+    wms_carton_count: baseRow.wms_carton_count,
+    last_synced_at: baseRow.last_synced_at,
+    total_wms_qty: summary.total_wms_qty,
+    matched_qty: summary.matched_qty,
+    failed_qty: summary.failed_qty,
+    accuracy_percent: summary.accuracy_percent,
+    error_rate_percent: summary.error_rate_percent,
+    verify_message: summary.total_wms_qty === 0 ? summary.message : null
   };
 }
 
@@ -384,6 +452,97 @@ router.post('/verify-all-qr', async (req, res) => {
     });
   } catch (error) {
     console.error('POST /api/wms/verify-all-qr:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/wms/mo-accuracy-report — MO list from production_results with qty-weighted error metrics
+router.get('/mo-accuracy-report', async (req, res) => {
+  try {
+    const search = (req.query.search || '').trim();
+    const dateFrom = parseOptionalDate(req.query.date_from || req.query.dateFrom, false);
+    const dateTo = parseOptionalDate(req.query.date_to || req.query.dateTo, true);
+    const { page, limit, offset } = parsePagination(req.query);
+
+    const params = [];
+    const filters = [`pr.mo_number IS NOT NULL`, `TRIM(pr.mo_number) <> ''`];
+
+    if (dateFrom) {
+      params.push(dateFrom);
+      filters.push(`pr.completed_at >= $${params.length}`);
+    }
+    if (dateTo) {
+      params.push(dateTo);
+      filters.push(`pr.completed_at <= $${params.length}`);
+    }
+    if (search) {
+      params.push(`%${search}%`);
+      filters.push(`pr.mo_number ILIKE $${params.length}`);
+    }
+
+    const whereClause = filters.join(' AND ');
+
+    const countResult = await pool.query(
+      `SELECT COUNT(DISTINCT pr.mo_number)::int AS total
+       FROM production_results pr
+       WHERE ${whereClause}`,
+      params
+    );
+    const total = countResult.rows[0].total;
+
+    const listParams = [...params, limit, offset];
+    const listResult = await pool.query(
+      `SELECT
+         pr.mo_number,
+         COUNT(DISTINCT pr.id)::int AS session_count,
+         MIN(pr.completed_at) AS first_completed_at,
+         MAX(pr.completed_at) AS last_completed_at,
+         MAX(pr.sku_name) AS sku_name,
+         COALESCE(w.carton_count, 0)::int AS wms_carton_count,
+         w.last_synced_at
+       FROM production_results pr
+       LEFT JOIN (
+         SELECT manufacturing_order_id,
+                COUNT(*)::int AS carton_count,
+                MAX(synced_at) AS last_synced_at
+         FROM wms_repacking_carton
+         GROUP BY manufacturing_order_id
+       ) w ON w.manufacturing_order_id = pr.mo_number
+       WHERE ${whereClause}
+       GROUP BY pr.mo_number, w.carton_count, w.last_synced_at
+       ORDER BY MAX(pr.completed_at) DESC NULLS LAST
+       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+      listParams
+    );
+
+    const rows = await Promise.all(
+      listResult.rows.map((row) => buildMoAccuracyReportRow(row.mo_number, row))
+    );
+
+    const withWms = rows.filter((row) => row.has_wms_data).length;
+    const measurable = rows.filter((row) => row.total_wms_qty > 0);
+    const avgErrorRate = measurable.length > 0
+      ? Math.round(
+        (measurable.reduce((sum, row) => sum + (row.error_rate_percent || 0), 0) / measurable.length) * 100
+      ) / 100
+      : null;
+
+    res.json({
+      success: true,
+      total,
+      page,
+      limit,
+      date_from: dateFrom,
+      date_to: dateTo,
+      overall: {
+        mo_count: rows.length,
+        with_wms: withWms,
+        avg_error_rate_percent: avgErrorRate
+      },
+      data: rows
+    });
+  } catch (error) {
+    console.error('GET /api/wms/mo-accuracy-report:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

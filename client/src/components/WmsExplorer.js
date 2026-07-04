@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import './WmsExplorer.css';
+import { formatPercent, getAccuracyColorClass } from '../utils/wmsAccuracy';
 
 const PAGE_SIZE = 10;
 
@@ -296,6 +297,13 @@ function WmsExplorer() {
           ← Kembali ke Dashboard
         </button>
         <h1>WMS vs Production Explorer</h1>
+        <button
+          type="button"
+          className="wms-btn wms-btn-secondary"
+          onClick={() => navigate('/wms-accuracy-report')}
+        >
+          Laporan Keakuratan MO
+        </button>
       </div>
 
       {message.text && (
@@ -662,6 +670,23 @@ function WmsExplorer() {
                 {' '}| OK: <strong>{bulkVerifyResult.summary?.matched || 0}</strong>
                 {' '}| Gagal: <strong>{bulkVerifyResult.summary?.unmatched || 0}</strong>
               </div>
+              <div className="wms-accuracy-summary">
+                Qty WMS: <strong>{bulkVerifyResult.summary?.total_wms_qty ?? 0}</strong>
+                {' '}| Qty OK: <strong>{bulkVerifyResult.summary?.matched_qty ?? 0}</strong>
+                {' '}| Qty gagal: <strong>{bulkVerifyResult.summary?.failed_qty ?? 0}</strong>
+                {' '}| Keakuratan:{' '}
+                <span
+                  className={`wms-accuracy-pill ${getAccuracyColorClass(bulkVerifyResult.summary?.error_rate_percent)}`}
+                >
+                  {formatPercent(bulkVerifyResult.summary?.accuracy_percent)}
+                </span>
+                {' '}| Error:{' '}
+                <span
+                  className={`wms-accuracy-pill ${getAccuracyColorClass(bulkVerifyResult.summary?.error_rate_percent)}`}
+                >
+                  {formatPercent(bulkVerifyResult.summary?.error_rate_percent)}
+                </span>
+              </div>
               {bulkVerifyResult.summary?.message && (
                 <div style={{ marginTop: '8px' }}>{bulkVerifyResult.summary.message}</div>
               )}
@@ -683,6 +708,7 @@ function WmsExplorer() {
                       <th>Count</th>
                       <th>QR OK</th>
                       <th>QR Gagal</th>
+                      <th>Keakuratan</th>
                       <th>Status</th>
                     </tr>
                   </thead>
@@ -716,6 +742,18 @@ function WmsExplorer() {
                             <td>{carton.matched}</td>
                             <td>{carton.unmatched}</td>
                             <td>
+                              <span
+                                className={`wms-accuracy-pill ${getAccuracyColorClass(carton.error_rate_percent)}`}
+                              >
+                                {formatPercent(carton.accuracy_percent)}
+                              </span>
+                              {carton.total_wms_qty > 0 && (
+                                <div className="wms-accuracy-subtext">
+                                  {carton.failed_qty}/{carton.total_wms_qty} qty gagal
+                                </div>
+                              )}
+                            </td>
+                            <td>
                               {carton.qr_total === 0 ? (
                                 <span className="wms-qr-status-fail">Tidak ada QR</span>
                               ) : carton.all_ok ? (
@@ -727,7 +765,7 @@ function WmsExplorer() {
                           </tr>
                           {expandedBulkCartons[carton.carton_id] && (
                             <tr>
-                              <td colSpan={7}>
+                              <td colSpan={8}>
                                 <table className="wms-subtable">
                                   <thead>
                                     <tr>
