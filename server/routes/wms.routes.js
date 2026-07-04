@@ -16,6 +16,7 @@ function parsePagination(query) {
 
 const MAX_CARTONS_VERIFY = 500;
 const MAX_SYNC_MO = 100;
+const MAX_SYNC_MO_PER_REQUEST = 10;
 
 async function getAllCartonsWithQrByMo(moNumber) {
   const cartonsResult = await pool.query(
@@ -644,6 +645,13 @@ router.post('/sync-mo-batch', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Tidak ada MO untuk disync sesuai filter.'
+      });
+    }
+
+    if (moNumbers.length > MAX_SYNC_MO_PER_REQUEST) {
+      return res.status(400).json({
+        success: false,
+        error: `Maksimum ${MAX_SYNC_MO_PER_REQUEST} MO per request. Kirim dalam beberapa chunk (frontend sync batch).`
       });
     }
 

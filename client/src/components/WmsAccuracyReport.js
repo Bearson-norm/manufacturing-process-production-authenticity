@@ -9,6 +9,7 @@ import {
 import './WmsAccuracyReport.css';
 
 const PAGE_SIZE = 25;
+const SYNC_CHUNK_SIZE = 5;
 
 function formatDate(value) {
   if (!value) return '-';
@@ -31,6 +32,7 @@ function WmsAccuracyReport() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [syncingBatch, setSyncingBatch] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(null);
   const [syncSummary, setSyncSummary] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [report, setReport] = useState(null);
@@ -108,21 +110,66 @@ function WmsAccuracyReport() {
       if (!confirmed) return;
 
       setSyncingBatch(true);
-      const syncRes = await axios.post('/api/wms/sync-mo-batch', {
-        ...buildFilterParams(),
-        mo_numbers: moNumbers
-      });
+      setSyncProgress({ current: 0, total: moNumbers.length, mo_number: moNumbers[0] });
 
-      if (syncRes.data.success) {
-        setSyncSummary(syncRes.data);
-        setMessage({
-          type: syncRes.data.failed > 0 ? 'warning' : 'success',
-          text: `Sync selesai: ${syncRes.data.synced_ok} OK, ${syncRes.data.synced_warning} warning, ${syncRes.data.failed} gagal`
+      const aggregated = {
+        total: moNumbers.length,
+        synced_ok: 0,
+        synced_warning: 0,
+        failed: 0,
+        results: []
+      };
+
+      for (let i = 0; i < moNumbers.length; i += SYNC_CHUNK_SIZE) {
+        const chunk = moNumbers.slice(i, i + SYNC_CHUNK_SIZE);
+        setSyncProgress({
+          current: Math.min(i + chunk.length, moNumbers.length),
+          total: moNumbers.length,
+          mo_number: chunk[0]
         });
-        await loadReport(page);
-      } else {
-        setMessage({ type: 'error', text: syncRes.data.error || 'Batch sync gagal' });
+
+        try {
+          const syncRes = await axios.post('/api/wms/sync-mo-batch', {
+            mo_numbers: chunk
+          });
+
+          if (syncRes.data.success) {
+            aggregated.synced_ok += syncRes.data.synced_ok || 0;
+            aggregated.synced_warning += syncRes.data.synced_warning || 0;
+            aggregated.failed += syncRes.data.failed || 0;
+            aggregated.results.push(...(syncRes.data.results || []));
+          } else {
+            aggregated.failed += chunk.length;
+            chunk.forEach((mo) => {
+              aggregated.results.push({
+                mo_number: mo,
+                success: false,
+                error: syncRes.data.error || 'Chunk sync gagal'
+              });
+            });
+          }
+        } catch (chunkError) {
+          const chunkMsg = chunkError.response?.data?.error ||
+            (chunkError.response?.status === 502
+              ? 'Gateway timeout — coba persempit filter atau sync ulang'
+              : 'Chunk sync gagal');
+          aggregated.failed += chunk.length;
+          chunk.forEach((mo) => {
+            aggregated.results.push({
+              mo_number: mo,
+              success: false,
+              error: chunkMsg
+            });
+          });
+        }
       }
+
+      setSyncSummary(aggregated);
+      setMessage({
+        type: aggregated.failed > 0 ? 'warning' : 'success',
+        text: `Sync selesai: ${aggregated.synced_ok} OK, ${aggregated.synced_warning} warning, ${aggregated.failed} gagal`
+      });
+      await loadReport(page);
     } catch (error) {
       setMessage({
         type: 'error',
@@ -130,6 +177,7 @@ function WmsAccuracyReport() {
       });
     } finally {
       setSyncingBatch(false);
+      setSyncProgress(null);
     }
   };
 
@@ -207,7 +255,14 @@ function WmsAccuracyReport() {
 
       {syncingBatch && (
         <div className="wms-sync-batch-panel wms-sync-batch-progress">
-          Menyinkronkan WMS... (memproses batch, mohon tunggu)
+          Menyinkronkan WMS...
+          {syncProgress && (
+            <span>
+              {' '}
+              ({syncProgress.current}/{syncProgress.total} MO
+              {syncProgress.mo_number ? ` — ${syncProgress.mo_number}` : ''})
+            </span>
+          )}
         </div>
       )}
 
