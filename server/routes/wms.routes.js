@@ -212,8 +212,12 @@ async function buildMoAccuracyReportRow(moNumber, baseRow) {
       total_wms_qty: 0,
       matched_qty: 0,
       failed_qty: 0,
+      total_qr: 0,
+      matched_qr: 0,
+      failed_qr: 0,
       accuracy_percent: null,
       error_rate_percent: null,
+      qty_error_rate_percent: null,
       verify_message: 'Belum sync WMS'
     };
   }
@@ -238,9 +242,13 @@ async function buildMoAccuracyReportRow(moNumber, baseRow) {
     total_wms_qty: summary.total_wms_qty,
     matched_qty: summary.matched_qty,
     failed_qty: summary.failed_qty,
+    total_qr: summary.total_qr,
+    matched_qr: summary.matched,
+    failed_qr: summary.unmatched,
     accuracy_percent: summary.accuracy_percent,
     error_rate_percent: summary.error_rate_percent,
-    verify_message: summary.total_wms_qty === 0 ? summary.message : null
+    qty_error_rate_percent: summary.qty_error_rate_percent,
+    verify_message: summary.total_qr === 0 ? summary.message : null
   };
 }
 
@@ -609,11 +617,11 @@ router.get('/mo-accuracy-report', async (req, res) => {
     );
 
     const withWms = rows.filter((row) => row.has_wms_data).length;
-    const measurable = rows.filter((row) => row.total_wms_qty > 0);
-    const avgErrorRate = measurable.length > 0
-      ? Math.round(
-        (measurable.reduce((sum, row) => sum + (row.error_rate_percent || 0), 0) / measurable.length) * 100
-      ) / 100
+    const qrMeasurable = rows.filter((row) => (row.total_qr || 0) > 0);
+    const aggregateTotalQr = qrMeasurable.reduce((sum, row) => sum + (row.total_qr || 0), 0);
+    const aggregateFailedQr = qrMeasurable.reduce((sum, row) => sum + (row.failed_qr || 0), 0);
+    const avgErrorRate = aggregateTotalQr > 0
+      ? Math.round((aggregateFailedQr / aggregateTotalQr) * 10000) / 100
       : null;
 
     res.json({
@@ -626,6 +634,8 @@ router.get('/mo-accuracy-report', async (req, res) => {
       overall: {
         mo_count: rows.length,
         with_wms: withWms,
+        total_qr: aggregateTotalQr,
+        failed_qr: aggregateFailedQr,
         avg_error_rate_percent: avgErrorRate
       },
       data: rows

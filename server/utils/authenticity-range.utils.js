@@ -106,8 +106,8 @@ function buildQtyAccuracyMetrics(totalWmsQty, matchedQty, failedQty) {
       total_wms_qty: totalWmsQty,
       matched_qty: matchedQty,
       failed_qty: failedQty,
-      accuracy_percent: null,
-      error_rate_percent: null
+      qty_accuracy_percent: null,
+      qty_error_rate_percent: null
     };
   }
 
@@ -115,8 +115,22 @@ function buildQtyAccuracyMetrics(totalWmsQty, matchedQty, failedQty) {
     total_wms_qty: totalWmsQty,
     matched_qty: matchedQty,
     failed_qty: failedQty,
-    accuracy_percent: roundPercent((matchedQty / totalWmsQty) * 100),
-    error_rate_percent: roundPercent((failedQty / totalWmsQty) * 100)
+    qty_accuracy_percent: roundPercent((matchedQty / totalWmsQty) * 100),
+    qty_error_rate_percent: roundPercent((failedQty / totalWmsQty) * 100)
+  };
+}
+
+function buildQrAccuracyMetrics(totalQr, matched, unmatched) {
+  if (totalQr <= 0) {
+    return {
+      accuracy_percent: null,
+      error_rate_percent: null
+    };
+  }
+
+  return {
+    accuracy_percent: roundPercent((matched / totalQr) * 100),
+    error_rate_percent: roundPercent((unmatched / totalQr) * 100)
   };
 }
 
@@ -177,6 +191,7 @@ function verifyMoQrAgainstProduction(productionRows, cartonsWithQr) {
     });
 
     const cartonQtyMetrics = buildQtyAccuracyMetrics(cartonWmsQty, cartonMatchedQty, cartonFailedQty);
+    const cartonQrMetrics = buildQrAccuracyMetrics(qrItems.length, cartonMatched, cartonUnmatched);
 
     return {
       carton_id: carton.id,
@@ -189,11 +204,13 @@ function verifyMoQrAgainstProduction(productionRows, cartonsWithQr) {
       unmatched: cartonUnmatched,
       all_ok: cartonUnmatched === 0 && qrItems.length > 0,
       ...cartonQtyMetrics,
+      ...cartonQrMetrics,
       qr_items: qrItems
     };
   });
 
   const qtyMetrics = buildQtyAccuracyMetrics(totalWmsQty, matchedQty, failedQty);
+  const qrMetrics = buildQrAccuracyMetrics(totalQr, matched, unmatched);
 
   const summary = {
     total_cartons: cartons.length,
@@ -204,6 +221,7 @@ function verifyMoQrAgainstProduction(productionRows, cartonsWithQr) {
     no_production_ranges: noProductionRanges,
     all_ok: unmatched === 0 && totalQr > 0,
     ...qtyMetrics,
+    ...qrMetrics,
     message: null
   };
 
@@ -227,5 +245,6 @@ module.exports = {
   findMatchingRanges,
   verifyQrBarcodeAgainstProduction,
   verifyMoQrAgainstProduction,
-  buildQtyAccuracyMetrics
+  buildQtyAccuracyMetrics,
+  buildQrAccuracyMetrics
 };

@@ -669,22 +669,30 @@ function WmsExplorer() {
                 {' '}| QR: <strong>{bulkVerifyResult.summary?.total_qr || 0}</strong>
                 {' '}| OK: <strong>{bulkVerifyResult.summary?.matched || 0}</strong>
                 {' '}| Gagal: <strong>{bulkVerifyResult.summary?.unmatched || 0}</strong>
+                {' '}| Error QR:{' '}
+                <span
+                  className={`wms-accuracy-pill ${getAccuracyColorClass(bulkVerifyResult.summary?.error_rate_percent)}`}
+                >
+                  {formatPercent(bulkVerifyResult.summary?.error_rate_percent)}
+                </span>
               </div>
               <div className="wms-accuracy-summary">
                 Qty WMS: <strong>{bulkVerifyResult.summary?.total_wms_qty ?? 0}</strong>
                 {' '}| Qty OK: <strong>{bulkVerifyResult.summary?.matched_qty ?? 0}</strong>
                 {' '}| Qty gagal: <strong>{bulkVerifyResult.summary?.failed_qty ?? 0}</strong>
-                {' '}| Keakuratan:{' '}
+                {' '}| Error qty:{' '}
+                <span
+                  className={`wms-accuracy-pill ${getAccuracyColorClass(bulkVerifyResult.summary?.qty_error_rate_percent)}`}
+                >
+                  {formatPercent(bulkVerifyResult.summary?.qty_error_rate_percent)}
+                </span>
+              </div>
+              <div className="wms-accuracy-summary">
+                Keakuratan QR:{' '}
                 <span
                   className={`wms-accuracy-pill ${getAccuracyColorClass(bulkVerifyResult.summary?.error_rate_percent)}`}
                 >
                   {formatPercent(bulkVerifyResult.summary?.accuracy_percent)}
-                </span>
-                {' '}| Error:{' '}
-                <span
-                  className={`wms-accuracy-pill ${getAccuracyColorClass(bulkVerifyResult.summary?.error_rate_percent)}`}
-                >
-                  {formatPercent(bulkVerifyResult.summary?.error_rate_percent)}
                 </span>
               </div>
               {bulkVerifyResult.summary?.message && (
@@ -747,9 +755,9 @@ function WmsExplorer() {
                               >
                                 {formatPercent(carton.accuracy_percent)}
                               </span>
-                              {carton.total_wms_qty > 0 && (
+                              {carton.qr_total > 0 && (
                                 <div className="wms-accuracy-subtext">
-                                  {carton.failed_qty}/{carton.total_wms_qty} qty gagal
+                                  {carton.unmatched}/{carton.qr_total} QR gagal
                                 </div>
                               )}
                             </td>

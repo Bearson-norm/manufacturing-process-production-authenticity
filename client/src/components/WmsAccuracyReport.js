@@ -309,6 +309,11 @@ function WmsAccuracyReport() {
               >
                 {formatPercent(report.overall?.avg_error_rate_percent)}
               </span>
+              {(report.overall?.total_qr || 0) > 0 && (
+                <span className="wms-accuracy-subtext" style={{ marginLeft: '8px' }}>
+                  ({report.overall?.failed_qr || 0}/{report.overall?.total_qr} QR gagal)
+                </span>
+              )}
             </span>
           </div>
 
@@ -363,6 +368,11 @@ function WmsAccuracyReport() {
                         )}
                         {row.verify_message && (
                           <div className="wms-accuracy-subtext">{row.verify_message}</div>
+                        )}
+                        {!row.verify_message && (row.total_qr || 0) > 0 && (
+                          <div className="wms-accuracy-subtext">
+                            {row.failed_qr}/{row.total_qr} QR gagal
+                          </div>
                         )}
                       </td>
                       <td>
