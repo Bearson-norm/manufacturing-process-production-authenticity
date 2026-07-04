@@ -15,6 +15,7 @@ function parsePagination(query) {
 }
 
 const MAX_CARTONS_VERIFY = 500;
+const MAX_SYNC_MO = 100;
 
 async function getAllCartonsWithQrByMo(moNumber) {
   const cartonsResult = await pool.query(
@@ -98,6 +99,94 @@ function parseOptionalDate(value, endOfDay) {
     parsed.setHours(0, 0, 0, 0);
   }
   return parsed.toISOString();
+}
+
+function buildProductionMoFilters(source) {
+  const search = (source.search || '').trim();
+  const dateFrom = parseOptionalDate(source.date_from || source.dateFrom, false);
+  const dateTo = parseOptionalDate(source.date_to || source.dateTo, true);
+
+  const params = [];
+  const filters = [`pr.mo_number IS NOT NULL`, `TRIM(pr.mo_number) <> ''`];
+
+  if (dateFrom) {
+    params.push(dateFrom);
+    filters.push(`pr.completed_at >= $${params.length}`);
+  }
+  if (dateTo) {
+    params.push(dateTo);
+    filters.push(`pr.completed_at <= $${params.length}`);
+  }
+  if (search) {
+    params.push(`%${search}%`);
+    filters.push(`pr.mo_number ILIKE $${params.length}`);
+  }
+
+  return {
+    search,
+    dateFrom,
+    dateTo,
+    whereClause: filters.join(' AND '),
+    params
+  };
+}
+
+async function fetchProductionMoNumbers(whereClause, params) {
+  const result = await pool.query(
+    `SELECT pr.mo_number
+     FROM production_results pr
+     WHERE ${whereClause}
+     GROUP BY pr.mo_number
+     ORDER BY MAX(pr.completed_at) DESC NULLS LAST`,
+    params
+  );
+  return result.rows.map((row) => row.mo_number);
+}
+
+async function resolveMoNumbersForBatch(body) {
+  const rawList = body.mo_numbers || body.moNumbers;
+  if (Array.isArray(rawList) && rawList.length > 0) {
+    return [...new Set(rawList.map((mo) => String(mo || '').trim()).filter(Boolean))];
+  }
+
+  const { whereClause, params } = buildProductionMoFilters(body);
+  return fetchProductionMoNumbers(whereClause, params);
+}
+
+async function syncMoBatch(moNumbers) {
+  const results = [];
+  let syncedOk = 0;
+  let syncedWarning = 0;
+  let failed = 0;
+
+  for (const moNumber of moNumbers) {
+    try {
+      const result = await syncMoFromWms(moNumber);
+      const isWarning = (result.fetched_from_wms ?? result.cartons_upserted ?? 0) === 0 && result.warning;
+      if (isWarning) {
+        syncedWarning += 1;
+      } else {
+        syncedOk += 1;
+      }
+      results.push({
+        mo_number: moNumber,
+        success: true,
+        cartons_upserted: result.cartons_upserted,
+        qr_upserted: result.qr_upserted,
+        fetched_from_wms: result.fetched_from_wms,
+        warning: result.warning || null
+      });
+    } catch (error) {
+      failed += 1;
+      results.push({
+        mo_number: moNumber,
+        success: false,
+        error: error.message || 'Sync failed'
+      });
+    }
+  }
+
+  return { syncedOk, syncedWarning, failed, results };
 }
 
 async function buildMoAccuracyReportRow(moNumber, baseRow) {
@@ -456,31 +545,30 @@ router.post('/verify-all-qr', async (req, res) => {
   }
 });
 
+// GET /api/wms/mo-accuracy-report/mo-list — fast MO list for batch sync (no accuracy compute)
+router.get('/mo-accuracy-report/mo-list', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, whereClause, params } = buildProductionMoFilters(req.query);
+    const moNumbers = await fetchProductionMoNumbers(whereClause, params);
+
+    res.json({
+      success: true,
+      total: moNumbers.length,
+      date_from: dateFrom,
+      date_to: dateTo,
+      mo_numbers: moNumbers
+    });
+  } catch (error) {
+    console.error('GET /api/wms/mo-accuracy-report/mo-list:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /api/wms/mo-accuracy-report — MO list from production_results with qty-weighted error metrics
 router.get('/mo-accuracy-report', async (req, res) => {
   try {
-    const search = (req.query.search || '').trim();
-    const dateFrom = parseOptionalDate(req.query.date_from || req.query.dateFrom, false);
-    const dateTo = parseOptionalDate(req.query.date_to || req.query.dateTo, true);
+    const { dateFrom, dateTo, whereClause, params } = buildProductionMoFilters(req.query);
     const { page, limit, offset } = parsePagination(req.query);
-
-    const params = [];
-    const filters = [`pr.mo_number IS NOT NULL`, `TRIM(pr.mo_number) <> ''`];
-
-    if (dateFrom) {
-      params.push(dateFrom);
-      filters.push(`pr.completed_at >= $${params.length}`);
-    }
-    if (dateTo) {
-      params.push(dateTo);
-      filters.push(`pr.completed_at <= $${params.length}`);
-    }
-    if (search) {
-      params.push(`%${search}%`);
-      filters.push(`pr.mo_number ILIKE $${params.length}`);
-    }
-
-    const whereClause = filters.join(' AND ');
 
     const countResult = await pool.query(
       `SELECT COUNT(DISTINCT pr.mo_number)::int AS total
@@ -544,6 +632,41 @@ router.get('/mo-accuracy-report', async (req, res) => {
   } catch (error) {
     console.error('GET /api/wms/mo-accuracy-report:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/wms/sync-mo-batch — sync WMS for multiple MOs (filtered or explicit list)
+router.post('/sync-mo-batch', async (req, res) => {
+  try {
+    const moNumbers = await resolveMoNumbersForBatch(req.body || {});
+
+    if (moNumbers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tidak ada MO untuk disync sesuai filter.'
+      });
+    }
+
+    if (moNumbers.length > MAX_SYNC_MO) {
+      return res.status(400).json({
+        success: false,
+        error: `Terlalu banyak MO (${moNumbers.length}). Maksimum ${MAX_SYNC_MO} per batch — persempit filter tanggal atau search.`
+      });
+    }
+
+    const { syncedOk, syncedWarning, failed, results } = await syncMoBatch(moNumbers);
+
+    res.json({
+      success: true,
+      total: moNumbers.length,
+      synced_ok: syncedOk,
+      synced_warning: syncedWarning,
+      failed,
+      results
+    });
+  } catch (error) {
+    console.error('POST /api/wms/sync-mo-batch:', error);
+    res.status(500).json({ success: false, error: error.message || 'Batch sync failed' });
   }
 });
 

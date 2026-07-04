@@ -30,8 +30,18 @@ function WmsAccuracyReport() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [syncingBatch, setSyncingBatch] = useState(false);
+  const [syncSummary, setSyncSummary] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [report, setReport] = useState(null);
+
+  const buildFilterParams = useCallback(() => {
+    const params = {};
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    if (search.trim()) params.search = search.trim();
+    return params;
+  }, [dateFrom, dateTo, search]);
 
   const loadReport = useCallback(async (pageOverride) => {
     const currentPage = pageOverride != null ? pageOverride : page;
@@ -39,10 +49,7 @@ function WmsAccuracyReport() {
     setMessage({ type: '', text: '' });
 
     try {
-      const params = { page: currentPage, limit: PAGE_SIZE };
-      if (dateFrom) params.date_from = dateFrom;
-      if (dateTo) params.date_to = dateTo;
-      if (search.trim()) params.search = search.trim();
+      const params = { page: currentPage, limit: PAGE_SIZE, ...buildFilterParams() };
 
       const response = await axios.get('/api/wms/mo-accuracy-report', { params });
       if (response.data.success) {
@@ -59,7 +66,7 @@ function WmsAccuracyReport() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, page, search]);
+  }, [page, buildFilterParams]);
 
   useEffect(() => {
     loadReport(1);
@@ -72,6 +79,63 @@ function WmsAccuracyReport() {
   const openMoDetail = (moNumber) => {
     navigate(`/wms-explorer?mo=${encodeURIComponent(moNumber)}`);
   };
+
+  const handleBatchSync = async () => {
+    setSyncSummary(null);
+    setMessage({ type: '', text: '' });
+
+    try {
+      const listRes = await axios.get('/api/wms/mo-accuracy-report/mo-list', {
+        params: buildFilterParams()
+      });
+
+      if (!listRes.data.success) {
+        setMessage({ type: 'error', text: listRes.data.error || 'Gagal mengambil daftar MO' });
+        return;
+      }
+
+      const moNumbers = listRes.data.mo_numbers || [];
+      const total = listRes.data.total || moNumbers.length;
+
+      if (total === 0) {
+        setMessage({ type: 'error', text: 'Tidak ada MO untuk disync sesuai filter.' });
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Sync WMS untuk ${total} MO sesuai filter?\n\nProses ini dapat memakan waktu beberapa menit.`
+      );
+      if (!confirmed) return;
+
+      setSyncingBatch(true);
+      const syncRes = await axios.post('/api/wms/sync-mo-batch', {
+        ...buildFilterParams(),
+        mo_numbers: moNumbers
+      });
+
+      if (syncRes.data.success) {
+        setSyncSummary(syncRes.data);
+        setMessage({
+          type: syncRes.data.failed > 0 ? 'warning' : 'success',
+          text: `Sync selesai: ${syncRes.data.synced_ok} OK, ${syncRes.data.synced_warning} warning, ${syncRes.data.failed} gagal`
+        });
+        await loadReport(page);
+      } else {
+        setMessage({ type: 'error', text: syncRes.data.error || 'Batch sync gagal' });
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.error || 'Batch sync gagal'
+      });
+    } finally {
+      setSyncingBatch(false);
+    }
+  };
+
+  const failedResults = (syncSummary?.results || []).filter((r) => !r.success);
+  const failedPreview = failedResults.slice(0, 5);
+  const failedRemainder = failedResults.length - failedPreview.length;
 
   return (
     <div className="wms-report-container">
@@ -127,11 +191,56 @@ function WmsAccuracyReport() {
           type="button"
           className="wms-btn wms-btn-primary"
           onClick={() => loadReport(1)}
-          disabled={loading}
+          disabled={loading || syncingBatch}
         >
           {loading ? 'Memuat...' : 'Muat Ulang'}
         </button>
+        <button
+          type="button"
+          className="wms-btn wms-btn-secondary"
+          onClick={handleBatchSync}
+          disabled={loading || syncingBatch}
+        >
+          {syncingBatch ? 'Menyinkronkan...' : 'Sync WMS Semua MO'}
+        </button>
       </div>
+
+      {syncingBatch && (
+        <div className="wms-sync-batch-panel wms-sync-batch-progress">
+          Menyinkronkan WMS... (memproses batch, mohon tunggu)
+        </div>
+      )}
+
+      {syncSummary && !syncingBatch && (
+        <div
+          className={`wms-sync-batch-panel ${
+            syncSummary.failed > 0
+              ? 'wms-sync-batch-warn'
+              : syncSummary.synced_warning > 0
+                ? 'wms-sync-batch-warn'
+                : 'wms-sync-batch-ok'
+          }`}
+        >
+          <div>
+            Hasil sync: <strong>{syncSummary.synced_ok}</strong> OK
+            {' '}| <strong>{syncSummary.synced_warning}</strong> warning (0 carton WMS)
+            {' '}| <strong>{syncSummary.failed}</strong> gagal
+            {' '}(total {syncSummary.total} MO)
+          </div>
+          {failedPreview.length > 0 && (
+            <ul className="wms-sync-fail-list">
+              {failedPreview.map((row) => (
+                <li key={row.mo_number}>
+                  {row.mo_number}: {row.error}
+                </li>
+              ))}
+              {failedRemainder > 0 && (
+                <li>... dan {failedRemainder} MO gagal lainnya</li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
 
       {report && (
         <>
