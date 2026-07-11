@@ -34,6 +34,30 @@ function normalizeAuthData(authenticityData) {
   return [];
 }
 
+/** Sum (last - first + 1) for every authenticity range; rollNumber is ignored. */
+function calcQtyFromAuth(authenticityData) {
+  let qty = 0;
+  for (const auth of normalizeAuthData(authenticityData)) {
+    if (!auth?.firstAuthenticity || !auth?.lastAuthenticity) continue;
+    const firstMatch = String(auth.firstAuthenticity).trim().match(/\d+/);
+    const lastMatch = String(auth.lastAuthenticity).trim().match(/\d+/);
+    if (!firstMatch || !lastMatch) continue;
+    const first = parseInt(firstMatch[0], 10);
+    const last = parseInt(lastMatch[0], 10);
+    if (!Number.isNaN(first) && !Number.isNaN(last) && last >= first) {
+      qty += last - first + 1;
+    }
+  }
+  return qty;
+}
+
+function displayProductionQty(row) {
+  const stored = row?.quantity != null ? Number(row.quantity) : NaN;
+  if (!Number.isNaN(stored) && stored > 0) return stored;
+  const derived = calcQtyFromAuth(row?.authenticity_data);
+  return derived > 0 ? derived : (row?.quantity ?? '-');
+}
+
 function WmsExplorer() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -505,7 +529,7 @@ function WmsExplorer() {
                             <td>{row.production_type}</td>
                             <td>{row.pic || '-'}</td>
                             <td>{row.sku_name || '-'}</td>
-                            <td>{row.quantity ?? '-'}</td>
+                            <td>{displayProductionQty(row)}</td>
                             <td>{row.status || '-'}</td>
                             <td>{formatDate(row.created_at)}</td>
                           </tr>
@@ -522,10 +546,11 @@ function WmsExplorer() {
                                   </thead>
                                   <tbody>
                                     {normalizeAuthData(row.authenticity_data).map((auth, idx) => {
-                                      const rangeKey = `${row.id}-${auth.firstAuthenticity}-${auth.lastAuthenticity}`;
-                                      const rangeHighlight = highlightRangeKeys.has(rangeKey);
+                                      const rangeKey = `${row.id}-${idx}-${auth.firstAuthenticity}-${auth.lastAuthenticity}`;
+                                      const rangeHighlight = highlightRangeKeys.has(rangeKey) ||
+                                        highlightRangeKeys.has(`${row.id}-${auth.firstAuthenticity}-${auth.lastAuthenticity}`);
                                       return (
-                                        <tr key={rangeKey || idx} className={rangeHighlight ? 'highlight-row' : ''}>
+                                        <tr key={rangeKey} className={rangeHighlight ? 'highlight-row' : ''}>
                                           <td>{auth.rollNumber || '-'}</td>
                                           <td>{auth.firstAuthenticity || '-'}</td>
                                           <td>{auth.lastAuthenticity || '-'}</td>

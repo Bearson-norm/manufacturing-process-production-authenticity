@@ -31,6 +31,8 @@ function normalizeAuthenticityData(authenticityData) {
 
 function collectRangesFromProductionRow(row) {
   const entries = normalizeAuthenticityData(row.authenticity_data);
+  // Keep every first/last pair. Do not dedupe by rollNumber — the same roll
+  // label may appear on multiple physical ranges and each must be verified.
   return entries
     .filter((e) => e && (e.firstAuthenticity || e.lastAuthenticity))
     .map((e) => ({

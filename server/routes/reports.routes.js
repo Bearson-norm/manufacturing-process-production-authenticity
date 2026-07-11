@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../database');
-const { parseAuthenticityData } = require('../utils/authenticity.utils');
+const {
+  parseAuthenticityData,
+  resolveProductionQuantity
+} = require('../utils/authenticity.utils');
 
 function queryAll(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -173,6 +176,7 @@ router.get('/manufacturing', async (req, res) => {
 
       return {
         ...row,
+        quantity: resolveProductionQuantity(row),
         buffers: bufferReject.buffers,
         rejects: bufferReject.rejects,
         buffer_count,

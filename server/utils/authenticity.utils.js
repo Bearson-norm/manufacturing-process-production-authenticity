@@ -127,6 +127,50 @@ function loadActiveVendorMapDb(db, callback) {
   );
 }
 
+/**
+ * Quantity from authenticity ranges.
+ * Sums (last - first + 1) for every row that has first/last.
+ * rollNumber is only a label — duplicate roll numbers do not collapse ranges.
+ */
+function calculateQuantityFromAuthenticity(authenticityData) {
+  try {
+    let authData = authenticityData;
+    if (typeof authenticityData === 'string') {
+      authData = JSON.parse(authenticityData);
+    }
+
+    const rows = Array.isArray(authData)
+      ? authData
+      : (authData && typeof authData === 'object' ? [authData] : []);
+
+    let quantity = 0;
+    for (const auth of rows) {
+      if (!auth || !auth.firstAuthenticity || !auth.lastAuthenticity) continue;
+
+      const firstMatch = String(auth.firstAuthenticity).trim().match(/\d+/);
+      const lastMatch = String(auth.lastAuthenticity).trim().match(/\d+/);
+      if (!firstMatch || !lastMatch) continue;
+
+      const first = parseInt(firstMatch[0], 10) || 0;
+      const last = parseInt(lastMatch[0], 10) || 0;
+      if (last >= first) {
+        quantity += (last - first + 1);
+      }
+    }
+    return quantity;
+  } catch (error) {
+    console.error('Error calculating quantity from authenticity:', error);
+    return 0;
+  }
+}
+
+/** Prefer stored quantity; otherwise derive from authenticity_data. */
+function resolveProductionQuantity(row) {
+  const stored = row && row.quantity != null ? Number(row.quantity) : NaN;
+  if (!Number.isNaN(stored) && stored > 0) return stored;
+  return calculateQuantityFromAuthenticity(row && row.authenticity_data);
+}
+
 module.exports = {
   parseAuthenticityData,
   normalizeVendorName,
@@ -136,5 +180,7 @@ module.exports = {
   buildActiveVendorMapByLowerName,
   loadActiveVendorMapDb,
   validateProductionAuthRowVendorDigits,
-  validateAuthenticityNumbersVendorDigits
+  validateAuthenticityNumbersVendorDigits,
+  calculateQuantityFromAuthenticity,
+  resolveProductionQuantity
 };

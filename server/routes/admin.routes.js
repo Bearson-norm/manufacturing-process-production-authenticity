@@ -863,6 +863,12 @@ router.post('/sync-production-data', async (req, res) => {
            WHERE pr.status = 'active'
               OR pr.status IS DISTINCT FROM s.status
               OR pr.quantity IS NULL
+              OR pr.authenticity_data IS DISTINCT FROM s.authenticity_data::jsonb
+              OR (
+                COALESCE(pr.quantity, 0) = 0
+                AND s.authenticity_data IS NOT NULL
+                AND s.authenticity_data::text NOT IN ('[]', 'null', '', '{}')
+              )
               OR (pr.completed_at IS NULL AND s.status = 'completed')`,
           [table.type]
         );

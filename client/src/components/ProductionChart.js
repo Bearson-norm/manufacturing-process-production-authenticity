@@ -126,17 +126,29 @@ function ProductionChart() {
       device: { bg: 'rgba(139, 92, 246, 0.6)', border: 'rgba(139, 92, 246, 1)' },
       cartridge: { bg: 'rgba(245, 158, 11, 0.6)', border: 'rgba(245, 158, 11, 1)' }
     };
+    const defaultColors = { bg: 'rgba(148, 163, 184, 0.6)', border: 'rgba(148, 163, 184, 1)' };
 
     // Create datasets for each leader-production combination
     const datasets = [];
     leaderProductionSet.forEach(leaderProd => {
-      const [leaderName, prodType] = leaderProd.split('_');
-      const data = sortedPeriods.map(period => {
-        const periodData = periodMap.get(period);
+      // Prefer metadata from periodMap so leader names with "_" don't break prodType
+      let leaderName = leaderProd;
+      let prodType = 'unknown';
+      for (const periodKey of sortedPeriods) {
+        const entry = periodMap.get(periodKey)?.[leaderProd];
+        if (entry) {
+          leaderName = entry.leader_name;
+          prodType = entry.production_type || 'unknown';
+          break;
+        }
+      }
+
+      const data = sortedPeriods.map(periodKey => {
+        const periodData = periodMap.get(periodKey);
         return periodData[leaderProd]?.[metric] || 0;
       });
 
-      const colors = colorMap[prodType];
+      const colors = colorMap[prodType] || defaultColors;
       datasets.push({
         label: `${leaderName} (${prodType})`,
         data: data,

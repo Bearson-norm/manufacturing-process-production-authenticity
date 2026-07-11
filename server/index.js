@@ -82,64 +82,10 @@ function normalizeAuthenticityNumbers(numbers) {
 
 // Calculate quantity from authenticity_data
 // Quantity = sum of (lastAuthenticity - firstAuthenticity + 1) for each roll
-function calculateQuantityFromAuthenticity(authenticityData) {
-  try {
-    let quantity = 0;
-    
-    // Parse authenticity_data if it's a string
-    let authData = authenticityData;
-    if (typeof authenticityData === 'string') {
-      authData = JSON.parse(authenticityData);
-    }
-    
-    // Handle array of authenticity objects
-    if (Array.isArray(authData)) {
-      authData.forEach(auth => {
-        if (auth && auth.firstAuthenticity && auth.lastAuthenticity) {
-          // Extract numeric part from authenticity strings
-          // Handle cases like "A001", "001", "1", etc.
-          const firstStr = String(auth.firstAuthenticity).trim();
-          const lastStr = String(auth.lastAuthenticity).trim();
-          
-          // Try to extract numeric value (remove leading zeros and non-numeric chars)
-          const firstMatch = firstStr.match(/\d+/);
-          const lastMatch = lastStr.match(/\d+/);
-          
-          if (firstMatch && lastMatch) {
-            const first = parseInt(firstMatch[0], 10) || 0;
-            const last = parseInt(lastMatch[0], 10) || 0;
-            
-            if (last >= first) {
-              // Calculate difference: last - first + 1 (inclusive)
-              quantity += (last - first + 1);
-            }
-          }
-        }
-      });
-    } else if (authData && authData.firstAuthenticity && authData.lastAuthenticity) {
-      // Handle single object
-      const firstStr = String(authData.firstAuthenticity).trim();
-      const lastStr = String(authData.lastAuthenticity).trim();
-      
-      const firstMatch = firstStr.match(/\d+/);
-      const lastMatch = lastStr.match(/\d+/);
-      
-      if (firstMatch && lastMatch) {
-        const first = parseInt(firstMatch[0], 10) || 0;
-        const last = parseInt(lastMatch[0], 10) || 0;
-        
-        if (last >= first) {
-          quantity = (last - first + 1);
-        }
-      }
-    }
-    
-    return quantity;
-    } catch (error) {
-    console.error('Error calculating quantity from authenticity:', error);
-    return 0;
-  }
-}
+// (shared implementation — rollNumber is ignored; duplicate roll labels are fine)
+const {
+  calculateQuantityFromAuthenticity
+} = require('./utils/authenticity.utils');
 
 // All external API functions are imported from services/external-api.service.js
 
@@ -3596,6 +3542,12 @@ async function syncStatusAndDataChanges() {
          WHERE pr.status = 'active'
             OR pr.status IS DISTINCT FROM s.status
             OR pr.quantity IS NULL
+            OR pr.authenticity_data IS DISTINCT FROM s.authenticity_data::jsonb
+            OR (
+              COALESCE(pr.quantity, 0) = 0
+              AND s.authenticity_data IS NOT NULL
+              AND s.authenticity_data::text NOT IN ('[]', 'null', '', '{}')
+            )
             OR (pr.completed_at IS NULL AND s.status = 'completed')`,
         [table.type]
       );

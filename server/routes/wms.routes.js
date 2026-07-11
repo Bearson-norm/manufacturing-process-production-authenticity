@@ -6,6 +6,7 @@ const {
   testWmsConnection
 } = require('../services/prieds-wms.service');
 const { findMatchingRanges, verifyMoQrAgainstProduction } = require('../utils/authenticity-range.utils');
+const { resolveProductionQuantity } = require('../utils/authenticity.utils');
 
 function parsePagination(query) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -62,7 +63,46 @@ async function getProductionRowsByMo(moNumber) {
      ORDER BY created_at DESC`,
     [moNumber]
   );
-  return result.rows;
+  // Recalculate qty from all authenticity ranges (duplicate rollNumber must not drop ranges)
+  return result.rows.map((row) => ({
+    ...row,
+    quantity: resolveProductionQuantity(row)
+  }));
+}
+
+/**
+ * Source-of-truth rows for verification: production_liquid/device/cartridge.
+ * Falls back to production_results if a type has no source rows.
+ * Ensures verify-all-qr sees every first/last range even when production_results is stale.
+ */
+async function getProductionRowsForVerification(moNumber) {
+  const sourceTables = [
+    { name: 'production_liquid', type: 'liquid' },
+    { name: 'production_device', type: 'device' },
+    { name: 'production_cartridge', type: 'cartridge' }
+  ];
+
+  const rows = [];
+  for (const table of sourceTables) {
+    const result = await pool.query(
+      `SELECT id, session_id, leader_name, shift_number, pic, mo_number, sku_name,
+              authenticity_data, status, completed_at, created_at,
+              $2::text AS production_type
+       FROM ${table.name}
+       WHERE mo_number = $1
+       ORDER BY created_at DESC`,
+      [moNumber, table.type]
+    );
+    for (const row of result.rows) {
+      rows.push({
+        ...row,
+        quantity: resolveProductionQuantity(row)
+      });
+    }
+  }
+
+  if (rows.length > 0) return rows;
+  return getProductionRowsByMo(moNumber);
 }
 
 async function getWmsSummary(moNumber) {
@@ -223,7 +263,7 @@ async function buildMoAccuracyReportRow(moNumber, baseRow) {
   }
 
   const [productionRows, cartonsWithQr] = await Promise.all([
-    getProductionRowsByMo(moNumber),
+    getProductionRowsForVerification(moNumber),
     getAllCartonsWithQrByMo(moNumber)
   ]);
 
@@ -253,7 +293,8 @@ async function buildMoAccuracyReportRow(moNumber, baseRow) {
 }
 
 async function getLocalSummary(moNumber) {
-  const rows = await getProductionRowsByMo(moNumber);
+  // Prefer live source tables so qty/session match the Production panel
+  const rows = await getProductionRowsForVerification(moNumber);
   const byTypeMap = new Map();
 
   for (const row of rows) {
@@ -509,7 +550,7 @@ router.post('/verify-authenticity', async (req, res) => {
       return res.status(400).json({ success: false, error: 'authenticity_number is required' });
     }
 
-    const productionRows = await getProductionRowsByMo(moNumber);
+    const productionRows = await getProductionRowsForVerification(moNumber);
     const { allRanges, matchedRanges } = findMatchingRanges(productionRows, authenticityNumber);
 
     res.json({
@@ -526,7 +567,7 @@ router.post('/verify-authenticity', async (req, res) => {
   }
 });
 
-// POST /api/wms/verify-all-qr — bulk verify every QR in every carton vs production_results
+// POST /api/wms/verify-all-qr — bulk verify every QR in every carton vs production authenticity ranges
 router.post('/verify-all-qr', async (req, res) => {
   try {
     const moNumber = (req.body.mo_number || req.body.moNumber || req.query.mo_number || '').trim();
@@ -535,7 +576,7 @@ router.post('/verify-all-qr', async (req, res) => {
     }
 
     const [productionRows, cartonsWithQr] = await Promise.all([
-      getProductionRowsByMo(moNumber),
+      getProductionRowsForVerification(moNumber),
       getAllCartonsWithQrByMo(moNumber)
     ]);
 
