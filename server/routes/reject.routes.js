@@ -7,6 +7,7 @@ const {
   loadActiveVendorMapDb,
   validateAuthenticityNumbersVendorDigits
 } = require('../utils/authenticity.utils');
+const { MAX_MO_BATCH, parseMoNumbersFromBody } = require('../utils/mo-batch.utils');
 
 // Helper function to create reject endpoints for a type
 function createRejectEndpoints(type) {
@@ -36,18 +37,19 @@ function createRejectEndpoints(type) {
   
   // POST /api/reject/:type/batch — all reject rows for many MO numbers in one query
   router.post(`/${type}/batch`, (req, res) => {
-    const raw = req.body && req.body.moNumbers;
-    if (!Array.isArray(raw)) {
-      res.status(400).json({ error: 'moNumbers must be an array' });
+    const { error, moNumbers: unique } = parseMoNumbersFromBody(req.body);
+    if (error) {
+      res.status(400).json({ error });
       return;
     }
-    const unique = [...new Set(raw.map((m) => String(m).trim()).filter(Boolean))];
     if (unique.length === 0) {
       res.json({});
       return;
     }
-    if (unique.length > 2000) {
-      res.status(400).json({ error: 'Too many moNumbers (max 2000)' });
+    if (unique.length > MAX_MO_BATCH) {
+      res.status(400).json({
+        error: `Too many moNumbers (${unique.length}). Maximum ${MAX_MO_BATCH} per request — kirim dalam beberapa chunk.`
+      });
       return;
     }
     const sql = `SELECT * FROM ${table} WHERE mo_number = ANY($1::text[]) ORDER BY mo_number, created_at DESC`;

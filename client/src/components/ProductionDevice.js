@@ -14,6 +14,7 @@ import MoPickerField from './MoPickerField';
 import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
 import { buildPaginatedSavedMoKeys, formatMoSearchLabel, getMoTeamName, matchesDeviceNote } from '../utils/moListHelpers';
+import { fetchBufferRejectBatchMaps } from '../utils/bufferRejectBatch';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
@@ -222,7 +223,9 @@ function ProductionDevice() {
       const moNumbers = new Set();
       response.data.forEach(session => {
         session.inputs.forEach(input => {
-          moNumbers.add(input.mo_number);
+          if (input.mo_number) {
+            moNumbers.add(input.mo_number);
+          }
         });
       });
       
@@ -234,31 +237,8 @@ function ProductionDevice() {
         return;
       }
 
-      const [bufferBatch, rejectBatch] = await Promise.all([
-        axios.post('/api/buffer/device/batch', { moNumbers: moList }).catch((err) => {
-          console.error('Error fetching buffer batch:', err);
-          return { data: {} };
-        }),
-        axios.post('/api/reject/device/batch', { moNumbers: moList }).catch((err) => {
-          console.error('Error fetching reject batch:', err);
-          return { data: {} };
-        })
-      ]);
-
-      const bufferMap = {};
-      Object.entries(bufferBatch.data || {}).forEach(([moNumber, buffers]) => {
-        if (Array.isArray(buffers) && buffers.length > 0) {
-          bufferMap[moNumber] = buffers;
-        }
-      });
+      const { bufferMap, rejectMap } = await fetchBufferRejectBatchMaps('device', moList);
       setBufferDataMap(bufferMap);
-
-      const rejectMap = {};
-      Object.entries(rejectBatch.data || {}).forEach(([moNumber, rejects]) => {
-        if (Array.isArray(rejects) && rejects.length > 0) {
-          rejectMap[moNumber] = rejects;
-        }
-      });
       setRejectDataMap(rejectMap);
     } catch (error) {
       console.error('Error fetching data:', error);
