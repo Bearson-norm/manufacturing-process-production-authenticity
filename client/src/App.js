@@ -10,6 +10,7 @@ import ReportDashboard from './components/ReportDashboard';
 import ProductionChart from './components/ProductionChart';
 import WmsExplorer from './components/WmsExplorer';
 import WmsAccuracyReport from './components/WmsAccuracyReport';
+import ExternalManufacturingSender from './components/ExternalManufacturingSender';
 import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 
@@ -99,6 +100,14 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <WmsAccuracyReport />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/external-manufacturing-sender"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <ExternalManufacturingSender />
               </ProtectedRoute>
             }
           />

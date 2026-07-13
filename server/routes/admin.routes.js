@@ -2,7 +2,14 @@ const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
 const { db, pool } = require('../database');
-const { pushIdleManufacturingForLiquidMosFromCache } = require('../services/liquid-external-manufacturing.service');
+const { pushIdleManufacturingForLiquidMosFromCache, getExternalManufacturingMapRow } = require('../services/liquid-external-manufacturing.service');
+const {
+  getExternalManufacturingConfig,
+  buildManufacturingItemUrl,
+  buildManufacturingItemStatusUrl,
+  sendToExternalAPIWithUrl,
+  getManufacturingIdentityByMoNumber
+} = require('../services/external-api.service');
 const {
   ODOO_MO_SYNC_FIELDS,
   ODOO_MO_CACHE_UPSERT_SQL,
@@ -1174,6 +1181,201 @@ router.post('/sync-mo', async (req, res) => {
       success: false,
       error: error.message || 'Failed to sync MO data from Odoo'
     });
+  }
+});
+
+const EXTERNAL_RESPONSE_TRUNCATE = 4000;
+
+function truncateExternalResponseBody(body) {
+  const str = body == null ? '' : typeof body === 'string' ? body : JSON.stringify(body);
+  if (str.length > EXTERNAL_RESPONSE_TRUNCATE) {
+    return `${str.slice(0, EXTERNAL_RESPONSE_TRUNCATE)}… [truncated, total ${str.length} chars]`;
+  }
+  return str;
+}
+
+function formatExternalStepResult(result) {
+  if (!result) return null;
+  return {
+    success: result.success,
+    statusCode: result.statusCode,
+    skipped: !!result.skipped,
+    message: result.message || null,
+    data: truncateExternalResponseBody(result.data || '')
+  };
+}
+
+function validateExternalManufacturingPutBody(putBody) {
+  if (!putBody || typeof putBody !== 'object') {
+    return 'putBody is required';
+  }
+  if (!putBody.manufacturing_id) {
+    return 'manufacturing_id is required in putBody';
+  }
+  const sku = putBody.sku || putBody.sku_name;
+  if (!sku) {
+    return 'sku or sku_name is required in putBody';
+  }
+  if (putBody.target_qty === undefined || putBody.target_qty === null) {
+    return 'target_qty is required in putBody';
+  }
+  if (!putBody.leader_name) {
+    return 'leader_name is required in putBody';
+  }
+  return null;
+}
+
+function normalizeExternalManufacturingPutBody(putBody) {
+  const skuName = String(putBody.sku_name || putBody.sku || '').trim() || 'Unknown';
+  return {
+    manufacturing_id: putBody.manufacturing_id,
+    sku: String(putBody.sku || skuName).trim() || skuName,
+    sku_name: skuName,
+    target_qty: Number(putBody.target_qty) || 0,
+    done_qty: putBody.done_qty == null || putBody.done_qty === '' ? 0 : Number(putBody.done_qty),
+    status: putBody.status != null && String(putBody.status).trim() !== '' ? String(putBody.status).trim() : 'finished',
+    manual_finished_qty:
+      putBody.manual_finished_qty == null || putBody.manual_finished_qty === ''
+        ? 0
+        : Number(putBody.manual_finished_qty),
+    leader_name: String(putBody.leader_name || '').trim(),
+    started_at: putBody.started_at !== undefined ? putBody.started_at : null,
+    finished_at: putBody.finished_at !== undefined ? putBody.finished_at : null
+  };
+}
+
+// GET /api/admin/external-manufacturing/resolve-id — resolve external UUID from MO number
+router.get('/external-manufacturing/resolve-id', (req, res) => {
+  try {
+    const moNumber = String(req.query.mo_number || '').trim();
+    if (!moNumber) {
+      return res.status(400).json({ success: false, error: 'mo_number query parameter is required' });
+    }
+
+    getExternalManufacturingMapRow(moNumber, (mapErr, mapRow) => {
+      if (mapErr) {
+        return res.status(500).json({ success: false, error: mapErr.message });
+      }
+      if (mapRow && mapRow.external_resource_id) {
+        return res.json({
+          success: true,
+          externalId: String(mapRow.external_resource_id),
+          source: 'local_map'
+        });
+      }
+
+      getExternalManufacturingConfig(async (cfgErr, cfg) => {
+        if (cfgErr) {
+          return res.status(500).json({ success: false, error: cfgErr.message });
+        }
+        if (!cfg.baseUrl) {
+          return res.status(404).json({
+            success: false,
+            error: 'External ID not found in local map and external_api_base_url is not configured'
+          });
+        }
+        try {
+          const remote = await getManufacturingIdentityByMoNumber(moNumber, cfg.baseUrl, cfg.bearerToken);
+          if (remote && remote.success && remote.id) {
+            return res.json({
+              success: true,
+              externalId: String(remote.id),
+              source: 'remote_lookup'
+            });
+          }
+          return res.status(404).json({
+            success: false,
+            error: `No external resource id found for MO ${moNumber}`
+          });
+        } catch (lookupErr) {
+          return res.status(500).json({ success: false, error: lookupErr.message });
+        }
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/external-manufacturing/send — proxy PUT/PATCH to external manufacturing API
+router.post('/external-manufacturing/send', (req, res) => {
+  try {
+    const { externalId, action, putBody, patchBody } = req.body || {};
+    const id = String(externalId || '').trim();
+    const act = String(action || '').trim().toLowerCase();
+
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'externalId is required' });
+    }
+    if (!['put', 'patch', 'put_then_patch'].includes(act)) {
+      return res.status(400).json({
+        success: false,
+        error: 'action must be one of: put, patch, put_then_patch'
+      });
+    }
+
+    if (act === 'put' || act === 'put_then_patch') {
+      const putErr = validateExternalManufacturingPutBody(putBody);
+      if (putErr) {
+        return res.status(400).json({ success: false, error: putErr });
+      }
+    }
+    if (act === 'patch' || act === 'put_then_patch') {
+      if (!patchBody || !patchBody.status) {
+        return res.status(400).json({
+          success: false,
+          error: 'patchBody.status is required for patch actions'
+        });
+      }
+    }
+
+    getExternalManufacturingConfig(async (cfgErr, cfg) => {
+      if (cfgErr) {
+        return res.status(500).json({ success: false, error: cfgErr.message });
+      }
+      if (!cfg.baseUrl) {
+        return res.status(400).json({
+          success: false,
+          error: 'external_api_base_url is not configured in Admin settings'
+        });
+      }
+
+      const result = { success: false, put: null, patch: null, errors: [], targetUrls: {} };
+      const putUrl = buildManufacturingItemUrl(cfg.baseUrl, id);
+      const patchUrl = buildManufacturingItemStatusUrl(cfg.baseUrl, id);
+
+      try {
+        if (act === 'put' || act === 'put_then_patch') {
+          result.targetUrls.put = putUrl;
+          const putResult = await sendToExternalAPIWithUrl(
+            normalizeExternalManufacturingPutBody(putBody),
+            putUrl,
+            'PUT',
+            cfg.bearerToken
+          );
+          result.put = formatExternalStepResult(putResult);
+        }
+
+        if (act === 'patch' || act === 'put_then_patch') {
+          result.targetUrls.patch = patchUrl;
+          const patchResult = await sendToExternalAPIWithUrl(
+            { status: String(patchBody.status).trim() },
+            patchUrl,
+            'PATCH',
+            cfg.bearerToken
+          );
+          result.patch = formatExternalStepResult(patchResult);
+        }
+
+        result.success = true;
+        return res.json(result);
+      } catch (sendErr) {
+        result.errors.push(sendErr.message);
+        return res.status(502).json(result);
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
