@@ -28,6 +28,49 @@ function validateRowsVendorDigits(rows, vendorMap, res) {
   return true;
 }
 
+// Guard: only 1 active MO allowed per production page (table).
+// Calls back with the other active mo_number if one exists, otherwise null.
+function findOtherActiveMo(table, moNumber, callback) {
+  db.all(
+    `SELECT DISTINCT mo_number FROM ${table} WHERE status = 'active'`,
+    [],
+    (err, rows) => {
+      if (err) {
+        return callback(err);
+      }
+      const otherActive = (rows || [])
+        .map(r => r.mo_number)
+        .find(m => m && m !== moNumber);
+      callback(null, otherActive || null);
+    }
+  );
+}
+
+// Guard: drop rows identical to already-saved active rows (double submit protection).
+// Calls back with (err, rowsToInsert, skippedCount).
+function filterDuplicateActiveRows(table, moNumber, rows, callback) {
+  const checks = rows.map(row => new Promise((resolve, reject) => {
+    db.get(
+      `SELECT id FROM ${table} WHERE status = 'active' AND mo_number = $1 AND authenticity_data = $2`,
+      [moNumber, JSON.stringify([row])],
+      (err, existing) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(existing ? null : row);
+        }
+      }
+    );
+  }));
+
+  Promise.all(checks)
+    .then(results => {
+      const rowsToInsert = results.filter(Boolean);
+      callback(null, rowsToInsert, rows.length - rowsToInsert.length);
+    })
+    .catch(err => callback(err));
+}
+
 // Helper function to calculate done_qty from authenticity_data array (handle multiple rolls)
 function calculateDoneQty(authenticityDataArray) {
   let totalDoneQty = 0;
@@ -268,48 +311,71 @@ router.post('/liquid', (req, res) => {
       return;
     }
 
-    db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [mo_number], (err, row) => {
-      const targetQty = (!err && row) ? (row.quantity || 0) : 0;
+    findOtherActiveMo('production_liquid', mo_number, (guardErr, otherActiveMo) => {
+      if (guardErr) {
+        return res.status(500).json({ error: guardErr.message });
+      }
+      if (otherActiveMo) {
+        return res.status(409).json({
+          error: `MO ${otherActiveMo} masih aktif di halaman ini. Submit/selesaikan MO tersebut sebelum input MO baru.`
+        });
+      }
 
-      const insertPromises = authenticityRows.map((authRow) => {
-        return new Promise((resolve, reject) => {
-          db.run(
-            `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
-            [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([authRow])],
-            function(insertErr) {
-              if (insertErr) {
-                reject(insertErr);
-              } else {
-                resolve({ id: this.lastID, row: authRow });
-              }
-            }
-          );
+      filterDuplicateActiveRows('production_liquid', mo_number, authenticityRows, (dupErr, rowsToInsert, skippedCount) => {
+        if (dupErr) {
+          return res.status(500).json({ error: dupErr.message });
+        }
+        if (rowsToInsert.length === 0) {
+          return res.status(409).json({
+            error: 'Data authenticity yang sama sudah tersimpan (kemungkinan double submit).'
+          });
+        }
+
+        db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [mo_number], (err, row) => {
+          const targetQty = (!err && row) ? (row.quantity || 0) : 0;
+
+          const insertPromises = rowsToInsert.map((authRow) => {
+            return new Promise((resolve, reject) => {
+              db.run(
+                `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+               VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+                [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([authRow])],
+                function(insertErr) {
+                  if (insertErr) {
+                    reject(insertErr);
+                  } else {
+                    resolve({ id: this.lastID, row: authRow });
+                  }
+                }
+              );
+            });
+          });
+
+          Promise.all(insertPromises)
+            .then((results) => {
+              ensureLiquidExternalIdAndPatchStarted(mo_number, sku_name, targetQty, leader_name, () => {});
+
+              res.json({
+                message: 'Data saved successfully',
+                saved_count: results.length,
+                skipped_duplicates: skippedCount,
+                data: results.map(r => ({
+                  id: r.id,
+                  session_id,
+                  leader_name,
+                  shift_number,
+                  pic,
+                  mo_number,
+                  sku_name,
+                  authenticity_data: [r.row]
+                }))
+              });
+            })
+            .catch((err) => {
+              res.status(500).json({ error: err.message });
+            });
         });
       });
-
-      Promise.all(insertPromises)
-        .then((results) => {
-          ensureLiquidExternalIdAndPatchStarted(mo_number, sku_name, targetQty, leader_name, () => {});
-
-          res.json({
-            message: 'Data saved successfully',
-            saved_count: results.length,
-            data: results.map(r => ({
-              id: r.id,
-              session_id,
-              leader_name,
-              shift_number,
-              pic,
-              mo_number,
-              sku_name,
-              authenticity_data: [r.row]
-            }))
-          });
-        })
-        .catch((err) => {
-          res.status(500).json({ error: err.message });
-        });
     });
   });
 });
@@ -328,43 +394,66 @@ router.post('/device', (req, res) => {
       return;
     }
 
-    const insertPromises = authenticityRows.map((row) => {
-      return new Promise((resolve, reject) => {
-        db.run(
-          `INSERT INTO production_device (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
-          [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
-          function(err) {
-            if (err) {
-              reject(err);
-            } else {
-              resolve({ id: this.lastID, row });
-            }
-          }
-        );
+    findOtherActiveMo('production_device', mo_number, (guardErr, otherActiveMo) => {
+      if (guardErr) {
+        return res.status(500).json({ error: guardErr.message });
+      }
+      if (otherActiveMo) {
+        return res.status(409).json({
+          error: `MO ${otherActiveMo} masih aktif di halaman ini. Submit/selesaikan MO tersebut sebelum input MO baru.`
+        });
+      }
+
+      filterDuplicateActiveRows('production_device', mo_number, authenticityRows, (dupErr, rowsToInsert, skippedCount) => {
+        if (dupErr) {
+          return res.status(500).json({ error: dupErr.message });
+        }
+        if (rowsToInsert.length === 0) {
+          return res.status(409).json({
+            error: 'Data authenticity yang sama sudah tersimpan (kemungkinan double submit).'
+          });
+        }
+
+        const insertPromises = rowsToInsert.map((row) => {
+          return new Promise((resolve, reject) => {
+            db.run(
+              `INSERT INTO production_device (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+              [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
+              function(err) {
+                if (err) {
+                  reject(err);
+                } else {
+                  resolve({ id: this.lastID, row });
+                }
+              }
+            );
+          });
+        });
+
+        Promise.all(insertPromises)
+          .then((results) => {
+            res.json({
+              message: 'Data saved successfully',
+              saved_count: results.length,
+              skipped_duplicates: skippedCount,
+              data: results.map(r => ({
+                id: r.id,
+                session_id,
+                leader_name,
+                shift_number,
+                pic,
+                mo_number,
+                sku_name,
+                authenticity_data: [r.row]
+              }))
+            });
+          })
+          .catch((err) => {
+            res.status(500).json({ error: err.message });
+          });
       });
     });
-
-    Promise.all(insertPromises)
-      .then((results) => {
-        res.json({
-          message: 'Data saved successfully',
-          saved_count: results.length,
-          data: results.map(r => ({
-            id: r.id,
-            session_id,
-            leader_name,
-            shift_number,
-            pic,
-            mo_number,
-            sku_name,
-            authenticity_data: [r.row]
-          }))
-        });
-      })
-      .catch((err) => {
-        res.status(500).json({ error: err.message });
-      });
   });
 });
 
@@ -382,43 +471,66 @@ router.post('/cartridge', (req, res) => {
       return;
     }
 
-    const insertPromises = authenticityRows.map((row) => {
-      return new Promise((resolve, reject) => {
-        db.run(
-          `INSERT INTO production_cartridge (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
-          [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
-          function(err) {
-            if (err) {
-              reject(err);
-            } else {
-              resolve({ id: this.lastID, row });
-            }
-          }
-        );
+    findOtherActiveMo('production_cartridge', mo_number, (guardErr, otherActiveMo) => {
+      if (guardErr) {
+        return res.status(500).json({ error: guardErr.message });
+      }
+      if (otherActiveMo) {
+        return res.status(409).json({
+          error: `MO ${otherActiveMo} masih aktif di halaman ini. Submit/selesaikan MO tersebut sebelum input MO baru.`
+        });
+      }
+
+      filterDuplicateActiveRows('production_cartridge', mo_number, authenticityRows, (dupErr, rowsToInsert, skippedCount) => {
+        if (dupErr) {
+          return res.status(500).json({ error: dupErr.message });
+        }
+        if (rowsToInsert.length === 0) {
+          return res.status(409).json({
+            error: 'Data authenticity yang sama sudah tersimpan (kemungkinan double submit).'
+          });
+        }
+
+        const insertPromises = rowsToInsert.map((row) => {
+          return new Promise((resolve, reject) => {
+            db.run(
+              `INSERT INTO production_cartridge (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+              [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
+              function(err) {
+                if (err) {
+                  reject(err);
+                } else {
+                  resolve({ id: this.lastID, row });
+                }
+              }
+            );
+          });
+        });
+
+        Promise.all(insertPromises)
+          .then((results) => {
+            res.json({
+              message: 'Data saved successfully',
+              saved_count: results.length,
+              skipped_duplicates: skippedCount,
+              data: results.map(r => ({
+                id: r.id,
+                session_id,
+                leader_name,
+                shift_number,
+                pic,
+                mo_number,
+                sku_name,
+                authenticity_data: [r.row]
+              }))
+            });
+          })
+          .catch((err) => {
+            res.status(500).json({ error: err.message });
+          });
       });
     });
-
-    Promise.all(insertPromises)
-      .then((results) => {
-        res.json({
-          message: 'Data saved successfully',
-          saved_count: results.length,
-          data: results.map(r => ({
-            id: r.id,
-            session_id,
-            leader_name,
-            shift_number,
-            pic,
-            mo_number,
-            sku_name,
-            authenticity_data: [r.row]
-          }))
-        });
-      })
-      .catch((err) => {
-        res.status(500).json({ error: err.message });
-      });
   });
 });
 

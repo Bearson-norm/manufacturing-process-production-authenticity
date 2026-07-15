@@ -137,6 +137,9 @@ function ProductionDevice() {
   const [activeVendors, setActiveVendors] = useState([]);
   const [bufferModalVendorId, setBufferModalVendorId] = useState('');
   const [rejectModalVendorId, setRejectModalVendorId] = useState('');
+  const [isSavingInput, setIsSavingInput] = useState(false);
+  const savingInputRef = useRef(false);
+  const pausePollingRef = useRef(false);
 
   const vendorDigitMap = useMemo(() => buildVendorDigitMap(activeVendors), [activeVendors]);
 
@@ -212,7 +215,20 @@ function ProductionDevice() {
         console.error('Error loading session:', error);
       }
     }
+
+    // Polling agar data tetap segar antar tab/browser (skip saat modal input terbuka / sedang menyimpan)
+    const pollInterval = setInterval(() => {
+      if (!pausePollingRef.current) {
+        fetchData();
+      }
+    }, 10000);
+    return () => clearInterval(pollInterval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    pausePollingRef.current = showInputModal || isSavingInput;
+  }, [showInputModal, isSavingInput]);
 
   const fetchData = async () => {
     try {
@@ -1242,8 +1258,21 @@ function ProductionDevice() {
   };
 
   const handleConfirmInput = async () => {
+    if (savingInputRef.current) {
+      return;
+    }
+
     if (!formData.pic || !formData.moNumber || !formData.skuName) {
       alert('Silakan isi semua field yang wajib diisi');
+      return;
+    }
+
+    // Guard frontend: hanya 1 MO aktif per halaman produksi
+    const otherActiveMo = savedData
+      .flatMap(session => session.inputs || [])
+      .find(input => (input.status || 'active') === 'active' && input.mo_number && input.mo_number !== formData.moNumber);
+    if (otherActiveMo) {
+      alert(`MO ${otherActiveMo.mo_number} masih aktif di halaman ini. Submit/selesaikan MO tersebut sebelum input MO baru.`);
       return;
     }
 
@@ -1294,6 +1323,8 @@ function ProductionDevice() {
       }
     }
 
+    savingInputRef.current = true;
+    setIsSavingInput(true);
     try {
       const rowsPayload = formData.authenticityRows.map((r) => ({
         ...r,
@@ -1323,7 +1354,15 @@ function ProductionDevice() {
       fetchData();
     } catch (error) {
       console.error('Error saving data:', error);
-      alert('Error menyimpan data');
+      if (error.response?.status === 409 && error.response.data?.error) {
+        alert(error.response.data.error);
+        fetchData();
+      } else {
+        alert('Error menyimpan data');
+      }
+    } finally {
+      savingInputRef.current = false;
+      setIsSavingInput(false);
     }
   };
 
@@ -2454,8 +2493,8 @@ function ProductionDevice() {
               }} className="cancel-button">
                 Cancel
               </button>
-              <button onClick={handleConfirmInput} className="confirm-button">
-                Confirm Input
+              <button onClick={handleConfirmInput} className="confirm-button" disabled={isSavingInput}>
+                {isSavingInput ? 'Menyimpan...' : 'Confirm Input'}
               </button>
             </div>
           </div>

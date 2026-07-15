@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './ReportDashboard.css';
@@ -63,51 +63,59 @@ function ReportDashboard() {
     endDate: ''
   });
   const [searchMo, setSearchMo] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(null);
+  // Filter yang terakhir di-apply, dipakai ulang oleh polling
+  const appliedParamsRef = useRef({});
 
   useEffect(() => {
     fetchReportData();
+
+    const pollInterval = setInterval(() => {
+      loadReportData(appliedParamsRef.current, { silent: true });
+    }, 30000);
+    return () => clearInterval(pollInterval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchReportData = async () => {
-    setLoading(true);
-    try {
-      const response = await axios.get('/api/reports/manufacturing');
-      // API returns { success: true, total: ..., data: [...] }
-      // Extract the data array from response
-      const data = response.data?.data || response.data || [];
-      // Ensure it's an array
-      setReportData(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Error fetching report data:', error);
-      alert('Error mengambil data laporan');
-      setReportData([]); // Set to empty array on error
-    } finally {
-      setLoading(false);
+  const loadReportData = async (params = {}, { silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
     }
-  };
-
-  const handleApplyFilter = async () => {
-    setLoading(true);
     try {
-      const params = {};
-      if (selectedType !== 'all') params.type = selectedType;
-      if (dateFilter.startDate) params.startDate = dateFilter.startDate;
-      if (dateFilter.endDate) params.endDate = dateFilter.endDate;
-      if (searchMo) params.moNumber = searchMo;
-
       const response = await axios.get('/api/reports/manufacturing', { params });
       // API returns { success: true, total: ..., data: [...] }
       // Extract the data array from response
       const data = response.data?.data || response.data || [];
       // Ensure it's an array
       setReportData(Array.isArray(data) ? data : []);
+      setLastUpdated(new Date());
     } catch (error) {
-      console.error('Error filtering report data:', error);
-      alert('Error mengambil data laporan dengan filter');
-      setReportData([]); // Set to empty array on error
+      console.error('Error fetching report data:', error);
+      if (!silent) {
+        alert('Error mengambil data laporan');
+        setReportData([]); // Set to empty array on error
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
+  };
+
+  const fetchReportData = async () => {
+    appliedParamsRef.current = {};
+    await loadReportData({});
+  };
+
+  const handleApplyFilter = async () => {
+    const params = {};
+    if (selectedType !== 'all') params.type = selectedType;
+    if (dateFilter.startDate) params.startDate = dateFilter.startDate;
+    if (dateFilter.endDate) params.endDate = dateFilter.endDate;
+    if (searchMo) params.moNumber = searchMo;
+
+    appliedParamsRef.current = params;
+    await loadReportData(params);
   };
 
   const handleResetFilter = () => {
@@ -204,6 +212,11 @@ function ReportDashboard() {
             <p><strong>Rumus Perhitungan:</strong></p>
             <p>Produk Dihasilkan = (Last Authenticity - First Authenticity + 1) - Reject + Buffer</p>
           </div>
+          {lastUpdated && (
+            <p className="last-updated-info" style={{ fontSize: '0.85rem', opacity: 0.75, marginTop: '4px' }}>
+              Terakhir diperbarui {lastUpdated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            </p>
+          )}
         </div>
       </div>
 
