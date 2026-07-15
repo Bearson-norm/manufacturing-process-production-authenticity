@@ -1545,57 +1545,6 @@ function ProductionLiquid() {
     }
   };
 
-  const handleSubmitAllPending = async (sessionId) => {
-    const session = savedData.find(s => s.session_id === sessionId);
-    if (!session) return;
-
-    // Get all active inputs grouped by MO number
-    const groupedByMo = {};
-    session.inputs.forEach(input => {
-      if (input.status === 'active') {
-        if (!groupedByMo[input.mo_number]) {
-          groupedByMo[input.mo_number] = [];
-        }
-        groupedByMo[input.mo_number].push(input);
-      }
-    });
-
-    const allActiveInputs = session.inputs.filter(input => input.status === 'active');
-    
-    if (allActiveInputs.length === 0) {
-      alert('Tidak ada MO yang tertunda untuk disubmit');
-      return;
-    }
-
-    // Validate authenticity data before submit
-    const validation = validateAuthenticityData(allActiveInputs);
-    if (!validation.valid) {
-      alert(validation.message);
-      return;
-    }
-
-    const moNumbers = Object.keys(groupedByMo);
-    const confirmMessage = `Apakah Anda yakin ingin submit semua ${allActiveInputs.length} input yang tertunda dari ${moNumbers.length} MO dalam session ini?\n\nMO Numbers: ${moNumbers.join(', ')}`;
-    
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-
-    try {
-      const updatePromises = allActiveInputs.map(input => 
-        axios.put(`/api/production/liquid/update-status/${input.id}`, {
-          status: 'completed'
-        })
-      );
-      
-      await Promise.all(updatePromises);
-      fetchData();
-    } catch (error) {
-      console.error('Error updating status:', error);
-      alert('Error memperbarui status');
-    }
-  };
-
   const handleEditInput = (moNumber, sessionId) => {
     // Find all inputs with the same MO number in the same session
     const session = savedData.find(s => s.session_id === sessionId);
@@ -1905,8 +1854,6 @@ function ProductionLiquid() {
                   inputs.every(input => input.status === 'completed')
                 );
                 
-                // Count active inputs
-                const activeInputsCount = session.inputs.filter(input => input.status === 'active').length;
                 const pendingMoCount = Object.entries(groupedByMo).filter(([moNumber, inputs]) => 
                   inputs.some(input => input.status === 'active')
                 ).length;
@@ -1953,27 +1900,7 @@ function ProductionLiquid() {
                         <p><strong>Pending MOs:</strong> {pendingMoCount}</p>
                       )}
                     </div>
-                    {!allMoGroupsCompleted && activeInputsCount > 0 && (
-                      <div style={{ marginBottom: '12px' }}>
-                        <button
-                          onClick={() => handleSubmitAllPending(session.session_id)}
-                          className="submit-all-button"
-                          style={{ 
-                            padding: '8px 16px', 
-                            fontSize: '14px', 
-                            background: '#dc2626', 
-                            color: 'white', 
-                            border: 'none', 
-                            borderRadius: '4px', 
-                            cursor: 'pointer',
-                            fontWeight: 'bold'
-                          }}
-                        >
-                          Submit All Pending MO ({pendingMoCount})
-                        </button>
-                      </div>
-                    )}
-                    
+
                     <div className="inputs-container">
                       {Object.entries(groupedByMo).map(([moNumber, inputs], moIdx) => {
                         if (!savedMoPagination.pageKeySet.has(`${session.session_id}::${moNumber}`)) {
