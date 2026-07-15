@@ -1256,6 +1256,49 @@ function ProductionLiquid() {
     });
   };
 
+  const submitConfirmInput = async () => {
+    savingInputRef.current = true;
+    setIsSavingInput(true);
+    try {
+      const rowsPayload = formData.authenticityRows.map((r) => ({
+        ...r,
+        vendorName: r.vendorName || null
+      }));
+      await axios.post('/api/production/liquid', {
+        session_id: sessionId,
+        leader_name: leaderName,
+        shift_number: shiftNumber,
+        pic: formData.pic,
+        mo_number: formData.moNumber,
+        sku_name: formData.skuName,
+        authenticity_data: rowsPayload
+      });
+
+      setFormData({
+        pic: '',
+        moNumber: '',
+        skuName: '',
+        authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }]
+      });
+      setAuthenticityValidationStatus({});
+      setSelectedMo(null);
+      setMoSearchTerm('');
+      setShowInputModal(false);
+      fetchData();
+    } catch (error) {
+      console.error('Error saving data:', error);
+      if (error.response?.status === 409 && error.response.data?.error) {
+        alert(error.response.data.error);
+        fetchData();
+      } else {
+        alert('Error menyimpan data');
+      }
+    } finally {
+      savingInputRef.current = false;
+      setIsSavingInput(false);
+    }
+  };
+
   const handleConfirmInput = async () => {
     if (savingInputRef.current) {
       return;
@@ -1263,15 +1306,6 @@ function ProductionLiquid() {
 
     if (!formData.pic || !formData.moNumber || !formData.skuName) {
       alert('Silakan isi semua field yang wajib diisi');
-      return;
-    }
-
-    // Guard frontend: hanya 1 MO aktif per halaman produksi
-    const otherActiveMo = savedData
-      .flatMap(session => session.inputs || [])
-      .find(input => (input.status || 'active') === 'active' && input.mo_number && input.mo_number !== formData.moNumber);
-    if (otherActiveMo) {
-      alert(`MO ${otherActiveMo.mo_number} masih aktif di halaman ini. Submit/selesaikan MO tersebut sebelum input MO baru.`);
       return;
     }
 
@@ -1322,47 +1356,7 @@ function ProductionLiquid() {
       }
     }
 
-    savingInputRef.current = true;
-    setIsSavingInput(true);
-    try {
-      const rowsPayload = formData.authenticityRows.map((r) => ({
-        ...r,
-        vendorName: r.vendorName || null
-      }));
-      await axios.post('/api/production/liquid', {
-        session_id: sessionId,
-        leader_name: leaderName,
-        shift_number: shiftNumber,
-        pic: formData.pic,
-        mo_number: formData.moNumber,
-        sku_name: formData.skuName,
-        authenticity_data: rowsPayload
-      });
-
-      // Reset form
-      setFormData({
-        pic: '',
-        moNumber: '',
-        skuName: '',
-        authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }]
-      });
-      setAuthenticityValidationStatus({});
-      setSelectedMo(null);
-      setMoSearchTerm('');
-      setShowInputModal(false);
-      fetchData();
-    } catch (error) {
-      console.error('Error saving data:', error);
-      if (error.response?.status === 409 && error.response.data?.error) {
-        alert(error.response.data.error);
-        fetchData();
-      } else {
-        alert('Error menyimpan data');
-      }
-    } finally {
-      savingInputRef.current = false;
-      setIsSavingInput(false);
-    }
+    await submitConfirmInput();
   };
 
   // eslint-disable-next-line no-unused-vars
