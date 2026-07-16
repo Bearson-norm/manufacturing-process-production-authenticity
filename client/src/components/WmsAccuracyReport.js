@@ -34,6 +34,7 @@ function WmsAccuracyReport() {
   const [syncingBatch, setSyncingBatch] = useState(false);
   const [syncProgress, setSyncProgress] = useState(null);
   const [syncSummary, setSyncSummary] = useState(null);
+  const [downloadingExport, setDownloadingExport] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [report, setReport] = useState(null);
 
@@ -185,6 +186,59 @@ function WmsAccuracyReport() {
   const failedPreview = failedResults.slice(0, 5);
   const failedRemainder = failedResults.length - failedPreview.length;
 
+  const handleDownloadSummary = async () => {
+    setDownloadingExport(true);
+    setMessage({ type: '', text: '' });
+
+    try {
+      const response = await axios.get('/api/wms/mo-accuracy-report/export-summary', {
+        params: buildFilterParams(),
+        responseType: 'blob'
+      });
+
+      const contentType = response.headers['content-type'] || '';
+      if (contentType.includes('application/json')) {
+        const text = await response.data.text();
+        const parsed = JSON.parse(text);
+        setMessage({ type: 'error', text: parsed.error || 'Gagal mengunduh summary PDF' });
+        return;
+      }
+
+      const disposition = response.headers['content-disposition'] || '';
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch?.[1] || 'wms-accuracy-summary.pdf';
+
+      const blobUrl = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+
+      setMessage({ type: 'success', text: 'Summary PDF berhasil diunduh.' });
+    } catch (error) {
+      let errorText = 'Gagal mengunduh summary PDF';
+
+      if (error.response?.data instanceof Blob) {
+        try {
+          const text = await error.response.data.text();
+          const parsed = JSON.parse(text);
+          errorText = parsed.error || errorText;
+        } catch {
+          // keep default message
+        }
+      } else if (error.response?.data?.error) {
+        errorText = error.response.data.error;
+      }
+
+      setMessage({ type: 'error', text: errorText });
+    } finally {
+      setDownloadingExport(false);
+    }
+  };
+
   return (
     <div className="wms-report-container">
       <div className="wms-report-header">
@@ -239,7 +293,7 @@ function WmsAccuracyReport() {
           type="button"
           className="wms-btn wms-btn-primary"
           onClick={() => loadReport(1)}
-          disabled={loading || syncingBatch}
+          disabled={loading || syncingBatch || downloadingExport}
         >
           {loading ? 'Memuat...' : 'Muat Ulang'}
         </button>
@@ -247,9 +301,17 @@ function WmsAccuracyReport() {
           type="button"
           className="wms-btn wms-btn-secondary"
           onClick={handleBatchSync}
-          disabled={loading || syncingBatch}
+          disabled={loading || syncingBatch || downloadingExport}
         >
           {syncingBatch ? 'Menyinkronkan...' : 'Sync WMS Semua MO'}
+        </button>
+        <button
+          type="button"
+          className="wms-btn wms-btn-secondary"
+          onClick={handleDownloadSummary}
+          disabled={loading || syncingBatch || downloadingExport}
+        >
+          {downloadingExport ? 'Mengunduh PDF...' : 'Download Summary (PDF)'}
         </button>
       </div>
 

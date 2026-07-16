@@ -7,6 +7,10 @@ const {
 } = require('../services/prieds-wms.service');
 const { findMatchingRanges, verifyMoQrAgainstProduction } = require('../utils/authenticity-range.utils');
 const { resolveProductionQuantity } = require('../utils/authenticity.utils');
+const {
+  generateWmsAccuracySummaryPdf,
+  buildExportFilename
+} = require('../utils/wms-accuracy-pdf.utils');
 
 function parsePagination(query) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -17,6 +21,7 @@ function parsePagination(query) {
 
 const MAX_CARTONS_VERIFY = 500;
 const MAX_SYNC_MO = 100;
+const MAX_EXPORT_MO = 100;
 const MAX_SYNC_MO_PER_REQUEST = 10;
 
 async function getAllCartonsWithQrByMo(moNumber) {
@@ -230,7 +235,7 @@ async function syncMoBatch(moNumbers) {
   return { syncedOk, syncedWarning, failed, results };
 }
 
-async function buildMoAccuracyReportRow(moNumber, baseRow) {
+async function computeMoAccuracy(moNumber, baseRow) {
   const hasWmsData = (baseRow.wms_carton_count || 0) > 0;
   const hasProduction = (baseRow.session_count || 0) > 0;
 
@@ -240,25 +245,28 @@ async function buildMoAccuracyReportRow(moNumber, baseRow) {
 
   if (!hasWmsData) {
     return {
-      mo_number: moNumber,
-      session_count: baseRow.session_count,
-      first_completed_at: baseRow.first_completed_at,
-      last_completed_at: baseRow.last_completed_at,
-      sku_name: baseRow.sku_name,
-      wms_status: wmsStatus,
-      has_wms_data: false,
-      wms_carton_count: 0,
-      last_synced_at: null,
-      total_wms_qty: 0,
-      matched_qty: 0,
-      failed_qty: 0,
-      total_qr: 0,
-      matched_qr: 0,
-      failed_qr: 0,
-      accuracy_percent: null,
-      error_rate_percent: null,
-      qty_error_rate_percent: null,
-      verify_message: 'Belum sync WMS'
+      row: {
+        mo_number: moNumber,
+        session_count: baseRow.session_count,
+        first_completed_at: baseRow.first_completed_at,
+        last_completed_at: baseRow.last_completed_at,
+        sku_name: baseRow.sku_name,
+        wms_status: wmsStatus,
+        has_wms_data: false,
+        wms_carton_count: 0,
+        last_synced_at: null,
+        total_wms_qty: 0,
+        matched_qty: 0,
+        failed_qty: 0,
+        total_qr: 0,
+        matched_qr: 0,
+        failed_qr: 0,
+        accuracy_percent: null,
+        error_rate_percent: null,
+        qty_error_rate_percent: null,
+        verify_message: 'Belum sync WMS'
+      },
+      cartons: []
     };
   }
 
@@ -267,28 +275,128 @@ async function buildMoAccuracyReportRow(moNumber, baseRow) {
     getAllCartonsWithQrByMo(moNumber)
   ]);
 
-  const { summary } = verifyMoQrAgainstProduction(productionRows, cartonsWithQr);
+  const { summary, cartons } = verifyMoQrAgainstProduction(productionRows, cartonsWithQr);
 
   return {
-    mo_number: moNumber,
-    session_count: baseRow.session_count,
-    first_completed_at: baseRow.first_completed_at,
-    last_completed_at: baseRow.last_completed_at,
-    sku_name: baseRow.sku_name,
-    wms_status: wmsStatus,
-    has_wms_data: true,
-    wms_carton_count: baseRow.wms_carton_count,
-    last_synced_at: baseRow.last_synced_at,
-    total_wms_qty: summary.total_wms_qty,
-    matched_qty: summary.matched_qty,
-    failed_qty: summary.failed_qty,
-    total_qr: summary.total_qr,
-    matched_qr: summary.matched,
-    failed_qr: summary.unmatched,
-    accuracy_percent: summary.accuracy_percent,
-    error_rate_percent: summary.error_rate_percent,
-    qty_error_rate_percent: summary.qty_error_rate_percent,
-    verify_message: summary.total_qr === 0 ? summary.message : null
+    row: {
+      mo_number: moNumber,
+      session_count: baseRow.session_count,
+      first_completed_at: baseRow.first_completed_at,
+      last_completed_at: baseRow.last_completed_at,
+      sku_name: baseRow.sku_name,
+      wms_status: wmsStatus,
+      has_wms_data: true,
+      wms_carton_count: baseRow.wms_carton_count,
+      last_synced_at: baseRow.last_synced_at,
+      total_wms_qty: summary.total_wms_qty,
+      matched_qty: summary.matched_qty,
+      failed_qty: summary.failed_qty,
+      total_qr: summary.total_qr,
+      matched_qr: summary.matched,
+      failed_qr: summary.unmatched,
+      accuracy_percent: summary.accuracy_percent,
+      error_rate_percent: summary.error_rate_percent,
+      qty_error_rate_percent: summary.qty_error_rate_percent,
+      verify_message: summary.total_qr === 0 ? summary.message : null
+    },
+    cartons
+  };
+}
+
+async function buildMoAccuracyReportRow(moNumber, baseRow) {
+  const { row } = await computeMoAccuracy(moNumber, baseRow);
+  return row;
+}
+
+function collectRejectedUnits(cartons, moNumber) {
+  const rejected = [];
+
+  for (const carton of cartons || []) {
+    for (const qr of carton.qr_items || []) {
+      if (qr.in_range) continue;
+      rejected.push({
+        mo_number: moNumber,
+        carton_barcode: carton.barcode || '',
+        stock_transfer_order_id: carton.stock_transfer_order_id || null,
+        counting: carton.counting,
+        total_carton: carton.total_carton,
+        qr_barcode: qr.barcode || '',
+        qty: qr.qty ?? 1,
+        reason: qr.reason || null
+      });
+    }
+  }
+
+  return rejected;
+}
+
+async function fetchProductionMoBaseRows(whereClause, params) {
+  const result = await pool.query(
+    `SELECT
+       pr.mo_number,
+       COUNT(DISTINCT pr.id)::int AS session_count,
+       MIN(pr.completed_at) AS first_completed_at,
+       MAX(pr.completed_at) AS last_completed_at,
+       MAX(pr.sku_name) AS sku_name,
+       COALESCE(w.carton_count, 0)::int AS wms_carton_count,
+       w.last_synced_at
+     FROM production_results pr
+     LEFT JOIN (
+       SELECT manufacturing_order_id,
+              COUNT(*)::int AS carton_count,
+              MAX(synced_at) AS last_synced_at
+       FROM wms_repacking_carton
+       GROUP BY manufacturing_order_id
+     ) w ON w.manufacturing_order_id = pr.mo_number
+     WHERE ${whereClause}
+     GROUP BY pr.mo_number, w.carton_count, w.last_synced_at
+     ORDER BY MAX(pr.completed_at) DESC NULLS LAST`,
+    params
+  );
+  return result.rows;
+}
+
+async function buildExportPayload(baseRows) {
+  const rows = [];
+  const moSummaries = [];
+  const rejectedUnits = [];
+
+  for (const baseRow of baseRows) {
+    const { row, cartons } = await computeMoAccuracy(baseRow.mo_number, baseRow);
+    rows.push(row);
+
+    if ((row.failed_qr || 0) > 0) {
+      moSummaries.push(row);
+      rejectedUnits.push(...collectRejectedUnits(cartons, row.mo_number));
+    }
+  }
+
+  const withWms = rows.filter((row) => row.has_wms_data).length;
+  const qrMeasurable = rows.filter((row) => (row.total_qr || 0) > 0);
+  const aggregateTotalQr = qrMeasurable.reduce((sum, row) => sum + (row.total_qr || 0), 0);
+  const aggregateFailedQr = qrMeasurable.reduce((sum, row) => sum + (row.failed_qr || 0), 0);
+  const aggregateTotalWmsQty = qrMeasurable.reduce((sum, row) => sum + (row.total_wms_qty || 0), 0);
+  const aggregateFailedQty = qrMeasurable.reduce((sum, row) => sum + (row.failed_qty || 0), 0);
+  const avgErrorRate = aggregateTotalQr > 0
+    ? Math.round((aggregateFailedQr / aggregateTotalQr) * 10000) / 100
+    : null;
+  const qtyErrorRate = aggregateTotalWmsQty > 0
+    ? Math.round((aggregateFailedQty / aggregateTotalWmsQty) * 10000) / 100
+    : null;
+
+  return {
+    overall: {
+      mo_count: rows.length,
+      with_wms: withWms,
+      total_qr: aggregateTotalQr,
+      failed_qr: aggregateFailedQr,
+      avg_error_rate_percent: avgErrorRate,
+      total_wms_qty: aggregateTotalWmsQty,
+      failed_qty: aggregateFailedQty,
+      qty_error_rate_percent: qtyErrorRate
+    },
+    mo_summaries: moSummaries,
+    rejected_units: rejectedUnits
   };
 }
 
@@ -684,6 +792,51 @@ router.get('/mo-accuracy-report', async (req, res) => {
   } catch (error) {
     console.error('GET /api/wms/mo-accuracy-report:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/wms/mo-accuracy-report/export-summary — PDF summary with rejected units only
+router.get('/mo-accuracy-report/export-summary', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, search, whereClause, params } = buildProductionMoFilters(req.query);
+
+    const countResult = await pool.query(
+      `SELECT COUNT(DISTINCT pr.mo_number)::int AS total
+       FROM production_results pr
+       WHERE ${whereClause}`,
+      params
+    );
+    const total = countResult.rows[0].total;
+
+    if (total === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tidak ada MO untuk filter ini.'
+      });
+    }
+
+    if (total > MAX_EXPORT_MO) {
+      return res.status(400).json({
+        success: false,
+        error: `Terlalu banyak MO (${total}). Maksimum ${MAX_EXPORT_MO} per export — persempit filter tanggal atau search.`
+      });
+    }
+
+    const baseRows = await fetchProductionMoBaseRows(whereClause, params);
+    const payload = await buildExportPayload(baseRows);
+    const pdfBuffer = await generateWmsAccuracySummaryPdf(payload, {
+      dateFrom,
+      dateTo,
+      search
+    });
+    const filename = buildExportFilename();
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('GET /api/wms/mo-accuracy-report/export-summary:', error);
+    res.status(500).json({ success: false, error: error.message || 'Export summary gagal' });
   }
 });
 

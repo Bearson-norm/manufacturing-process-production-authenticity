@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './ReportDashboard.css';
 
+const PAGE_SIZE = 10;
+
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
   if (!dateString) return '';
@@ -221,6 +223,7 @@ function ReportDashboard() {
   });
   const [searchMo, setSearchMo] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const appliedParamsRef = useRef({});
 
   useEffect(() => {
@@ -268,6 +271,7 @@ function ReportDashboard() {
     if (searchMo) params.moNumber = searchMo;
 
     appliedParamsRef.current = params;
+    setCurrentPage(1);
     await loadReportData(params);
   };
 
@@ -275,10 +279,26 @@ function ReportDashboard() {
     setSelectedType('all');
     setDateFilter({ startDate: '', endDate: '' });
     setSearchMo('');
+    setCurrentPage(1);
     fetchReportData();
   };
 
   const sessionData = groupBySession(reportData);
+  const totalSessions = sessionData.length;
+  const totalPages = Math.max(1, Math.ceil(totalSessions / PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStart = totalSessions === 0 ? 0 : (safeCurrentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(safeCurrentPage * PAGE_SIZE, totalSessions);
+  const paginatedSessions = sessionData.slice(
+    (safeCurrentPage - 1) * PAGE_SIZE,
+    safeCurrentPage * PAGE_SIZE
+  );
+
+  const handlePageChange = (nextPage) => {
+    if (nextPage < 1 || nextPage > totalPages || nextPage === safeCurrentPage) return;
+    setCurrentPage(nextPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   return (
     <div className="report-dashboard-container">
@@ -363,8 +383,14 @@ function ReportDashboard() {
           {sessionData.length === 0 ? (
             <div className="no-data">Tidak ada data laporan</div>
           ) : (
+            <>
+            {totalSessions > 0 && (
+              <div className="report-pagination-info">
+                Menampilkan {pageStart}–{pageEnd} dari {totalSessions} session
+              </div>
+            )}
             <div className="report-list">
-              {sessionData.map((session) => (
+              {paginatedSessions.map((session) => (
                 <div key={`${session.production_type}::${session.session_id}`} className="report-card session-report-card">
                   <div className="report-card-header session-card-header">
                     <div className="session-info">
@@ -514,6 +540,31 @@ function ReportDashboard() {
                 </div>
               ))}
             </div>
+
+            {totalPages > 1 && (
+              <div className="report-pagination">
+                <button
+                  type="button"
+                  className="report-page-btn"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => handlePageChange(safeCurrentPage - 1)}
+                >
+                  Sebelumnya
+                </button>
+                <span className="report-page-indicator">
+                  Halaman {safeCurrentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className="report-page-btn"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => handlePageChange(safeCurrentPage + 1)}
+                >
+                  Berikutnya
+                </button>
+              </div>
+            )}
+            </>
           )}
         </div>
       )}
