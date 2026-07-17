@@ -8,7 +8,7 @@ const {
 const { findMatchingRanges, verifyMoQrAgainstProduction } = require('../utils/authenticity-range.utils');
 const { resolveProductionQuantity } = require('../utils/authenticity.utils');
 const {
-  generateWmsAccuracySummaryPdf,
+  createWmsAccuracySummaryPdfStream,
   buildExportFilename
 } = require('../utils/wms-accuracy-pdf.utils');
 
@@ -21,7 +21,6 @@ function parsePagination(query) {
 
 const MAX_CARTONS_VERIFY = 500;
 const MAX_SYNC_MO = 100;
-const MAX_EXPORT_MO = 100;
 const MAX_SYNC_MO_PER_REQUEST = 10;
 
 async function getAllCartonsWithQrByMo(moNumber) {
@@ -354,50 +353,6 @@ async function fetchProductionMoBaseRows(whereClause, params) {
     params
   );
   return result.rows;
-}
-
-async function buildExportPayload(baseRows) {
-  const rows = [];
-  const moSummaries = [];
-  const rejectedUnits = [];
-
-  for (const baseRow of baseRows) {
-    const { row, cartons } = await computeMoAccuracy(baseRow.mo_number, baseRow);
-    rows.push(row);
-
-    if ((row.failed_qr || 0) > 0) {
-      moSummaries.push(row);
-      rejectedUnits.push(...collectRejectedUnits(cartons, row.mo_number));
-    }
-  }
-
-  const withWms = rows.filter((row) => row.has_wms_data).length;
-  const qrMeasurable = rows.filter((row) => (row.total_qr || 0) > 0);
-  const aggregateTotalQr = qrMeasurable.reduce((sum, row) => sum + (row.total_qr || 0), 0);
-  const aggregateFailedQr = qrMeasurable.reduce((sum, row) => sum + (row.failed_qr || 0), 0);
-  const aggregateTotalWmsQty = qrMeasurable.reduce((sum, row) => sum + (row.total_wms_qty || 0), 0);
-  const aggregateFailedQty = qrMeasurable.reduce((sum, row) => sum + (row.failed_qty || 0), 0);
-  const avgErrorRate = aggregateTotalQr > 0
-    ? Math.round((aggregateFailedQr / aggregateTotalQr) * 10000) / 100
-    : null;
-  const qtyErrorRate = aggregateTotalWmsQty > 0
-    ? Math.round((aggregateFailedQty / aggregateTotalWmsQty) * 10000) / 100
-    : null;
-
-  return {
-    overall: {
-      mo_count: rows.length,
-      with_wms: withWms,
-      total_qr: aggregateTotalQr,
-      failed_qr: aggregateFailedQr,
-      avg_error_rate_percent: avgErrorRate,
-      total_wms_qty: aggregateTotalWmsQty,
-      failed_qty: aggregateFailedQty,
-      qty_error_rate_percent: qtyErrorRate
-    },
-    mo_summaries: moSummaries,
-    rejected_units: rejectedUnits
-  };
 }
 
 async function getLocalSummary(moNumber) {
@@ -795,8 +750,10 @@ router.get('/mo-accuracy-report', async (req, res) => {
   }
 });
 
-// GET /api/wms/mo-accuracy-report/export-summary — PDF summary with rejected units only
+// GET /api/wms/mo-accuracy-report/export-summary — PDF summary with rejected units only (all MOs in filter)
 router.get('/mo-accuracy-report/export-summary', async (req, res) => {
+  let pdfWriter = null;
+
   try {
     const { dateFrom, dateTo, search, whereClause, params } = buildProductionMoFilters(req.query);
 
@@ -815,28 +772,74 @@ router.get('/mo-accuracy-report/export-summary', async (req, res) => {
       });
     }
 
-    if (total > MAX_EXPORT_MO) {
-      return res.status(400).json({
-        success: false,
-        error: `Terlalu banyak MO (${total}). Maksimum ${MAX_EXPORT_MO} per export — persempit filter tanggal atau search.`
-      });
-    }
-
     const baseRows = await fetchProductionMoBaseRows(whereClause, params);
-    const payload = await buildExportPayload(baseRows);
-    const pdfBuffer = await generateWmsAccuracySummaryPdf(payload, {
-      dateFrom,
-      dateTo,
-      search
-    });
     const filename = buildExportFilename();
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(pdfBuffer);
+    res.setHeader('Cache-Control', 'no-store');
+
+    pdfWriter = createWmsAccuracySummaryPdfStream({ dateFrom, dateTo, search });
+    pdfWriter.doc.pipe(res);
+    pdfWriter.doc.on('error', (err) => {
+      console.error('PDF stream error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: 'Export summary gagal' });
+      } else if (!res.writableEnded) {
+        res.destroy(err);
+      }
+    });
+
+    const overall = {
+      mo_count: 0,
+      with_wms: 0,
+      total_qr: 0,
+      failed_qr: 0,
+      avg_error_rate_percent: null,
+      total_wms_qty: 0,
+      failed_qty: 0,
+      qty_error_rate_percent: null
+    };
+
+    for (const baseRow of baseRows) {
+      const { row, cartons } = await computeMoAccuracy(baseRow.mo_number, baseRow);
+      overall.mo_count += 1;
+      if (row.has_wms_data) overall.with_wms += 1;
+
+      if ((row.total_qr || 0) > 0) {
+        overall.total_qr += row.total_qr || 0;
+        overall.failed_qr += row.failed_qr || 0;
+        overall.total_wms_qty += row.total_wms_qty || 0;
+        overall.failed_qty += row.failed_qty || 0;
+      }
+
+      if ((row.failed_qr || 0) > 0) {
+        pdfWriter.writeMoSummaryRow(row);
+        pdfWriter.writeRejectedUnitRows(collectRejectedUnits(cartons, row.mo_number));
+      }
+    }
+
+    overall.avg_error_rate_percent = overall.total_qr > 0
+      ? Math.round((overall.failed_qr / overall.total_qr) * 10000) / 100
+      : null;
+    overall.qty_error_rate_percent = overall.total_wms_qty > 0
+      ? Math.round((overall.failed_qty / overall.total_wms_qty) * 10000) / 100
+      : null;
+
+    pdfWriter.writeOverallSummary(overall);
+    pdfWriter.end();
   } catch (error) {
     console.error('GET /api/wms/mo-accuracy-report/export-summary:', error);
-    res.status(500).json({ success: false, error: error.message || 'Export summary gagal' });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: error.message || 'Export summary gagal' });
+    } else if (pdfWriter?.doc && !res.writableEnded) {
+      try {
+        pdfWriter.doc.destroy();
+      } catch {
+        // ignore destroy errors
+      }
+      res.destroy(error);
+    }
   }
 });
 

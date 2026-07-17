@@ -193,7 +193,9 @@ function WmsAccuracyReport() {
     try {
       const response = await axios.get('/api/wms/mo-accuracy-report/export-summary', {
         params: buildFilterParams(),
-        responseType: 'blob'
+        responseType: 'blob',
+        // Large exports can take several minutes — do not abort early
+        timeout: 0
       });
 
       const contentType = response.headers['content-type'] || '';
