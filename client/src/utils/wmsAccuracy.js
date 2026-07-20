@@ -30,3 +30,20 @@ export function formatWmsCompareStatus(wmsStatus) {
       return { label: 'Belum sync WMS', className: 'wms-compare-badge-pending' };
   }
 }
+
+export function formatQtyVarianceStatus(status) {
+  switch (status) {
+    case 'match':
+      return { label: 'Match', className: 'wms-compare-badge-ok' };
+    case 'shortage':
+      return { label: 'Shortage', className: 'wms-compare-badge-fail' };
+    case 'surplus':
+      return { label: 'Surplus WMS', className: 'wms-compare-badge-warn' };
+    case 'no_wms':
+      return { label: 'Belum sync WMS', className: 'wms-compare-badge-pending' };
+    case 'no_production':
+      return { label: 'Tanpa production', className: 'wms-compare-badge-pending' };
+    default:
+      return { label: status || '—', className: 'wms-compare-badge-pending' };
+  }
+}

@@ -126,6 +126,12 @@
   border-color: #d97706;
 }
 
+.wms-compare-badge-fail {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: #dc2626;
+}
+
 .wms-accuracy-pill {
   display: inline-block;
   padding: 2px 10px;

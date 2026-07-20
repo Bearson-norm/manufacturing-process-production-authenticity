@@ -328,6 +328,13 @@ function WmsExplorer() {
         >
           Laporan Keakuratan MO
         </button>
+        <button
+          type="button"
+          className="wms-btn wms-btn-secondary"
+          onClick={() => navigate('/wms-production-compare')}
+        >
+          Pembanding Qty
+        </button>
       </div>
 
       {message.text && (

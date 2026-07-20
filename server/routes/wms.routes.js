@@ -11,6 +11,7 @@ const {
   createWmsAccuracySummaryPdfStream,
   buildExportFilename
 } = require('../utils/wms-accuracy-pdf.utils');
+const { compareProductionQtyToWms } = require('../utils/wms-production-compare.utils');
 
 function parsePagination(query) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -327,6 +328,68 @@ function collectRejectedUnits(cartons, moNumber) {
   }
 
   return rejected;
+}
+
+async function buildMoQtyCompareReportRow(moNumber, baseRow, { includeDetail = false } = {}) {
+  const productionRows = await getProductionRowsByMo(moNumber);
+  const hasWmsData = (baseRow.wms_carton_count || 0) > 0;
+
+  let cartonsWithQr = [];
+  let wmsCartonQty = 0;
+  let lastSyncedAt = baseRow.last_synced_at || null;
+
+  if (hasWmsData) {
+    const [cartons, wmsSummary] = await Promise.all([
+      getAllCartonsWithQrByMo(moNumber),
+      getWmsSummary(moNumber)
+    ]);
+    cartonsWithQr = cartons;
+    wmsCartonQty = Number(wmsSummary.total_qty) || 0;
+    lastSyncedAt = wmsSummary.last_synced_at || lastSyncedAt;
+  }
+
+  const compared = compareProductionQtyToWms(productionRows, cartonsWithQr, {
+    wmsCartonQty
+  });
+  const { summary } = compared;
+
+  const row = {
+    mo_number: moNumber,
+    session_count: baseRow.session_count ?? productionRows.length,
+    first_completed_at: baseRow.first_completed_at || null,
+    last_completed_at: baseRow.last_completed_at || null,
+    sku_name: baseRow.sku_name || productionRows[0]?.sku_name || null,
+    wms_carton_count: baseRow.wms_carton_count || cartonsWithQr.length,
+    last_synced_at: lastSyncedAt,
+    production_qty: summary.production_qty,
+    wms_carton_qty: summary.wms_carton_qty,
+    wms_qr_qty: summary.wms_qr_qty,
+    wms_covered_qty: summary.wms_covered_qty,
+    missing_qty: summary.missing_qty,
+    surplus_wms_qty: summary.surplus_wms_qty,
+    qty_delta: summary.qty_delta,
+    qty_variance_percent: summary.qty_variance_percent,
+    production_range_count: summary.production_range_count,
+    uncovered_range_count: summary.uncovered_range_count,
+    uncovered_range_qty: summary.uncovered_range_qty,
+    has_wms_data: summary.has_wms_data,
+    has_production: summary.has_production,
+    status: summary.status
+  };
+
+  if (!includeDetail) {
+    return row;
+  }
+
+  return {
+    ...row,
+    by_type: compared.by_type,
+    uncovered_ranges: compared.uncovered_ranges,
+    missing_breakdown_ranges: compared.missing_breakdown_ranges,
+    missing_breakdown_sessions: compared.missing_breakdown_sessions,
+    carton_breakdown: compared.carton_breakdown,
+    surplus_cartons: compared.surplus_cartons
+  };
 }
 
 async function fetchProductionMoBaseRows(whereClause, params) {
@@ -746,6 +809,152 @@ router.get('/mo-accuracy-report', async (req, res) => {
     });
   } catch (error) {
     console.error('GET /api/wms/mo-accuracy-report:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/wms/mo-qty-compare-report/detail — production_results SoT vs WMS qty + uncovered ranges
+router.get('/mo-qty-compare-report/detail', async (req, res) => {
+  try {
+    const moNumber = (req.query.mo_number || req.query.moNumber || '').trim();
+    if (!moNumber) {
+      return res.status(400).json({ success: false, error: 'mo_number is required' });
+    }
+
+    const baseResult = await pool.query(
+      `SELECT
+         pr.mo_number,
+         COUNT(DISTINCT pr.id)::int AS session_count,
+         MIN(pr.completed_at) AS first_completed_at,
+         MAX(pr.completed_at) AS last_completed_at,
+         MAX(pr.sku_name) AS sku_name,
+         COALESCE(w.carton_count, 0)::int AS wms_carton_count,
+         w.last_synced_at
+       FROM production_results pr
+       LEFT JOIN (
+         SELECT manufacturing_order_id,
+                COUNT(*)::int AS carton_count,
+                MAX(synced_at) AS last_synced_at
+         FROM wms_repacking_carton
+         GROUP BY manufacturing_order_id
+       ) w ON w.manufacturing_order_id = pr.mo_number
+       WHERE pr.mo_number = $1
+       GROUP BY pr.mo_number, w.carton_count, w.last_synced_at`,
+      [moNumber]
+    );
+
+    let baseRow = baseResult.rows[0];
+    if (!baseRow) {
+      const wmsOnly = await getWmsSummary(moNumber);
+      if ((wmsOnly.carton_count || 0) === 0) {
+        return res.status(404).json({
+          success: false,
+          error: `MO ${moNumber} tidak ditemukan di production_results atau WMS`
+        });
+      }
+      baseRow = {
+        mo_number: moNumber,
+        session_count: 0,
+        first_completed_at: null,
+        last_completed_at: null,
+        sku_name: wmsOnly.sku || wmsOnly.description || null,
+        wms_carton_count: wmsOnly.carton_count,
+        last_synced_at: wmsOnly.last_synced_at
+      };
+    }
+
+    const detail = await buildMoQtyCompareReportRow(moNumber, baseRow, { includeDetail: true });
+
+    res.json({
+      success: true,
+      mo_number: moNumber,
+      data: detail
+    });
+  } catch (error) {
+    console.error('GET /api/wms/mo-qty-compare-report/detail:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/wms/mo-qty-compare-report — production_results SoT qty vs WMS + reverse coverage
+router.get('/mo-qty-compare-report', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, whereClause, params } = buildProductionMoFilters(req.query);
+    const { page, limit, offset } = parsePagination(req.query);
+
+    const countResult = await pool.query(
+      `SELECT COUNT(DISTINCT pr.mo_number)::int AS total
+       FROM production_results pr
+       WHERE ${whereClause}`,
+      params
+    );
+    const total = countResult.rows[0].total;
+
+    const listParams = [...params, limit, offset];
+    const listResult = await pool.query(
+      `SELECT
+         pr.mo_number,
+         COUNT(DISTINCT pr.id)::int AS session_count,
+         MIN(pr.completed_at) AS first_completed_at,
+         MAX(pr.completed_at) AS last_completed_at,
+         MAX(pr.sku_name) AS sku_name,
+         COALESCE(w.carton_count, 0)::int AS wms_carton_count,
+         w.last_synced_at
+       FROM production_results pr
+       LEFT JOIN (
+         SELECT manufacturing_order_id,
+                COUNT(*)::int AS carton_count,
+                MAX(synced_at) AS last_synced_at
+         FROM wms_repacking_carton
+         GROUP BY manufacturing_order_id
+       ) w ON w.manufacturing_order_id = pr.mo_number
+       WHERE ${whereClause}
+       GROUP BY pr.mo_number, w.carton_count, w.last_synced_at
+       ORDER BY MAX(pr.completed_at) DESC NULLS LAST
+       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+      listParams
+    );
+
+    const rows = [];
+    for (const baseRow of listResult.rows) {
+      rows.push(await buildMoQtyCompareReportRow(baseRow.mo_number, baseRow));
+    }
+
+    const totalProductionQty = rows.reduce((sum, row) => sum + (row.production_qty || 0), 0);
+    const totalCoveredQty = rows.reduce((sum, row) => sum + (row.wms_covered_qty || 0), 0);
+    const totalMissingQty = rows.reduce((sum, row) => sum + (row.missing_qty || 0), 0);
+    const totalSurplusQty = rows.reduce((sum, row) => sum + (row.surplus_wms_qty || 0), 0);
+    const totalUncoveredRanges = rows.reduce((sum, row) => sum + (row.uncovered_range_count || 0), 0);
+
+    const weightedVarianceNumerator = rows.reduce((sum, row) => {
+      if (!(row.production_qty > 0) || row.qty_variance_percent == null) return sum;
+      return sum + (row.qty_variance_percent * row.production_qty);
+    }, 0);
+    const avgAbsVariancePercent = totalProductionQty > 0
+      ? Math.round((weightedVarianceNumerator / totalProductionQty) * 100) / 100
+      : null;
+
+    res.json({
+      success: true,
+      total,
+      page,
+      limit,
+      date_from: dateFrom,
+      date_to: dateTo,
+      overall: {
+        mo_count: rows.length,
+        with_wms: rows.filter((r) => r.has_wms_data).length,
+        production_qty: totalProductionQty,
+        wms_covered_qty: totalCoveredQty,
+        missing_qty: totalMissingQty,
+        surplus_wms_qty: totalSurplusQty,
+        uncovered_range_count: totalUncoveredRanges,
+        avg_abs_variance_percent: avgAbsVariancePercent
+      },
+      data: rows
+    });
+  } catch (error) {
+    console.error('GET /api/wms/mo-qty-compare-report:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -251,6 +251,13 @@ function WmsAccuracyReport() {
         <button
           type="button"
           className="wms-btn wms-btn-secondary"
+          onClick={() => navigate('/wms-production-compare')}
+        >
+          Pembanding Qty
+        </button>
+        <button
+          type="button"
+          className="wms-btn wms-btn-secondary"
           onClick={() => navigate('/wms-explorer')}
         >
           WMS Explorer

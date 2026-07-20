@@ -93,6 +93,11 @@ function Dashboard({ setIsAuthenticated }) {
                 <h3>Laporan Keakuratan QR WMS</h3>
                 <p>Semua MO production dengan persentase error QR dan status compare WMS</p>
               </div>
+              <div className="production-card" onClick={() => navigate('/wms-production-compare')}>
+                <div className="card-icon">⚖️</div>
+                <h3>Pembanding Qty Production vs WMS</h3>
+                <p>Bandingkan qty production_results (SoT) vs WMS plus cakupan range terbalik</p>
+              </div>
               <div className="production-card" onClick={() => navigate('/external-manufacturing-sender')}>
                 <div className="card-icon">📡</div>
                 <h3>External Manufacturing Sender</h3>
