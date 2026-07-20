@@ -126,6 +126,7 @@ function compareProductionQtyToWms(productionRows, cartonsWithQr, options = {}) 
     let cartonQrQty = 0;
     let cartonCoveredQty = 0;
     let cartonSurplusQty = 0;
+    const unmatchedQrs = [];
 
     for (const qr of normalizeCartonQrList(carton)) {
       const qty = qr.qty != null ? Number(qr.qty) : 1;
@@ -176,6 +177,11 @@ function compareProductionQtyToWms(productionRows, cartonsWithQr, options = {}) 
         cartonUnmatchedQr += 1;
         surplusWmsQty += qty;
         cartonSurplusQty += qty;
+        unmatchedQrs.push({
+          qr_barcode: qr.barcode || '',
+          qty,
+          reason: verification.reason || 'out_of_range'
+        });
       }
     }
 
@@ -194,7 +200,8 @@ function compareProductionQtyToWms(productionRows, cartonsWithQr, options = {}) 
       covered_qty: cartonCoveredQty,
       surplus_qty: cartonSurplusQty,
       all_ok: cartonUnmatchedQr === 0 && cartonQrTotal > 0,
-      has_issue: cartonUnmatchedQr > 0 || cartonQrTotal === 0
+      has_issue: cartonUnmatchedQr > 0 || cartonQrTotal === 0,
+      unmatched_qrs: unmatchedQrs
     });
   }
 
@@ -204,6 +211,22 @@ function compareProductionQtyToWms(productionRows, cartonsWithQr, options = {}) 
   });
 
   const surplusCartons = cartonBreakdown.filter((c) => c.surplus_qty > 0 || c.qr_total === 0);
+
+  const unmatchedQrItems = [];
+  for (const carton of cartonBreakdown) {
+    for (const qr of carton.unmatched_qrs || []) {
+      unmatchedQrItems.push({
+        carton_id: carton.carton_id,
+        carton_barcode: carton.carton_barcode,
+        stock_transfer_order_id: carton.stock_transfer_order_id,
+        counting: carton.counting,
+        total_carton: carton.total_carton,
+        qr_barcode: qr.qr_barcode,
+        qty: qr.qty,
+        reason: qr.reason
+      });
+    }
+  }
 
   const rangeBreakdown = rangeStats.map(({ _key, hit_count, hit_qty, ...rest }) => {
     const coveredQty = Math.min(hit_qty, rest.range_size || 0);
@@ -283,6 +306,7 @@ function compareProductionQtyToWms(productionRows, cartonsWithQr, options = {}) 
       missing_session_count: missingBreakdownSessions.length,
       carton_count: cartonBreakdown.length,
       surplus_carton_count: surplusCartons.length,
+      unmatched_qr_count: unmatchedQrItems.length,
       total_qr: totalQr,
       matched_qr: matchedQr,
       unmatched_qr: unmatchedQr,
@@ -295,7 +319,8 @@ function compareProductionQtyToWms(productionRows, cartonsWithQr, options = {}) 
     missing_breakdown_ranges: missingBreakdownRanges,
     missing_breakdown_sessions: missingBreakdownSessions,
     carton_breakdown: cartonBreakdown,
-    surplus_cartons: surplusCartons
+    surplus_cartons: surplusCartons,
+    unmatched_qr_items: unmatchedQrItems
   };
 }
 

@@ -28,6 +28,20 @@ function formatQty(value) {
   return Number(value).toLocaleString('id-ID');
 }
 
+function formatUnmatchReason(reason) {
+  switch (reason) {
+    case 'invalid_barcode':
+      return 'Barcode invalid';
+    case 'empty_barcode':
+      return 'Barcode kosong';
+    case 'no_production_ranges':
+      return 'Tidak ada range production';
+    case 'out_of_range':
+    default:
+      return 'Di luar range';
+  }
+}
+
 function isMismatchStatus(status) {
   return status && status !== 'match';
 }
@@ -44,8 +58,10 @@ function WmsProductionCompare() {
   const [report, setReport] = useState(null);
   const [detail, setDetail] = useState(null);
   const [mismatchOnly, setMismatchOnly] = useState(true);
-  const [detailTab, setDetailTab] = useState('cartons');
+  const [detailTab, setDetailTab] = useState('unmatched');
   const [cartonIssuesOnly, setCartonIssuesOnly] = useState(true);
+  const [expandedCartons, setExpandedCartons] = useState({});
+  const [unmatchedSearch, setUnmatchedSearch] = useState('');
 
   const buildFilterParams = useCallback(() => {
     const params = {};
@@ -105,7 +121,9 @@ function WmsProductionCompare() {
   const loadDetail = async (moNumber) => {
     setDetailLoading(true);
     setMessage({ type: '', text: '' });
-    setDetailTab('cartons');
+    setDetailTab('unmatched');
+    setExpandedCartons({});
+    setUnmatchedSearch('');
     try {
       const response = await axios.get('/api/wms/mo-qty-compare-report/detail', {
         params: { mo_number: moNumber }
@@ -130,9 +148,31 @@ function WmsProductionCompare() {
   const rangeCount = (detail?.missing_breakdown_ranges || []).length;
   const allCartons = detail?.carton_breakdown || [];
   const surplusCartonCount = (detail?.surplus_cartons || []).length;
+  const unmatchedQrItems = detail?.unmatched_qr_items || [];
   const displayCartons = cartonIssuesOnly
     ? allCartons.filter((c) => c.has_issue)
     : allCartons;
+
+  const filteredUnmatchedQrs = useMemo(() => {
+    const term = unmatchedSearch.trim().toLowerCase();
+    if (!term) return unmatchedQrItems;
+    return unmatchedQrItems.filter((qr) => {
+      const hay = [
+        qr.qr_barcode,
+        qr.carton_barcode,
+        qr.stock_transfer_order_id,
+        qr.reason
+      ].map((v) => String(v || '').toLowerCase()).join(' ');
+      return hay.includes(term);
+    });
+  }, [unmatchedQrItems, unmatchedSearch]);
+
+  const toggleCartonExpand = (cartonId) => {
+    setExpandedCartons((prev) => ({
+      ...prev,
+      [cartonId]: !prev[cartonId]
+    }));
+  };
 
   return (
     <div className="wms-report-container wms-qty-compare">
@@ -271,6 +311,13 @@ function WmsProductionCompare() {
           <div className="wms-qty-detail-tabs">
             <button
               type="button"
+              className={`wms-qty-detail-tab ${detailTab === 'unmatched' ? 'active' : ''}`}
+              onClick={() => setDetailTab('unmatched')}
+            >
+              QR tidak match ({unmatchedQrItems.length})
+            </button>
+            <button
+              type="button"
               className={`wms-qty-detail-tab ${detailTab === 'cartons' ? 'active' : ''}`}
               onClick={() => setDetailTab('cartons')}
             >
@@ -293,6 +340,62 @@ function WmsProductionCompare() {
             </button>
           </div>
 
+          {detailTab === 'unmatched' && (
+            <div className="wms-qty-detail-section">
+              <div className="wms-qty-unmatched-toolbar">
+                <input
+                  type="text"
+                  value={unmatchedSearch}
+                  onChange={(e) => setUnmatchedSearch(e.target.value)}
+                  placeholder="Cari QR / carton / SFP..."
+                  className="wms-qty-unmatched-search"
+                />
+                <span className="wms-qty-filter-hint" style={{ margin: 0 }}>
+                  {filteredUnmatchedQrs.length} / {unmatchedQrItems.length} QR
+                </span>
+              </div>
+              <div className="wms-table-wrap wms-qty-unmatched-scroll">
+                <table className="wms-table">
+                  <thead>
+                    <tr>
+                      <th># Carton</th>
+                      <th>Carton</th>
+                      <th>SFP</th>
+                      <th>QR WMS</th>
+                      <th>Qty</th>
+                      <th>Alasan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredUnmatchedQrs.map((qr, idx) => (
+                      <tr key={`${qr.carton_id}-${qr.qr_barcode}-${idx}`}>
+                        <td>
+                          {qr.counting != null
+                            ? `${qr.counting}/${qr.total_carton ?? '—'}`
+                            : '—'}
+                        </td>
+                        <td>{qr.carton_barcode || '—'}</td>
+                        <td>{qr.stock_transfer_order_id || '—'}</td>
+                        <td className="wms-qty-qr-code">{qr.qr_barcode || '—'}</td>
+                        <td>{formatQty(qr.qty)}</td>
+                        <td>{formatUnmatchReason(qr.reason)}</td>
+                      </tr>
+                    ))}
+                    {filteredUnmatchedQrs.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="wms-empty">
+                          {unmatchedQrItems.length === 0
+                            ? 'Tidak ada QR WMS yang tidak match production_results.'
+                            : 'Tidak ada hasil pencarian.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {detailTab === 'cartons' && (
             <div className="wms-qty-detail-section">
               <label className="wms-qty-filter-toggle" htmlFor="carton-issues-only" style={{ marginBottom: 6 }}>
@@ -308,6 +411,7 @@ function WmsProductionCompare() {
                 <table className="wms-table">
                   <thead>
                     <tr>
+                      <th></th>
                       <th>#</th>
                       <th>Carton</th>
                       <th>SFP</th>
@@ -321,35 +425,78 @@ function WmsProductionCompare() {
                     </tr>
                   </thead>
                   <tbody>
-                    {displayCartons.map((carton) => (
-                      <tr key={carton.carton_id}>
-                        <td>
-                          {carton.counting != null
-                            ? `${carton.counting}/${carton.total_carton ?? '—'}`
-                            : '—'}
-                        </td>
-                        <td>{carton.carton_barcode || '—'}</td>
-                        <td>{carton.stock_transfer_order_id || '—'}</td>
-                        <td>{formatQty(carton.carton_qty)}</td>
-                        <td>{formatQty(carton.qr_total)}</td>
-                        <td>{formatQty(carton.matched_qr)}</td>
-                        <td>{formatQty(carton.unmatched_qr)}</td>
-                        <td>{formatQty(carton.covered_qty)}</td>
-                        <td>{formatQty(carton.surplus_qty)}</td>
-                        <td>
-                          {carton.qr_total === 0 ? (
-                            <span className="wms-compare-badge wms-compare-badge-warn">No QR</span>
-                          ) : carton.all_ok ? (
-                            <span className="wms-compare-badge wms-compare-badge-ok">OK</span>
-                          ) : (
-                            <span className="wms-compare-badge wms-compare-badge-fail">Surplus</span>
+                    {displayCartons.map((carton) => {
+                      const expanded = !!expandedCartons[carton.carton_id];
+                      const unmatchedList = carton.unmatched_qrs || [];
+                      return (
+                        <React.Fragment key={carton.carton_id}>
+                          <tr>
+                            <td>
+                              {unmatchedList.length > 0 ? (
+                                <button
+                                  type="button"
+                                  className="wms-btn wms-btn-secondary wms-btn-sm"
+                                  onClick={() => toggleCartonExpand(carton.carton_id)}
+                                >
+                                  {expanded ? '−' : '+'} QR
+                                </button>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td>
+                              {carton.counting != null
+                                ? `${carton.counting}/${carton.total_carton ?? '—'}`
+                                : '—'}
+                            </td>
+                            <td>{carton.carton_barcode || '—'}</td>
+                            <td>{carton.stock_transfer_order_id || '—'}</td>
+                            <td>{formatQty(carton.carton_qty)}</td>
+                            <td>{formatQty(carton.qr_total)}</td>
+                            <td>{formatQty(carton.matched_qr)}</td>
+                            <td>{formatQty(carton.unmatched_qr)}</td>
+                            <td>{formatQty(carton.covered_qty)}</td>
+                            <td>{formatQty(carton.surplus_qty)}</td>
+                            <td>
+                              {carton.qr_total === 0 ? (
+                                <span className="wms-compare-badge wms-compare-badge-warn">No QR</span>
+                              ) : carton.all_ok ? (
+                                <span className="wms-compare-badge wms-compare-badge-ok">OK</span>
+                              ) : (
+                                <span className="wms-compare-badge wms-compare-badge-fail">Surplus</span>
+                              )}
+                            </td>
+                          </tr>
+                          {expanded && (
+                            <tr className="wms-qty-carton-expand-row">
+                              <td colSpan={11}>
+                                <table className="wms-table wms-qty-subtable">
+                                  <thead>
+                                    <tr>
+                                      <th>QR WMS tidak match</th>
+                                      <th>Qty</th>
+                                      <th>Alasan</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {unmatchedList.map((qr, idx) => (
+                                      <tr key={`${carton.carton_id}-u-${idx}`}>
+                                        <td className="wms-qty-qr-code">{qr.qr_barcode || '—'}</td>
+                                        <td>{formatQty(qr.qty)}</td>
+                                        <td>{formatUnmatchReason(qr.reason)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
                           )}
-                        </td>
-                      </tr>
-                    ))}
+                        </React.Fragment>
+                      );
+                    })}
                     {displayCartons.length === 0 && (
                       <tr>
-                        <td colSpan={10} className="wms-empty">
+                        <td colSpan={11} className="wms-empty">
                           {cartonIssuesOnly
                             ? 'Tidak ada carton bermasalah.'
                             : 'Tidak ada carton WMS.'}

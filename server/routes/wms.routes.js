@@ -388,7 +388,8 @@ async function buildMoQtyCompareReportRow(moNumber, baseRow, { includeDetail = f
     missing_breakdown_ranges: compared.missing_breakdown_ranges,
     missing_breakdown_sessions: compared.missing_breakdown_sessions,
     carton_breakdown: compared.carton_breakdown,
-    surplus_cartons: compared.surplus_cartons
+    surplus_cartons: compared.surplus_cartons,
+    unmatched_qr_items: compared.unmatched_qr_items
   };
 }
 
