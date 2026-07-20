@@ -77,6 +77,17 @@ const calculateNetProduction = (authenticityCount, bufferCount, rejectCount) => 
   return authenticityCount - rejectCount + bufferCount;
 };
 
+// Jumlah pcs untuk satu range authenticity (last - first + 1)
+const calculateAuthRangeCount = (auth) => {
+  if (!auth || !auth.firstAuthenticity || !auth.lastAuthenticity) return null;
+  const firstMatch = String(auth.firstAuthenticity).trim().match(/\d+/);
+  const lastMatch = String(auth.lastAuthenticity).trim().match(/\d+/);
+  if (!firstMatch || !lastMatch) return null;
+  const first = parseInt(firstMatch[0], 10);
+  const last = parseInt(lastMatch[0], 10);
+  return last >= first ? (last - first + 1) : null;
+};
+
 const countAuthenticityNumbers = (rows) => {
   if (!Array.isArray(rows)) return 0;
   let count = 0;
@@ -88,6 +99,19 @@ const countAuthenticityNumbers = (rows) => {
     }
   });
   return count;
+};
+
+// Keterangan hasil per input row: Authenticity - Reject + Buffer
+const buildInputResult = (input) => {
+  const authenticity = calculateTotalAuthenticity(input.authenticity_data);
+  const buffer = countAuthenticityNumbers(input.buffers);
+  const reject = countAuthenticityNumbers(input.rejects);
+  return {
+    authenticity,
+    buffer,
+    reject,
+    hasil: calculateNetProduction(authenticity, buffer, reject)
+  };
 };
 
 const collectSessionBufferReject = (inputs, sessionId) => {
@@ -456,24 +480,39 @@ function ReportDashboard() {
                     <h3 className="section-title">Daftar Input</h3>
                     <div className="session-inputs">
                       {session.inputs.map((input, inputIdx) => {
-                        const authCount = calculateTotalAuthenticity(input.authenticity_data);
+                        const result = buildInputResult(input);
                         return (
                           <div key={input.id || inputIdx} className="input-item">
                             <div className="input-info">
                               <span><strong>MO:</strong> {input.mo_number}</span>
                               <span><strong>SKU:</strong> {input.sku_name}</span>
                               <span><strong>PIC:</strong> {input.pic}</span>
-                              <span><strong>Authenticity:</strong> {authCount}</span>
+                              <span><strong>Authenticity:</strong> {result.authenticity}</span>
+                            </div>
+                            <div className="input-result">
+                              <span className="input-result-label">Hasil:</span>
+                              <span className="input-result-value">{result.hasil} pcs</span>
+                              {(result.buffer > 0 || result.reject > 0) && (
+                                <span className="input-result-detail">
+                                  (Authenticity {result.authenticity} - Reject {result.reject} + Buffer {result.buffer})
+                                </span>
+                              )}
                             </div>
                             {input.authenticity_data && Array.isArray(input.authenticity_data) && (
                               <div className="authenticity-details">
-                                {input.authenticity_data.map((auth, authIdx) => (
-                                  <div key={authIdx} className="auth-row">
-                                    <span>First: {auth.firstAuthenticity}</span>
-                                    <span>Last: {auth.lastAuthenticity}</span>
-                                    <span>Roll: {auth.rollNumber}</span>
-                                  </div>
-                                ))}
+                                {input.authenticity_data.map((auth, authIdx) => {
+                                  const rangeCount = calculateAuthRangeCount(auth);
+                                  return (
+                                    <div key={authIdx} className="auth-row">
+                                      <span>First: {auth.firstAuthenticity}</span>
+                                      <span>Last: {auth.lastAuthenticity}</span>
+                                      <span>Roll: {auth.rollNumber}</span>
+                                      {rangeCount !== null && (
+                                        <span className="auth-row-count">= {rangeCount} pcs</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>

@@ -455,6 +455,31 @@
   color: #e2e8f0;
 }
 
+.input-result {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.input-result-label {
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.input-result-value {
+  color: #10b981;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.input-result-detail {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 .authenticity-details {
   display: flex;
   flex-direction: column;
@@ -476,6 +501,11 @@
   padding: 4px 8px;
   background: #0f172a;
   border-radius: 4px;
+}
+
+.auth-row .auth-row-count {
+  color: #10b981;
+  font-weight: 700;
 }
 
 .report-buffer-card,
