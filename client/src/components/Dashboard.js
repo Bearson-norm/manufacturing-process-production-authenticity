@@ -9,6 +9,7 @@ function Dashboard({ setIsAuthenticated }) {
   const isAdmin = userRole === 'admin';
 
   const handleLogout = () => {
+    localStorage.removeItem('authToken');
     localStorage.removeItem('isAuthenticated');
     localStorage.removeItem('userRole');
     setIsAuthenticated(false);

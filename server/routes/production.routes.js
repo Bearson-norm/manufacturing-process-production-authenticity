@@ -838,10 +838,8 @@ router.put('/liquid/submit-mo-group', (req, res) => {
 // Revert all inputs with the same MO number from 'completed' to 'active' (Admin only)
 router.put('/liquid/revert-mo-group/:mo_number', (req, res) => {
   const { mo_number } = req.params;
-  const { userRole } = req.body; // Admin check - should be sent from frontend
-  
-  // Check if user is admin
-  if (!userRole || userRole !== 'admin') {
+  // Role must come from JWT (requireAuth + requireRole), never from request body
+  if (!req.user || req.user.role !== 'admin') {
     return res.status(403).json({ 
       error: 'Forbidden: Admin access required',
       message: 'Only admin users can revert MO groups'
@@ -1104,13 +1102,19 @@ router.put('/cartridge/:id', (req, res) => {
 // GET /api/production/check-mo-used
 router.get('/check-mo-used', (req, res) => {
   const { moNumber, productionType } = req.query;
+  const { resolveProductionTable } = require('../middleware/auth.middleware');
   
   if (!moNumber) {
     return res.status(400).json({ error: 'moNumber parameter is required' });
   }
   
-  const type = productionType || 'liquid';
-  const table = `production_${type}`;
+  const resolved = resolveProductionTable(productionType, 'liquid');
+  if (!resolved) {
+    return res.status(400).json({
+      error: 'Invalid productionType. Allowed: liquid, device, cartridge',
+    });
+  }
+  const { table } = resolved;
   
   db.all(
     `SELECT id, session_id, leader_name, shift_number, pic, status, created_at 

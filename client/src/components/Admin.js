@@ -6,6 +6,7 @@ import './Admin.css';
 function Admin() {
   const navigate = useNavigate();
   const [sessionId, setSessionId] = useState('');
+  const [sessionIdConfigured, setSessionIdConfigured] = useState(false);
   const [odooBaseUrl, setOdooBaseUrl] = useState('');
   const [externalApiBaseUrl, setExternalApiBaseUrl] = useState('');
   const [externalApiBearerTokenInput, setExternalApiBearerTokenInput] = useState('');
@@ -45,7 +46,8 @@ function Admin() {
     try {
       const response = await axios.get('/api/admin/config');
       if (response.data.success) {
-        setSessionId(response.data.config.sessionId || '');
+        setSessionId('');
+        setSessionIdConfigured(!!response.data.config.sessionIdConfigured);
         setOdooBaseUrl(response.data.config.odooBaseUrl || '');
         setExternalApiBaseUrl(response.data.config.externalApiBaseUrl || '');
         setExternalApiBearerTokenInput('');
@@ -250,8 +252,12 @@ function Admin() {
   };
 
   const handleSaveConfig = async () => {
-    if (!sessionId || sessionId.length < 20) {
+    if (sessionId.trim() && sessionId.trim().length < 20) {
       setMessage({ type: 'error', text: 'Session ID must be at least 20 characters' });
+      return;
+    }
+    if (!sessionIdConfigured && !sessionId.trim()) {
+      setMessage({ type: 'error', text: 'Session ID is required (min 20 characters)' });
       return;
     }
 
@@ -260,11 +266,15 @@ function Admin() {
 
     try {
       const payload = {
-        sessionId: sessionId.trim(),
         odooBaseUrl: odooBaseUrl.trim() || 'https://foomx.odoo.com',
         externalApiBaseUrl: externalApiBaseUrl.trim(),
-        apiKey: apiKey.trim() || undefined
       };
+      if (sessionId.trim()) {
+        payload.sessionId = sessionId.trim();
+      }
+      if (apiKey.trim() && !apiKey.includes('*')) {
+        payload.apiKey = apiKey.trim();
+      }
       if (externalApiBearerTokenInput.trim() !== '') {
         payload.externalApiBearerToken = externalApiBearerTokenInput.trim();
       }
@@ -452,7 +462,9 @@ function Admin() {
         </button>
         <h1>Admin Configuration</h1>
         <button onClick={() => {
+          localStorage.removeItem('authToken');
           localStorage.removeItem('isAuthenticated');
+          localStorage.removeItem('userRole');
           navigate('/login');
         }} className="logout-button">
           Logout
@@ -470,16 +482,19 @@ function Admin() {
         <div className="admin-section">
           <h2>Odoo API Configuration</h2>
           <div className="form-group">
-            <label>Session ID *</label>
+            <label>Session ID {sessionIdConfigured ? '(configured — leave blank to keep)' : '*'}</label>
             <input
-              type="text"
+              type="password"
               value={sessionId}
               onChange={(e) => setSessionId(e.target.value)}
-              placeholder="Enter Odoo Session ID (min 20 characters)"
+              placeholder={sessionIdConfigured ? 'Enter new Session ID to replace' : 'Enter Odoo Session ID (min 20 characters)'}
+              autoComplete="off"
               style={{ width: '100%', padding: '8px', fontSize: '14px' }}
             />
             <small style={{ color: '#94a3b8', fontSize: '12px' }}>
-              Session ID from Odoo authentication. Must be at least 20 characters.
+              {sessionIdConfigured
+                ? 'Session ID is already configured. Paste a new value only when rotating.'
+                : 'Session ID from Odoo authentication. Must be at least 20 characters.'}
             </small>
           </div>
           <div className="form-group">

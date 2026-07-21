@@ -106,9 +106,16 @@ jobs:
           STAGING_DIR="/home/${{ secrets.VPS_USER }}/deployments/manufacturing-app-staging"
           STAGING_PORT=3467
           STAGING_DB_NAME="Staging_Manufacturing_Order"
-          DB_USER="admin"
-          DB_PASSWORD="Admin123"
-          DB_PORT=5433
+          DB_USER="${{ secrets.STAGING_DB_USER }}"
+          DB_PASSWORD="${{ secrets.STAGING_DB_PASSWORD }}"
+          DB_PORT="${{ secrets.STAGING_DB_PORT }}"
+          DB_USER="${DB_USER:-admin}"
+          DB_PORT="${DB_PORT:-5433}"
+          
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "❌ STAGING_DB_PASSWORD GitHub secret is required"
+            exit 1
+          fi
           
           echo "🚀 Starting STAGING deployment..."
           echo "📍 Staging directory: $STAGING_DIR"
@@ -123,10 +130,12 @@ jobs:
           ls -la deploy/ || echo "⚠️  Deploy directory check"
           ls -la deploy/server/ || echo "⚠️  Server directory check"
           
+          BACKUP_NAME=""
           # Backup existing staging deployment
           if [ -d "$STAGING_DIR" ]; then
             echo "📦 Creating staging backup..."
-            mv "$STAGING_DIR" "${STAGING_DIR}-backup-$(date +%Y%m%d-%H%M%S)"
+            BACKUP_NAME="${STAGING_DIR}-backup-$(date +%Y%m%d-%H%M%S)"
+            mv "$STAGING_DIR" "$BACKUP_NAME"
           fi
           
           # Create new staging deployment directory
@@ -211,58 +220,41 @@ jobs:
           cd "$STAGING_DIR/server"
           npm install --production
           
-          # Create staging .env if it doesn't exist
-          if [ ! -f .env ]; then
-            echo "📝 Creating staging .env file..."
-            echo "NODE_ENV=staging" > .env
-            echo "PORT=$STAGING_PORT" >> .env
-            echo "DB_HOST=localhost" >> .env
-            echo "DB_PORT=$DB_PORT" >> .env
-            echo "DB_NAME=$STAGING_DB_NAME" >> .env
-            echo "DB_USER=$DB_USER" >> .env
-            echo "DB_PASSWORD=$DB_PASSWORD" >> .env
-          else
-            # Ensure PORT is set to staging port
-            if grep -q "^PORT=" .env; then
-              sed -i "s/^PORT=.*/PORT=$STAGING_PORT/" .env
-            else
-              echo "PORT=$STAGING_PORT" >> .env
-            fi
-            # Ensure NODE_ENV is staging
-            if grep -q "^NODE_ENV=" .env; then
-              sed -i "s/^NODE_ENV=.*/NODE_ENV=staging/" .env
-            else
-              echo "NODE_ENV=staging" >> .env
-            fi
-            # Ensure DB_NAME is set to staging database
-            if grep -q "^DB_NAME=" .env; then
-              sed -i "s/^DB_NAME=.*/DB_NAME=$STAGING_DB_NAME/" .env
-            else
-              echo "DB_NAME=$STAGING_DB_NAME" >> .env
-            fi
-            # Ensure DB_USER is admin
-            if grep -q "^DB_USER=" .env; then
-              sed -i "s/^DB_USER=.*/DB_USER=$DB_USER/" .env
-            else
-              echo "DB_USER=$DB_USER" >> .env
-            fi
-            # Ensure DB_PASSWORD is set
-            if grep -q "^DB_PASSWORD=" .env; then
-              sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
-            else
-              echo "DB_PASSWORD=$DB_PASSWORD" >> .env
-            fi
-            # Ensure DB_PORT is 5433
-            if grep -q "^DB_PORT=" .env; then
-              sed -i "s/^DB_PORT=.*/DB_PORT=$DB_PORT/" .env
-            else
-              echo "DB_PORT=$DB_PORT" >> .env
-            fi
+          # Restore or require staging .env (never print secret values)
+          ENV_CANONICAL="/home/${{ secrets.VPS_USER }}/deployments/.manufacturing-app-staging.env"
+          if [ -n "$BACKUP_NAME" ] && [ -f "$BACKUP_NAME/server/.env" ]; then
+            echo "📋 Restoring server/.env from previous staging release"
+            cp -f "$BACKUP_NAME/server/.env" .env
+            chmod 600 .env || true
+          elif [ -f "$ENV_CANONICAL" ]; then
+            echo "📋 Using canonical staging env file"
+            cp -f "$ENV_CANONICAL" .env
+            chmod 600 .env || true
+          elif [ ! -f .env ]; then
+            echo "❌ No staging server/.env found."
+            echo "   One-time on VPS: create $ENV_CANONICAL with NODE_ENV=staging, PORT, DB_*, JWT_SECRET, ADMIN_PASSWORD, PRODUCTION_PASSWORD, CORS_ORIGIN."
+            exit 1
           fi
           
-          # Verify .env file
-          echo "📝 Verifying .env file..."
-          cat .env
+          # Ensure critical non-secret keys for staging runtime
+          if grep -q "^PORT=" .env; then
+            sed -i "s/^PORT=.*/PORT=$STAGING_PORT/" .env
+          else
+            echo "PORT=$STAGING_PORT" >> .env
+          fi
+          if grep -q "^NODE_ENV=" .env; then
+            sed -i "s/^NODE_ENV=.*/NODE_ENV=staging/" .env
+          else
+            echo "NODE_ENV=staging" >> .env
+          fi
+          if grep -q "^DB_NAME=" .env; then
+            sed -i "s/^DB_NAME=.*/DB_NAME=$STAGING_DB_NAME/" .env
+          else
+            echo "DB_NAME=$STAGING_DB_NAME" >> .env
+          fi
+          
+          echo "📝 Verifying .env (names only, no values)..."
+          grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env | cut -d= -f1 | sort -u | head -50 || true
           
           # Create logs directory
           mkdir -p logs

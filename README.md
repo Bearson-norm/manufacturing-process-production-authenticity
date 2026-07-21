@@ -106,25 +106,28 @@ npm run build
 - Similar endpoints for device and cartridge
 
 ### Authentication
-- `POST /api/login` - Login endpoint (username: production, password: production123)
+- `POST /api/login` — returns JWT (`token`) + `role`
+- Credentials come from server env: `ADMIN_USERNAME` / `ADMIN_PASSWORD`, `PRODUCTION_USERNAME` / `PRODUCTION_PASSWORD`
+- All `/api/*` routes (except `/api/login`, `/api/external/*`, `/api/receiver/*`) require `Authorization: Bearer <token>`
+- `/health` is public
 
 ## 🗄️ Database
 
-Database menggunakan SQLite3 dengan tabel:
-- `production_liquid`
-- `production_device`
-- `production_cartridge`
-- `production_combined` (gabungan dari ketiga tabel)
-- `buffer_liquid`
-- `buffer_device`
-- `buffer_cartridge`
+Database menggunakan PostgreSQL. Lihat `server/env.example` untuk variabel yang wajib diisi.
 
-## 🔐 Default Credentials
+Tabel utama:
+- `production_liquid`, `production_device`, `production_cartridge`
+- `production_combined`
+- `buffer_liquid`, `buffer_device`, `buffer_cartridge`
 
-- **Username**: `production`
-- **Password**: `production123`
+## 🔐 Credentials
 
-⚠️ **PENTING**: Ganti credentials ini di production!
+Jangan hardcode password di dokumentasi. Set di `server/.env`:
+- `JWT_SECRET`
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD`
+- `PRODUCTION_USERNAME` / `PRODUCTION_PASSWORD`
+
+Untuk development lokal saja, jika password env kosong, fallback sementara `admin`/`admin123` dan `production`/`production123` masih aktif. **Staging/production wajib set password kuat via env.**
 
 ## 🚀 Deployment
 

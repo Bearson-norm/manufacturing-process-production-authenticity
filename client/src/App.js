@@ -17,7 +17,7 @@ import './App.css';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = React.useState(
-    localStorage.getItem('isAuthenticated') === 'true'
+    localStorage.getItem('isAuthenticated') === 'true' && !!localStorage.getItem('authToken')
   );
 
   return (

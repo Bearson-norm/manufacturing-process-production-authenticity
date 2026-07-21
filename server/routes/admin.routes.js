@@ -25,7 +25,7 @@ function getAdminConfig(callback) {
       return callback(err, null);
     }
     
-    const sessionId = row ? row.config_value : process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae';
+    const sessionId = row ? row.config_value : (process.env.ODOO_SESSION_ID || '');
     
     db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['odoo_base_url'], (err2, row2) => {
       if (err2) {
@@ -39,28 +39,41 @@ function getAdminConfig(callback) {
   });
 }
 
+function maskSecret(value) {
+  if (!value || typeof value !== 'string') return null;
+  if (value.length <= 8) return '********';
+  return `${value.substring(0, 4)}********${value.substring(value.length - 4)}`;
+}
+
+function isMaskedOrEmptySecret(value) {
+  if (value === undefined || value === null || value === '') return true;
+  return String(value).includes('*');
+}
+
 // GET /api/admin/config
 router.get('/config', (req, res) => {
   try {
     if (!db) {
-      return res.json({
-        success: true,
-        config: {
-          sessionId: process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae',
-          odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com',
-          externalApiBaseUrl: process.env.EXTERNAL_API_BASE_URL || '',
-          externalApiBearerToken: null,
-          externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN
-        }
-      });
-    }
+        return res.json({
+          success: true,
+          config: {
+            sessionId: null,
+            sessionIdConfigured: !!(process.env.ODOO_SESSION_ID),
+            odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com',
+            externalApiBaseUrl: process.env.EXTERNAL_API_BASE_URL || '',
+            externalApiBearerToken: null,
+            externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN
+          }
+        });
+      }
 
     db.get("SELECT table_name as name FROM information_schema.tables WHERE table_schema='public' AND table_name='admin_config'", (tableErr, tableRow) => {
       if (tableErr || !tableRow) {
         return res.json({
           success: true,
           config: {
-            sessionId: process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae',
+            sessionId: null,
+            sessionIdConfigured: !!(process.env.ODOO_SESSION_ID),
             odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com',
             externalApiBaseUrl: process.env.EXTERNAL_API_BASE_URL || '',
             externalApiBearerToken: null,
@@ -70,7 +83,7 @@ router.get('/config', (req, res) => {
       }
 
       db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['odoo_session_id'], (err, row) => {
-        const sessionId = row ? row.config_value : process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae';
+        const sessionId = row ? row.config_value : (process.env.ODOO_SESSION_ID || '');
         
           db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['odoo_base_url'], (err2, row2) => {
           const odooBaseUrl = row2 ? row2.config_value : process.env.ODOO_API_URL || 'https://foomx.odoo.com';
@@ -147,7 +160,9 @@ router.get('/config', (req, res) => {
                                 res.json({
                                   success: true,
                                   config: {
-                                    sessionId: sessionId,
+                                    sessionId: null,
+                                    sessionIdMasked: maskSecret(sessionId),
+                                    sessionIdConfigured: !!sessionId,
                                     odooBaseUrl: odooBaseUrl,
                                     externalApiBaseUrl: externalApiBaseUrl,
                                     externalApiBearerToken: maskedBearer,
@@ -206,7 +221,7 @@ router.put('/config', (req, res) => {
     wmsSite
   } = req.body;
   
-  if (sessionId && sessionId.length < 20) {
+  if (sessionId && !isMaskedOrEmptySecret(sessionId) && sessionId.length < 20) {
     return res.status(400).json({ success: false, error: 'Session ID must be at least 20 characters' });
   }
 
@@ -229,7 +244,7 @@ router.put('/config', (req, res) => {
   });
 
   function insertConfig() {
-    if (sessionId) {
+    if (sessionId && !isMaskedOrEmptySecret(sessionId)) {
       db.run(
         `INSERT INTO admin_config (config_key, config_value, updated_at) 
          VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -285,8 +300,8 @@ router.put('/config', (req, res) => {
     }
 
     function saveExternalBearerToken() {
-      if (externalApiBearerToken !== undefined) {
-        const tokenVal = externalApiBearerToken == null ? '' : String(externalApiBearerToken);
+      if (externalApiBearerToken !== undefined && !isMaskedOrEmptySecret(externalApiBearerToken)) {
+        const tokenVal = String(externalApiBearerToken);
         db.run(
           `INSERT INTO admin_config (config_key, config_value, updated_at) 
            VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -362,7 +377,7 @@ router.put('/config', (req, res) => {
     }
     
     function saveApiKey() {
-      if (apiKey !== undefined && apiKey !== null && apiKey !== '') {
+      if (apiKey !== undefined && apiKey !== null && apiKey !== '' && !isMaskedOrEmptySecret(apiKey)) {
         db.run(
           `INSERT INTO admin_config (config_key, config_value, updated_at) 
            VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -383,6 +398,7 @@ router.put('/config', (req, res) => {
     function saveWmsConfig() {
       const saveKey = (key, value, next) => {
         if (value === undefined) return next();
+        if (key === 'wms_access_token' && isMaskedOrEmptySecret(value)) return next();
         db.run(
           `INSERT INTO admin_config (config_key, config_value, updated_at)
            VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -413,7 +429,10 @@ router.put('/config', (req, res) => {
 function persistWmsConfig(res, { wmsApiBaseUrl, wmsAccessToken, wmsUsername, wmsCompanyId, wmsSite }) {
   const { enrichConfigFromToken, normalizeAccessToken } = require('../services/prieds-wms.service');
 
-  const token = wmsAccessToken !== undefined ? normalizeAccessToken(wmsAccessToken) : undefined;
+  const rawToken = wmsAccessToken !== undefined && !isMaskedOrEmptySecret(wmsAccessToken)
+    ? normalizeAccessToken(wmsAccessToken)
+    : undefined;
+  const token = rawToken;
   let username = wmsUsername;
   let companyId = wmsCompanyId;
   if (token) {
@@ -434,6 +453,7 @@ function persistWmsConfig(res, { wmsApiBaseUrl, wmsAccessToken, wmsUsername, wms
 
   const saveKey = (key, value, next) => {
     if (value === undefined) return next();
+    if (key === 'wms_access_token' && isMaskedOrEmptySecret(value)) return next();
     db.run(
       `INSERT INTO admin_config (config_key, config_value, updated_at)
        VALUES ($1, $2, CURRENT_TIMESTAMP)

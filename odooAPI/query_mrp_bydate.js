@@ -155,17 +155,16 @@ try {
     // Config not available, will use defaults
 }
 
-// Get session ID from command line, environment, config, or default
+// Get session ID from command line, environment, or config
 const SESSION_ID = sessionId 
     || process.env.ODOO_SESSION_ID 
     || (config && config.odoo && config.odoo.sessionId)
-    || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae';
+    || '';
 
 // Validate session ID format
 if (!SESSION_ID || SESSION_ID.length < 20) {
     console.error('❌ Error: Invalid or missing session ID');
     console.error('   Provide session ID as first argument or set ODOO_SESSION_ID environment variable');
-    console.error('   Example: node script.js bc6b1450c0cd3b05e3ac199521e02f7b639e39ae');
     process.exit(1);
 }
 

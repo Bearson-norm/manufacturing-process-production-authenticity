@@ -148,7 +148,10 @@ function WmsProductionCompare() {
   const rangeCount = (detail?.missing_breakdown_ranges || []).length;
   const allCartons = detail?.carton_breakdown || [];
   const surplusCartonCount = (detail?.surplus_cartons || []).length;
-  const unmatchedQrItems = detail?.unmatched_qr_items || [];
+  const unmatchedQrItems = useMemo(
+    () => detail?.unmatched_qr_items || [],
+    [detail]
+  );
   const displayCartons = cartonIssuesOnly
     ? allCartons.filter((c) => c.has_issue)
     : allCartons;

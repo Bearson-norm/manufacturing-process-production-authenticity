@@ -1523,9 +1523,7 @@ function ProductionLiquid() {
       // Encode MO so values like "PROD/MO/35603" stay a single path segment (same issue as submit-mo-group).
       const response = await axios.put(
         `/api/production/liquid/revert-mo-group/${encodeURIComponent(moNumber)}`,
-        {
-          userRole: userRole
-        }
+        {}
       );
       
       if (response.data && response.data.reverted_count > 0) {

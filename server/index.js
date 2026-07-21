@@ -1,6 +1,15 @@
 const app = require('./app');
 const { initializeTables } = require('./database');
 const cron = require('node-cron');
+const { assertAuthConfigOrThrow } = require('./middleware/auth.middleware');
+
+try {
+  assertAuthConfigOrThrow();
+} catch (authErr) {
+  console.error('\n❌ Auth configuration error:', authErr.message);
+  console.error('   Set JWT_SECRET, ADMIN_PASSWORD, and PRODUCTION_PASSWORD in server/.env\n');
+  process.exit(1);
+}
 
 const PORT = process.env.PORT || 1234;
 
@@ -2038,16 +2047,18 @@ app.get('/api/statistics/production-by-leader', (req, res) => {
     // Last 12 months
     dateFilter = "AND created_at::date >= CURRENT_DATE - INTERVAL '12 months'";
   } else if (startDate && endDate) {
-    // Custom date range
-    dateFilter = `AND created_at::date BETWEEN '${startDate}'::date AND '${endDate}'::date`;
+    // Custom date range — parameterized (never interpolate dates into SQL)
+    dateFilter = `AND created_at::date BETWEEN $2::date AND $3::date`;
   }
   
   // Build production type filter
   const types = [];
   if (!productionType || productionType === 'all') {
     types.push('liquid', 'device', 'cartridge');
+  } else if (['liquid', 'device', 'cartridge'].includes(String(productionType).toLowerCase())) {
+    types.push(String(productionType).toLowerCase());
   } else {
-    types.push(productionType);
+    return res.status(400).json({ success: false, error: 'Invalid production type' });
   }
   
   // Query each production type
@@ -2071,8 +2082,11 @@ app.get('/api/statistics/production-by-leader', (req, res) => {
         WHERE 1=1 ${dateFilter}
         ORDER BY created_at DESC
       `;
+      const params = (startDate && endDate && dateFilter.includes('$2'))
+        ? [type, startDate, endDate]
+        : [type];
       
-      db.all(query, [type], (err, rows) => {
+      db.all(query, params, (err, rows) => {
         if (err) {
           console.error(`Error querying production_${type}:`, err);
           console.error('Query:', query);
@@ -2431,7 +2445,7 @@ app.get('/api/admin/config', (req, res) => {
       return res.json({
         success: true,
         config: {
-          sessionId: process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae',
+          sessionId: (process.env.ODOO_SESSION_ID || ''),
           odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com'
         }
       });
@@ -2445,7 +2459,7 @@ app.get('/api/admin/config', (req, res) => {
         return res.json({
           success: true,
           config: {
-            sessionId: process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae',
+            sessionId: (process.env.ODOO_SESSION_ID || ''),
             odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com'
           }
         });
@@ -2456,7 +2470,7 @@ app.get('/api/admin/config', (req, res) => {
         return res.json({
           success: true,
           config: {
-            sessionId: process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae',
+            sessionId: (process.env.ODOO_SESSION_ID || ''),
             odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com'
           }
         });
@@ -2466,7 +2480,7 @@ app.get('/api/admin/config', (req, res) => {
         if (err) {
           console.error('Error fetching session_id config:', err);
           // Return default if error
-          const sessionId = process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae';
+          const sessionId = (process.env.ODOO_SESSION_ID || '');
           const odooBaseUrl = process.env.ODOO_API_URL || 'https://foomx.odoo.com';
           return res.json({
             success: true,
@@ -2477,7 +2491,7 @@ app.get('/api/admin/config', (req, res) => {
           });
         }
         
-        const sessionId = row ? row.config_value : process.env.ODOO_SESSION_ID || 'bc6b1450c0cd3b05e3ac199521e02f7b639e39ae';
+        const sessionId = row ? row.config_value : (process.env.ODOO_SESSION_ID || '');
         
         db.get('SELECT config_value FROM admin_config WHERE config_key = ?', ['odoo_base_url'], (err2, row2) => {
           if (err2) {
@@ -3841,13 +3855,19 @@ app.post('/api/admin/sync-mo', async (req, res) => {
 // Check if MO has been used in production
 app.get('/api/production/check-mo-used', (req, res) => {
   const { moNumber, productionType } = req.query;
+  const { resolveProductionTable } = require('./middleware/auth.middleware');
   
   if (!moNumber) {
     return res.status(400).json({ error: 'moNumber parameter is required' });
   }
   
-  const type = productionType || 'liquid'; // default to liquid
-  const table = `production_${type}`;
+  const resolved = resolveProductionTable(productionType, 'liquid');
+  if (!resolved) {
+    return res.status(400).json({
+      error: 'Invalid productionType. Allowed: liquid, device, cartridge',
+    });
+  }
+  const { table } = resolved;
   
   // Check if MO exists in production table
   db.all(

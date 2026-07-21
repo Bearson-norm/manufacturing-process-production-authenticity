@@ -16,11 +16,14 @@ function Login({ setIsAuthenticated }) {
 
     try {
       const response = await axios.post('/api/login', { username, password });
-      if (response.data.success) {
+      if (response.data.success && response.data.token) {
+        localStorage.setItem('authToken', response.data.token);
         localStorage.setItem('isAuthenticated', 'true');
         localStorage.setItem('userRole', response.data.role || 'production');
         setIsAuthenticated(true);
         navigate('/dashboard');
+      } else {
+        setError('Login failed: no token received');
       }
     } catch (err) {
       setError('Invalid username or password');
