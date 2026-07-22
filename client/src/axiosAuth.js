@@ -18,7 +18,8 @@ axios.interceptors.response.use(
       localStorage.removeItem('isAuthenticated');
       localStorage.removeItem('userRole');
       if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
-        window.location.assign('/login');
+        sessionStorage.setItem('sessionExpired', '1');
+        window.location.assign('/login?session=expired');
       }
     }
     return Promise.reject(error);

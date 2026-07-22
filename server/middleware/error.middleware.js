@@ -1,11 +1,20 @@
 // Error handling middleware
 function errorHandler(err, req, res, next) {
   console.error('Error:', err);
-  
-  res.status(err.status || 500).json({
+
+  const isDev = process.env.NODE_ENV === 'development';
+  const status = err.status || 500;
+  const clientMessage =
+    status < 500
+      ? err.message || 'Request error'
+      : isDev
+        ? err.message || 'Internal server error'
+        : 'Internal server error';
+
+  res.status(status).json({
     success: false,
-    error: err.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    error: clientMessage,
+    ...(isDev && { stack: err.stack }),
   });
 }
 
@@ -14,11 +23,11 @@ function notFoundHandler(req, res) {
   res.status(404).json({
     success: false,
     error: 'Endpoint not found',
-    path: req.path
+    path: req.path,
   });
 }
 
 module.exports = {
   errorHandler,
-  notFoundHandler
+  notFoundHandler,
 };

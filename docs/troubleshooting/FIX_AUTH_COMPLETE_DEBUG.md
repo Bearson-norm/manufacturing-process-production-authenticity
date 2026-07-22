@@ -87,7 +87,7 @@ sudo -u postgres psql << 'PSQL'
     \c postgres
     ALTER DATABASE manufacturing_db OWNER TO postgres;
     DROP USER IF EXISTS admin;
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
     ALTER DATABASE manufacturing_db OWNER TO admin;
     \c manufacturing_db
@@ -109,7 +109,7 @@ sleep 3
 ### Step 6: Test Connection
 
 ```bash
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔍 Check PostgreSQL Logs
@@ -192,7 +192,7 @@ sudo -u postgres psql << 'PSQL'
     \c postgres
     ALTER DATABASE manufacturing_db OWNER TO postgres;
     DROP USER IF EXISTS admin;
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
     ALTER DATABASE manufacturing_db OWNER TO admin;
     \c manufacturing_db
@@ -203,7 +203,7 @@ PSQL
 sudo -u postgres psql -tAc "SELECT substring(passwd, 1, 10) FROM pg_shadow WHERE usename = 'admin';"
 
 # Test
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ---

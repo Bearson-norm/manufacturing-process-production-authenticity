@@ -19,7 +19,7 @@ sudo -u postgres psql << 'PSQL'
     DROP USER IF EXISTS admin;
     
     -- Create fresh user
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     
     -- Grant privileges
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
@@ -41,7 +41,7 @@ sudo systemctl reload postgresql
 ### Step 3: Test Connection
 
 ```bash
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔄 Alternatif: Gunakan Unix Socket
@@ -103,7 +103,7 @@ sudo -u postgres psql -d manufacturing_db << 'PSQL'
     DROP OWNED BY admin;
     DROP USER admin;
     
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
     \c manufacturing_db
     GRANT ALL ON SCHEMA public TO admin;
@@ -140,7 +140,7 @@ DB_HOST=
 ## ✅ Checklist
 
 - [ ] User `admin` di-drop dan recreate
-- [ ] Password di-set: `Admin123`
+- [ ] Password di-set: `YOUR_DB_PASSWORD`
 - [ ] Privileges granted
 - [ ] PostgreSQL reloaded
 - [ ] Test connection berhasil
@@ -153,7 +153,7 @@ DB_HOST=
 sudo -u postgres psql << 'PSQL'
     DROP OWNED BY admin;
     DROP USER IF EXISTS admin;
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
     \c manufacturing_db
     GRANT ALL ON SCHEMA public TO admin;
@@ -163,7 +163,7 @@ PSQL
 sudo systemctl reload postgresql
 
 # Test
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ---

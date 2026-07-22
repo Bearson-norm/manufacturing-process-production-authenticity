@@ -181,7 +181,14 @@ router.get('/cartridge', (req, res) => {
 // GET /api/production/report
 router.get('/report', (req, res) => {
   const { type, mo_number, pic, date_from, date_to, status, limit, offset } = req.query;
-  
+  const MAX_LIMIT = 500;
+  const DEFAULT_LIMIT = 100;
+  let limitNum = parseInt(limit, 10);
+  if (Number.isNaN(limitNum) || limitNum <= 0) limitNum = DEFAULT_LIMIT;
+  if (limitNum > MAX_LIMIT) limitNum = MAX_LIMIT;
+  let offsetNum = parseInt(offset, 10);
+  if (Number.isNaN(offsetNum) || offsetNum < 0) offsetNum = 0;
+
   const tables = [];
   if (!type || type === 'all' || type === 'liquid') {
     tables.push({ name: 'production_liquid', type: 'liquid' });
@@ -192,10 +199,10 @@ router.get('/report', (req, res) => {
   if (!type || type === 'all' || type === 'cartridge') {
     tables.push({ name: 'production_cartridge', type: 'cartridge' });
   }
-  
+
   const allResults = [];
   let completedQueries = 0;
-  
+
   tables.forEach((table) => {
     let query = `
       SELECT 
@@ -214,9 +221,9 @@ router.get('/report', (req, res) => {
       FROM ${table.name}
       WHERE 1=1
     `;
-    
+
     const params = [];
-    
+
     if (mo_number) {
       query += ' AND mo_number = $' + (params.length + 1);
       params.push(mo_number);
@@ -237,44 +244,41 @@ router.get('/report', (req, res) => {
       query += ' AND status = $' + (params.length + 1);
       params.push(status);
     }
-    
-    query += ' ORDER BY created_at DESC';
-    
+
+    // Cap per-table fetch so multi-type reports stay bounded, then merge+slice
+    const perTableLimit = Math.min(MAX_LIMIT, offsetNum + limitNum);
+    query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
+    params.push(perTableLimit);
+
     db.all(query, params, (err, rows) => {
       if (err) {
         console.error(`Error querying ${table.name}:`, err);
       } else {
         allResults.push(...rows);
       }
-      
+
       completedQueries++;
-      
+
       if (completedQueries === tables.length) {
         allResults.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        
-        let paginatedResults = allResults;
-        const limitNum = parseInt(limit) || 0;
-        const offsetNum = parseInt(offset) || 0;
-        
-        if (limitNum > 0) {
-          paginatedResults = allResults.slice(offsetNum, offsetNum + limitNum);
-        }
-        
+        const paginatedResults = allResults.slice(offsetNum, offsetNum + limitNum);
+
         res.json({
           success: true,
           total: allResults.length,
-          limit: limitNum || null,
-          offset: offsetNum || 0,
-          data: paginatedResults
+          limit: limitNum,
+          offset: offsetNum,
+          max_limit: MAX_LIMIT,
+          data: paginatedResults,
         });
       }
     });
   });
-  
+
   if (tables.length === 0) {
     res.status(400).json({
       success: false,
-      error: 'Invalid production type'
+      error: 'Invalid production type',
     });
   }
 });
@@ -1155,16 +1159,25 @@ router.get('/check-mo-used', (req, res) => {
 
 // GET /api/production/combined (also accessible as /api/combined-production)
 router.get('/combined', (req, res) => {
-  const { moNumber, mo_number, created_at, production_type, startDate, endDate, start_date, end_date } = req.query;
-  
-  // Support both moNumber and mo_number for backward compatibility
+  const {
+    moNumber, mo_number, created_at, production_type,
+    startDate, endDate, start_date, end_date, limit, offset,
+  } = req.query;
+
   const finalMoNumber = moNumber || mo_number;
   const finalStartDate = startDate || start_date;
   const finalEndDate = endDate || end_date;
-  
+  const MAX_LIMIT = 500;
+  const DEFAULT_LIMIT = 100;
+  let limitNum = parseInt(limit, 10);
+  if (Number.isNaN(limitNum) || limitNum <= 0) limitNum = DEFAULT_LIMIT;
+  if (limitNum > MAX_LIMIT) limitNum = MAX_LIMIT;
+  let offsetNum = parseInt(offset, 10);
+  if (Number.isNaN(offsetNum) || offsetNum < 0) offsetNum = 0;
+
   let query = 'SELECT * FROM production_combined WHERE 1=1';
   const params = [];
-  
+
   if (finalMoNumber) {
     query += ' AND mo_number = $' + (params.length + 1);
     params.push(finalMoNumber);
@@ -1185,34 +1198,38 @@ router.get('/combined', (req, res) => {
     query += ' AND production_type = $' + (params.length + 1);
     params.push(production_type);
   }
-  
-  query += ' ORDER BY created_at DESC';
-  
+
+  query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+  params.push(limitNum, offsetNum);
+
   db.all(query, params, (err, rows) => {
     if (err) {
-      res.status(500).json({ error: err.message });
+      console.error('Error querying production_combined:', err);
+      res.status(500).json({ success: false, error: 'Database error' });
       return;
     }
-    
-    const parsedRows = rows.map(row => {
+
+    const parsedRows = rows.map((row) => {
       try {
         return {
           ...row,
-          authenticity_data: typeof row.authenticity_data === 'string' 
-            ? JSON.parse(row.authenticity_data) 
-            : row.authenticity_data
+          authenticity_data:
+            typeof row.authenticity_data === 'string'
+              ? JSON.parse(row.authenticity_data)
+              : row.authenticity_data,
         };
       } catch (e) {
-        return {
-          ...row,
-          authenticity_data: []
-        };
+        return { ...row, authenticity_data: [] };
       }
     });
-    
+
     res.json({
+      success: true,
       count: parsedRows.length,
-      data: parsedRows
+      limit: limitNum,
+      offset: offsetNum,
+      max_limit: MAX_LIMIT,
+      data: parsedRows,
     });
   });
 });

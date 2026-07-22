@@ -81,7 +81,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     grep -q "^DB_HOST" .env || echo "DB_HOST=localhost" >> .env
     grep -q "^DB_NAME" .env || echo "DB_NAME=manufacturing_db" >> .env
     grep -q "^DB_USER" .env || echo "DB_USER=admin" >> .env
-    grep -q "^DB_PASSWORD" .env || echo "DB_PASSWORD=Admin123" >> .env
+    grep -q "^DB_PASSWORD" .env || echo "DB_PASSWORD=YOUR_DB_PASSWORD" >> .env
     
     # Verify
     echo "=== .env DB Settings ==="
@@ -99,7 +99,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     node test-postgresql-connection.js
     
     # Or test with psql
-    # PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+    # PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
 ENDSSH
 ```
 
@@ -159,7 +159,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     grep -q "^DB_HOST" .env || echo "DB_HOST=localhost" >> .env
     grep -q "^DB_NAME" .env || echo "DB_NAME=manufacturing_db" >> .env
     grep -q "^DB_USER" .env || echo "DB_USER=admin" >> .env
-    grep -q "^DB_PASSWORD" .env || echo "DB_PASSWORD=Admin123" >> .env
+    grep -q "^DB_PASSWORD" .env || echo "DB_PASSWORD=YOUR_DB_PASSWORD" >> .env
     
     # Test connection
     node test-postgresql-connection.js

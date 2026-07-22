@@ -10,6 +10,7 @@
     "db:tables": "node explore-database.js --tables",
     "db:stats": "node explore-database.js --stats",
     "migrate": "node migrate-to-postgresql.js",
+    "test": "node --test test/**/*.test.js",
     "test:db": "node test-postgresql.js",
     "fix:schema": "node fix-postgresql-schema.js"
   },

@@ -1,15 +1,20 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { db } = require('../database');
 
 const VALID_PRODUCTION_TYPES = Object.freeze(['liquid', 'device', 'cartridge']);
 
+function isProdLikeEnv() {
+  return process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
+}
+
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
   if (secret && String(secret).trim()) {
     return String(secret).trim();
   }
-  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
+  if (isProdLikeEnv()) {
     return null;
   }
   // Dev-only fallback so local `npm run dev` works without a full .env
@@ -21,22 +26,28 @@ function getAuthUsers() {
   const productionUser = process.env.PRODUCTION_USERNAME || 'production';
   const adminPass = process.env.ADMIN_PASSWORD;
   const productionPass = process.env.PRODUCTION_PASSWORD;
-  const isProdLike = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
 
-  if (isProdLike && (!adminPass || !productionPass)) {
+  if (isProdLikeEnv() && (!adminPass || !productionPass)) {
     return { error: 'ADMIN_PASSWORD and PRODUCTION_PASSWORD must be set in production/staging' };
+  }
+
+  // Only allow weak defaults when NODE_ENV is explicitly development (or unset treated as development)
+  const allowDevDefaults = !isProdLikeEnv() && (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV);
+
+  if (!allowDevDefaults && (!adminPass || !productionPass)) {
+    return { error: 'ADMIN_PASSWORD and PRODUCTION_PASSWORD must be set' };
   }
 
   return {
     users: [
       {
         username: adminUser,
-        password: adminPass || 'admin123',
+        password: adminPass || (allowDevDefaults ? 'admin123' : null),
         role: 'admin',
       },
       {
         username: productionUser,
-        password: productionPass || 'production123',
+        password: productionPass || (allowDevDefaults ? 'production123' : null),
         role: 'production',
       },
     ],
@@ -104,6 +115,14 @@ function extractBearerOrApiKey(req) {
   return null;
 }
 
+function safeEqualStrings(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 /** Require JWT for browser/app APIs */
 function requireAuth(req, res, next) {
   const secret = getJwtSecret();
@@ -158,15 +177,13 @@ function requireRole(...roles) {
  * Fail-closed in production/staging when no key is configured.
  */
 function apiKeyAuth(req, res, next) {
-  const isProdLike = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
-
   getApiKey((err, storedApiKey) => {
     if (err) {
       return res.status(500).json({ success: false, error: 'Failed to verify API key' });
     }
 
     if (!storedApiKey) {
-      if (isProdLike) {
+      if (isProdLikeEnv()) {
         return res.status(503).json({
           success: false,
           error: 'API key is not configured. External API is disabled until an API key is set.',
@@ -186,7 +203,7 @@ function apiKeyAuth(req, res, next) {
       });
     }
 
-    if (apiKey !== storedApiKey) {
+    if (!safeEqualStrings(apiKey, storedApiKey)) {
       return res.status(403).json({
         success: false,
         error: 'Invalid API key',
@@ -217,4 +234,5 @@ module.exports = {
   signToken,
   resolveProductionTable,
   VALID_PRODUCTION_TYPES,
+  safeEqualStrings,
 };

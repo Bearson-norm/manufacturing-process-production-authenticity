@@ -1,65 +1,44 @@
 #!/bin/bash
-# Backup Script untuk Database di VPS
-# Backup SQLite database sebelum migrasi ke PostgreSQL
+# Backup PostgreSQL (primary) for Manufacturing app on VPS
+# Optional: also copies legacy SQLite file if still present
 
-set -e
+set -euo pipefail
 
-BACKUP_DIR="$HOME/backups/manufacturing-app"
+BACKUP_DIR="${BACKUP_DIR:-$HOME/backups/manufacturing-app}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-DB_PATH="$HOME/deployments/manufacturing-app/server"
+APP_DIR="${APP_DIR:-$HOME/deployments/manufacturing-app/server}"
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-5432}"
+DB_USER="${DB_USER:-admin}"
+DB_NAME="${DB_NAME:-manufacturing_db}"
 
-echo "=========================================="
-echo "Database Backup Script"
-echo "=========================================="
-echo ""
+if [ -z "${DB_PASSWORD:-}" ]; then
+  echo "❌ DB_PASSWORD is required"
+  exit 1
+fi
 
-# Create backup directory
 mkdir -p "$BACKUP_DIR"
+export PGPASSWORD="$DB_PASSWORD"
 
-# Backup SQLite database
-if [ -f "$DB_PATH/database.sqlite" ]; then
-    echo "📦 Backing up SQLite database..."
-    cp "$DB_PATH/database.sqlite" "$BACKUP_DIR/database.sqlite.$TIMESTAMP"
-    
-    # Backup WAL files if exist
-    if [ -f "$DB_PATH/database.sqlite-wal" ]; then
-        cp "$DB_PATH/database.sqlite-wal" "$BACKUP_DIR/database.sqlite-wal.$TIMESTAMP"
-    fi
-    
-    if [ -f "$DB_PATH/database.sqlite-shm" ]; then
-        cp "$DB_PATH/database.sqlite-shm" "$BACKUP_DIR/database.sqlite-shm.$TIMESTAMP"
-    fi
-    
-    echo "✅ Backup created: database.sqlite.$TIMESTAMP"
-    echo "   Location: $BACKUP_DIR"
-    
-    # Get file size
-    SIZE=$(du -h "$BACKUP_DIR/database.sqlite.$TIMESTAMP" | cut -f1)
-    echo "   Size: $SIZE"
-else
-    echo "⚠️  SQLite database not found at: $DB_PATH/database.sqlite"
-    exit 1
+echo "=========================================="
+echo "PostgreSQL backup"
+echo "=========================================="
+
+if ! command -v pg_dump &> /dev/null; then
+  echo "❌ pg_dump not found"
+  exit 1
 fi
 
-# Backup PostgreSQL database (if exists)
-if command -v pg_dump &> /dev/null; then
-    echo ""
-    echo "📦 Backing up PostgreSQL database..."
-    pg_dump -h localhost -U admin -d manufacturing_db > "$BACKUP_DIR/postgresql-backup.$TIMESTAMP.sql" 2>/dev/null || {
-        echo "⚠️  PostgreSQL backup skipped (database might not exist yet)"
-    }
-    
-    if [ -f "$BACKUP_DIR/postgresql-backup.$TIMESTAMP.sql" ]; then
-        echo "✅ PostgreSQL backup created: postgresql-backup.$TIMESTAMP.sql"
-        SIZE=$(du -h "$BACKUP_DIR/postgresql-backup.$TIMESTAMP.sql" | cut -f1)
-        echo "   Size: $SIZE"
-    fi
+OUT="$BACKUP_DIR/postgresql-${DB_NAME}.$TIMESTAMP.dump"
+pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Fc -f "$OUT"
+echo "✅ PostgreSQL backup: $OUT"
+ls -lh "$OUT"
+
+# Legacy SQLite (optional)
+if [ -f "$APP_DIR/database.sqlite" ]; then
+  cp "$APP_DIR/database.sqlite" "$BACKUP_DIR/database.sqlite.$TIMESTAMP"
+  echo "✅ Also copied legacy SQLite snapshot"
 fi
 
-echo ""
-echo "=========================================="
-echo "✅ Backup completed successfully!"
-echo "=========================================="
-echo ""
-echo "Backup location: $BACKUP_DIR"
-echo "Timestamp: $TIMESTAMP"
+unset PGPASSWORD
+echo "Done."

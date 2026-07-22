@@ -32,7 +32,7 @@ sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='manufacturi
 sudo -u postgres psql -d manufacturing_db -c "SELECT current_database();"
 
 # As admin user
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT current_database();"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT current_database();"
 ```
 
 ## 🔄 Complete Fix Script
@@ -56,7 +56,7 @@ sudo bash check-and-fix-database.sh
 sudo -u postgres psql -c "\du" | grep admin
 
 # If not exists, create
-sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'Admin123';"
+sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';"
 ```
 
 ### 2. Create Database
@@ -95,7 +95,7 @@ sudo systemctl reload postgresql
 sudo -u postgres psql -d manufacturing_db -c "SELECT 1;"
 
 # Test as admin
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔍 Troubleshooting
@@ -103,7 +103,7 @@ PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;
 ### Error: "role admin does not exist"
 
 ```bash
-sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'Admin123';"
+sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';"
 ```
 
 ### Error: "permission denied"
@@ -136,7 +136,7 @@ sudo -u postgres psql -c "\l" | grep manufacturing_db
 ```bash
 # Create everything
 sudo -u postgres psql << 'PSQL'
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     CREATE DATABASE manufacturing_db OWNER admin;
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
     \c manufacturing_db
@@ -147,7 +147,7 @@ PSQL
 sudo systemctl reload postgresql
 
 # Test
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ---

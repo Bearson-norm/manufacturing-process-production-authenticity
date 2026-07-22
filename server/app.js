@@ -17,9 +17,26 @@ const config = require('./config');
 
 const app = express();
 
-// Security headers
+// Behind nginx (one hop)
+app.set('trust proxy', 1);
+
+// Security headers — CSP allows SPA + inline styles for now
 app.use(helmet({
-  contentSecurityPolicy: false, // SPA + inline styles; tighten later with nonce if needed
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'self'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    },
+  },
   crossOriginEmbedderPolicy: false,
 }));
 
@@ -79,6 +96,14 @@ const loginLimiter = rateLimit({
   message: { success: false, message: 'Too many login attempts. Try again later.' },
 });
 
+const apiKeyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests. Try again later.' },
+});
+
 // Authentication endpoint (public, rate-limited)
 app.post('/api/login', loginLimiter, (req, res) => {
   try {
@@ -107,9 +132,9 @@ app.post('/api/login', loginLimiter, (req, res) => {
   }
 });
 
-// External / inbound APIs — API key only (no JWT)
-app.use('/api/external', apiKeyAuth, require('./routes/external.routes'));
-app.use('/api/receiver', apiKeyAuth, require('./routes/receiver.routes'));
+// External / inbound APIs — API key only (no JWT), rate-limited
+app.use('/api/external', apiKeyLimiter, apiKeyAuth, require('./routes/external.routes'));
+app.use('/api/receiver', apiKeyLimiter, apiKeyAuth, require('./routes/receiver.routes'));
 
 // All other /api routes require JWT
 app.use('/api', (req, res, next) => {
@@ -139,7 +164,14 @@ app.use('/api/wms', requireRole('admin'), require('./routes/wms.routes'));
 app.get('/api/combined-production', (req, res) => {
   const { db } = require('./database');
   const { parseAuthenticityData } = require('./utils/authenticity.utils');
-  const { mo_number, production_type, start_date, end_date } = req.query;
+  const { mo_number, production_type, start_date, end_date, limit, offset } = req.query;
+  const MAX_LIMIT = 500;
+  const DEFAULT_LIMIT = 100;
+  let limitNum = parseInt(limit, 10);
+  if (Number.isNaN(limitNum) || limitNum <= 0) limitNum = DEFAULT_LIMIT;
+  if (limitNum > MAX_LIMIT) limitNum = MAX_LIMIT;
+  let offsetNum = parseInt(offset, 10);
+  if (Number.isNaN(offsetNum) || offsetNum < 0) offsetNum = 0;
 
   const tables = [];
   if (!production_type || production_type === 'all' || production_type === 'liquid') {
@@ -164,6 +196,7 @@ app.get('/api/combined-production', (req, res) => {
 
   const allResults = [];
   let completedQueries = 0;
+  const perTableLimit = Math.min(MAX_LIMIT, offsetNum + limitNum);
 
   tables.forEach((table) => {
     let query = `SELECT *, '${table.type}' as production_type FROM ${table.name} WHERE 1=1`;
@@ -184,7 +217,8 @@ app.get('/api/combined-production', (req, res) => {
       params.push(end_date);
     }
 
-    query += ' ORDER BY created_at DESC';
+    query += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+    params.push(perTableLimit);
 
     db.all(query, params, (err, rows) => {
       if (err) {
@@ -198,10 +232,15 @@ app.get('/api/combined-production', (req, res) => {
 
       if (completedQueries === tables.length) {
         allResults.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const data = allResults.slice(offsetNum, offsetNum + limitNum);
         res.json({
           success: true,
-          count: allResults.length,
-          data: allResults,
+          count: data.length,
+          total: allResults.length,
+          limit: limitNum,
+          offset: offsetNum,
+          max_limit: MAX_LIMIT,
+          data,
         });
       }
     });

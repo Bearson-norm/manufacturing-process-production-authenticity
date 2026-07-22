@@ -40,7 +40,7 @@ sudo -u postgres psql << 'PSQL'
     DROP USER IF EXISTS admin;
     
     -- Create fresh user
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     
     -- Grant privileges
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
@@ -65,7 +65,7 @@ sudo systemctl reload postgresql
 ### Step 5: Test Connection
 
 ```bash
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔄 Complete Script
@@ -97,7 +97,7 @@ sudo -u postgres psql << 'PSQL'
     DROP USER IF EXISTS admin;
     
     -- Create fresh user
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     
     -- Grant privileges and change owner back
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
@@ -114,7 +114,7 @@ PSQL
 sudo systemctl reload postgresql
 
 # Test
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔄 Alternatif: Hanya Update Password (Tanpa Drop)
@@ -124,7 +124,7 @@ Jika tidak ingin drop user, bisa langsung update password:
 ```bash
 sudo -u postgres psql << 'PSQL'
     -- Update password
-    ALTER USER admin WITH PASSWORD 'Admin123';
+    ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     
     -- Ensure privileges
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
@@ -136,7 +136,7 @@ PSQL
 sudo systemctl reload postgresql
 
 # Test
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔄 Alternatif: Gunakan Unix Socket

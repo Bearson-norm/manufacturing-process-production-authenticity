@@ -4,12 +4,17 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 
+if (!process.env.DB_PASSWORD) {
+  console.error('Error: DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 const config = {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5433', 10), // Default to 5433 (PostgreSQL running port)
   database: process.env.DB_NAME || 'manufacturing_db',
   user: process.env.DB_USER || 'admin',
-  password: process.env.DB_PASSWORD || 'Admin123',
+  password: process.env.DB_PASSWORD,
 };
 
 console.log('🔍 Testing PostgreSQL Connection...');

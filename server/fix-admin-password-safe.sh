@@ -3,6 +3,9 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+NEW_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Safe Fix Admin Password"
 echo "=========================================="
@@ -12,7 +15,7 @@ echo ""
 if [ "$EUID" -ne 0 ]; then 
     echo "⚠️  This script needs sudo privileges"
     echo "Running with sudo..."
-    sudo bash "$0"
+    sudo DB_PASSWORD="$DB_PASSWORD" bash "$0"
     exit $?
 fi
 
@@ -34,12 +37,12 @@ PSQL
 
 echo ""
 echo "🔄 Step 3: Dropping and recreating user..."
-sudo -u postgres psql << 'PSQL'
+sudo -u postgres psql <<PSQL
     -- Now we can drop the user
     DROP USER IF EXISTS admin;
     
     -- Create fresh user
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD '${NEW_PASSWORD}';
 PSQL
 
 echo ""
@@ -65,7 +68,7 @@ sleep 1
 
 echo ""
 echo "🔄 Step 6: Testing connection..."
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
     echo "   ✅ Connection successful!"
 } || {
     echo "   ❌ Connection failed"

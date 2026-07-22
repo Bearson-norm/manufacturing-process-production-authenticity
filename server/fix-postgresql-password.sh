@@ -4,6 +4,9 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+NEW_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Fix PostgreSQL Password for User 'admin'"
 echo "=========================================="
@@ -13,7 +16,7 @@ echo ""
 if [ "$EUID" -ne 0 ]; then 
     echo "⚠️  This script needs sudo privileges"
     echo "Running with sudo..."
-    sudo bash "$0"
+    sudo DB_PASSWORD="$DB_PASSWORD" bash "$0"
     exit $?
 fi
 
@@ -22,10 +25,10 @@ echo "🔄 Resetting password for PostgreSQL user 'admin'..."
 # Check if user exists and create/update accordingly
 sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='admin'" | grep -q 1 && {
     echo "   User 'admin' exists, updating password..."
-    sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';"
+    sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD '$NEW_PASSWORD';"
 } || {
     echo "   User 'admin' does not exist, creating..."
-    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'Admin123';"
+    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD '$NEW_PASSWORD';"
 }
 
 # Check if database exists and create if not
@@ -49,7 +52,7 @@ echo ""
 echo "✅ PostgreSQL password fixed!"
 echo ""
 echo "Testing connection..."
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1 as test;" > /dev/null 2>&1 && {
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -U admin -d manufacturing_db -c "SELECT 1 as test;" > /dev/null 2>&1 && {
     echo "✅ Connection test successful!"
     echo ""
     echo "You can now run migration:"

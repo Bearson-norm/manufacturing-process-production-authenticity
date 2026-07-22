@@ -1,6 +1,8 @@
 #!/bin/bash
 # Test berbagai metode authentication PostgreSQL
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "PostgreSQL Authentication Test"
 echo "=========================================="
@@ -15,7 +17,7 @@ sudo -u postgres psql -d manufacturing_db -c "SELECT current_user, current_datab
 echo ""
 
 echo "2. Testing with PGPASSWORD environment variable:"
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
     echo "   ✅ OK"
 } || {
     echo "   ❌ FAILED"

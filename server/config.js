@@ -1,7 +1,9 @@
 // Centralized configuration management
 // Loads from environment variables with sensible defaults
 
-require('dotenv').config();
+const path = require('path');
+// Always load server/.env (cwd may be repo root when using `npm run server` / nodemon)
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const isProdLike = () =>
   process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';

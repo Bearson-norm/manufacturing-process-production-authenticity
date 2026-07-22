@@ -4,7 +4,7 @@
 
 1. **Install PostgreSQL**
    - Download dan install PostgreSQL dari https://www.postgresql.org/download/
-   - Atau gunakan Docker: `docker run --name postgres -e POSTGRES_PASSWORD=Admin123 -p 5432:5432 -d postgres`
+   - Atau gunakan Docker: `docker run --name postgres -e POSTGRES_PASSWORD=YOUR_DB_PASSWORD -p 5432:5432 -d postgres`
 
 2. **Buat Database dan User**
    ```bash
@@ -12,7 +12,7 @@
    psql -U postgres
    
    # Buat user admin
-   CREATE USER admin WITH PASSWORD 'Admin123';
+   CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
    
    # Buat database
    CREATE DATABASE manufacturing_db;
@@ -59,7 +59,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=manufacturing_db
 DB_USER=admin
-DB_PASSWORD=Admin123
+DB_PASSWORD=YOUR_DB_PASSWORD
 DB_POOL_MAX=20
 DB_IDLE_TIMEOUT=30000
 DB_CONNECTION_TIMEOUT=2000

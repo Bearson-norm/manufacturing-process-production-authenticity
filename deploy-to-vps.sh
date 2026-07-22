@@ -100,15 +100,11 @@ ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
         sudo systemctl start postgresql
         sudo systemctl enable postgresql
         
-        # Create database and user
-        sudo -u postgres psql << 'PSQL'
-            CREATE USER admin WITH PASSWORD 'Admin123';
-            CREATE DATABASE manufacturing_db OWNER admin;
-            GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
-            \c manufacturing_db
-            GRANT ALL ON SCHEMA public TO admin;
-PSQL
-        echo "✅ PostgreSQL installed and configured"
+        # Do not bootstrap DB passwords from this script (no hardcoded secrets).
+        echo "⚠️  PostgreSQL installed. Create role/db manually (no password is written by this script):"
+        echo "   sudo -u postgres createuser -P admin"
+        echo "   sudo -u postgres createdb -O admin manufacturing_db"
+        echo "   Then set DB_* in server/.env on the VPS."
     else
         echo "✅ PostgreSQL already installed"
     fi
@@ -143,8 +139,9 @@ ssh ${VPS_USER}@${VPS_HOST} << 'ENDSSH'
     if ! grep -q "DB_USER=admin" .env; then
         echo "DB_USER=admin" >> .env
     fi
-    if ! grep -q "DB_PASSWORD=Admin123" .env; then
-        echo "DB_PASSWORD=Admin123" >> .env
+    if ! grep -q "^DB_PASSWORD=" .env 2>/dev/null || grep -q "^DB_PASSWORD=$" .env 2>/dev/null; then
+        echo "❌ server/.env must set DB_PASSWORD (no default). Aborting."
+        exit 1
     fi
     if ! grep -q "DB_NAME=manufacturing_db" .env; then
         echo "DB_NAME=manufacturing_db" >> .env

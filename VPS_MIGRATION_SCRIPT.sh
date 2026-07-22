@@ -22,7 +22,7 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 # PostgreSQL Configuration
 PG_USER="admin"
-PG_PASSWORD="Admin123"
+PG_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
 PG_DATABASE="manufacturing_db"
 PG_PORT="5432"
 
@@ -175,7 +175,7 @@ echo -e "${YELLOW}Step 12: Waiting for application to initialize...${NC}"
 sleep 5
 
 echo -e "${YELLOW}Step 13: Testing health endpoint...${NC}"
-if curl -s http://localhost:1234/health | grep -q "healthy"; then
+if curl -s http://localhost:1234/health | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo -e "${GREEN}✓ Health check passed${NC}"
 else
     echo -e "${RED}✗ Health check failed${NC}"

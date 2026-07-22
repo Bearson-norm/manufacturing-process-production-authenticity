@@ -5,13 +5,14 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "🔧 Fix PostgreSQL Connection Issues"
 echo "===================================="
 echo ""
 
 DB_NAME="manufacturing_db"
 DB_USER="it_foom"
-DB_PASSWORD="FOOMIT"
 DB_PORT="5433"
 
 echo "📋 Target Configuration:"

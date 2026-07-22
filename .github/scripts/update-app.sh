@@ -96,7 +96,7 @@ verify_deployment() {
     echo ""
     echo "📋 Testing health endpoint:"
     HEALTH=$(curl -s http://localhost:1234/health || echo "ERROR")
-    if echo "$HEALTH" | grep -q "healthy"; then
+    if echo "$HEALTH" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
         echo "   ✅ Health check: OK"
         echo "   Response: $(echo $HEALTH | head -c 80)..."
     else

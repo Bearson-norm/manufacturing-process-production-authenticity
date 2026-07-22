@@ -3,6 +3,8 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Fix production_results Table"
 echo "=========================================="
@@ -17,7 +19,7 @@ cd ~/deployments/manufacturing-app/server
 
 echo "🔄 Adding missing columns to production_results table..."
 
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
     -- Add quantity column if not exists
     DO \$\$
     BEGIN
@@ -61,13 +63,18 @@ const { Pool } = require('pg');
 const path = require('path');
 require('dotenv').config();
 
+if (!process.env.DB_PASSWORD) {
+  console.error('Error: DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 const sqliteDbPath = path.join(__dirname, 'database.sqlite');
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5433', 10),
   database: process.env.DB_NAME || 'manufacturing_db',
   user: process.env.DB_USER || 'admin',
-  password: process.env.DB_PASSWORD || 'Admin123',
+  password: process.env.DB_PASSWORD,
 });
 
 async function remigrateProductionResults() {

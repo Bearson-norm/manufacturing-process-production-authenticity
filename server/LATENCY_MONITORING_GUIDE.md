@@ -189,7 +189,7 @@ Script akan menggunakan konfigurasi dari:
 - `DB_PORT` - Database port (default: 5432, script akan otomatis mencoba 5433 jika gagal)
 - `DB_NAME` - Database name (default: manufacturing_db)
 - `DB_USER` - Database user (default: admin)
-- `DB_PASSWORD` - Database password (default: Admin123)
+- `DB_PASSWORD` - Database password (default: YOUR_DB_PASSWORD)
 
 **Catatan:** Script akan otomatis mencoba beberapa metode koneksi:
 1. Konfigurasi default (dari env/config)

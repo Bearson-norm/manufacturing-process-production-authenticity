@@ -29,7 +29,7 @@ ENDSSH
 ### Step 2: Test PostgreSQL Connection
 
 ```bash
-ssh foom@103.31.39.189 "PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c 'SELECT current_user, current_database();'"
+ssh foom@103.31.39.189 "PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c 'SELECT current_user, current_database();'"
 ```
 
 Harus return user dan database name.
@@ -139,7 +139,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     # Test dengan script
     node test-postgresql-connection.js || {
         echo "Script not found, testing manually..."
-        PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+        PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
     }
 ENDSSH
 ```
@@ -148,7 +148,7 @@ ENDSSH
 
 ```bash
 ssh foom@103.31.39.189 << 'ENDSSH'
-    PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db << 'SQL'
+    PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db << 'SQL'
         SELECT 'production_liquid' as table_name, COUNT(*) as count FROM production_liquid
         UNION ALL
         SELECT 'production_device', COUNT(*) FROM production_device
@@ -230,7 +230,7 @@ ssh foom@103.31.39.189 "pm2 logs manufacturing-app --err --lines 50"
 
 ```bash
 # Test connection manual
-ssh foom@103.31.39.189 "PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c 'SELECT 1;'"
+ssh foom@103.31.39.189 "PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c 'SELECT 1;'"
 
 # Cek .env
 ssh foom@103.31.39.189 "cat ~/deployments/manufacturing-app/server/.env | grep DB_"

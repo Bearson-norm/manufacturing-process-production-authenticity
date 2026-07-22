@@ -9,7 +9,7 @@ Host: localhost (jika di VPS) atau ProductionDashboard (jika dari remote)
 Port: 5433 ⚠️ PENTING: Bukan 5432!
 Database: manufacturing_db
 Username: it_foom
-Password: FOOMIT
+Password: YOUR_DB_PASSWORD
 ```
 
 ---
@@ -30,7 +30,7 @@ Password: FOOMIT
 - **Port:** `5433` ⚠️ **SANGAT PENTING: Jangan gunakan 5432!**
 - **Database:** `manufacturing_db`
 - **Username:** `it_foom`
-- **Password:** `FOOMIT`
+- **Password:** `YOUR_DB_PASSWORD`
 - **Save password:** ✓ (centang untuk menyimpan password)
 
 ### Step 3: Driver Properties (PENTING!)
@@ -135,7 +135,7 @@ sudo ufw status
 **Solusi 5: Test dengan psql**
 ```bash
 # Test dari komputer yang sama dengan DBeaver
-PGPASSWORD=FOOMIT psql -h ProductionDashboard -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h ProductionDashboard -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
 ```
 
 **Solusi 6: Gunakan Connection String**
@@ -144,7 +144,7 @@ Di DBeaver, coba gunakan connection string langsung:
 2. Di tab **Main**, klik **JDBC URL** (toggle)
 3. Gunakan URL:
    ```
-   jdbc:postgresql://localhost:5433/manufacturing_db?user=it_foom&password=FOOMIT&connectTimeout=30&socketTimeout=60&tcpKeepAlive=true
+   jdbc:postgresql://localhost:5433/manufacturing_db?user=it_foom&password=YOUR_DB_PASSWORD&connectTimeout=30&socketTimeout=60&tcpKeepAlive=true
    ```
 
 **Solusi 7: Cek DBeaver Logs**
@@ -206,7 +206,7 @@ Setelah setup, pastikan:
 - [ ] Port: `5433` (bukan 5432!)
 - [ ] Database: `manufacturing_db`
 - [ ] Username: `it_foom`
-- [ ] Password: `FOOMIT`
+- [ ] Password: `YOUR_DB_PASSWORD`
 - [ ] Driver Properties: `connectTimeout=30`, `socketTimeout=60`
 - [ ] SSH Tunnel enabled (jika connect dari remote)
 - [ ] Test connection berhasil
@@ -243,7 +243,7 @@ LIMIT 10;
    - Atau gunakan VPN
 
 2. **Gunakan password yang kuat**
-   - Password `FOOMIT` sudah cukup untuk development
+   - Password `YOUR_DB_PASSWORD` sudah cukup untuk development
    - Untuk production, pertimbangkan password yang lebih kuat
 
 3. **Limit access**

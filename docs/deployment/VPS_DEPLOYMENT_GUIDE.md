@@ -175,7 +175,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     
     # Create database and user
     sudo -u postgres psql << 'PSQL'
-        CREATE USER admin WITH PASSWORD 'Admin123';
+        CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
         CREATE DATABASE manufacturing_db OWNER admin;
         GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
         \c manufacturing_db
@@ -209,7 +209,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     # DB_PORT=5432
     # DB_NAME=manufacturing_db
     # DB_USER=admin
-    # DB_PASSWORD=Admin123
+    # DB_PASSWORD=YOUR_DB_PASSWORD
 ENDSSH
 ```
 

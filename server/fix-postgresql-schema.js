@@ -2,12 +2,17 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
+if (!process.env.DB_PASSWORD) {
+  console.error('Error: DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432', 10),
   database: process.env.DB_NAME || 'manufacturing_db',
   user: process.env.DB_USER || 'admin',
-  password: process.env.DB_PASSWORD || 'Admin123',
+  password: process.env.DB_PASSWORD,
   max: 20,
 });
 

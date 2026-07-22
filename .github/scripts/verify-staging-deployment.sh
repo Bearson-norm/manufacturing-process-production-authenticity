@@ -5,7 +5,7 @@
 set -e
 
 STAGING_DIR="/home/foom/deployments/manufacturing-app-staging"
-STAGING_PORT=5678
+STAGING_PORT=3467
 
 echo "🔍 Verifying staging deployment..."
 
@@ -40,7 +40,7 @@ pm2 list | grep manufacturing-app-staging || echo "⚠️  PM2 process not found
 # Check if server is responding
 echo "🏥 Checking server health..."
 HEALTH=$(curl -s http://localhost:$STAGING_PORT/health || echo "failed")
-if echo "$HEALTH" | grep -q "healthy"; then
+if echo "$HEALTH" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo "   ✅ Server is healthy"
 else
     echo "   ⚠️  Server health check failed: $HEALTH"

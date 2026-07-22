@@ -95,12 +95,7 @@ router.get('/config', (req, res) => {
             db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_bearer_token'], (btErr, btRow) => {
               const bearerRaw =
                 btRow && btRow.config_value ? String(btRow.config_value) : process.env.EXTERNAL_API_BEARER_TOKEN || '';
-              let maskedBearer = null;
-              if (bearerRaw && bearerRaw.length > 8) {
-                maskedBearer = bearerRaw.substring(0, bearerRaw.length - 8) + '********';
-              } else if (bearerRaw) {
-                maskedBearer = '********';
-              }
+              const maskedBearer = maskSecret(bearerRaw);
 
               db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url_active'], (err3, row3) => {
                 const externalApiUrlActive = row3
@@ -119,12 +114,7 @@ router.get('/config', (req, res) => {
 
                     db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['api_key'], (err6, row6) => {
                       const apiKey = row6 ? row6.config_value : null;
-                      let maskedApiKey = null;
-                      if (apiKey && typeof apiKey === 'string' && apiKey.length > 8) {
-                        maskedApiKey = apiKey.substring(0, apiKey.length - 8) + '********';
-                      } else if (apiKey && typeof apiKey === 'string') {
-                        maskedApiKey = '********';
-                      }
+                      const maskedApiKey = maskSecret(apiKey);
 
                       db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_api_base_url'], (wmsUrlErr, wmsUrlRow) => {
                         const wmsApiBaseUrl = wmsUrlRow && wmsUrlRow.config_value
@@ -135,12 +125,7 @@ router.get('/config', (req, res) => {
                           const wmsTokenRaw = wmsTokRow && wmsTokRow.config_value
                             ? String(wmsTokRow.config_value)
                             : (process.env.WMS_ACCESS_TOKEN || '');
-                          let maskedWmsToken = null;
-                          if (wmsTokenRaw && wmsTokenRaw.length > 8) {
-                            maskedWmsToken = wmsTokenRaw.substring(0, wmsTokenRaw.length - 8) + '********';
-                          } else if (wmsTokenRaw) {
-                            maskedWmsToken = '********';
-                          }
+                          const maskedWmsToken = maskSecret(wmsTokenRaw);
 
                           db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_username'], (wmsUserErr, wmsUserRow) => {
                             const wmsUsername = wmsUserRow && wmsUserRow.config_value

@@ -2,194 +2,69 @@
 
 Sistem untuk mengelola proses produksi dan autentikasi pada manufacturing dengan tracking MO Number, Roll Number, dan Authenticity Data.
 
-## 🚀 Fitur
+## Fitur
 
-- **Production Management**: Kelola proses produksi untuk Liquid, Device, dan Cartridge
-- **Authenticity Tracking**: Tracking authenticity label dengan First/Last Authenticity dan Roll Number
-- **Buffer Management**: Kelola buffer authenticity numbers
-- **Session Management**: Kelola session produksi dengan leader name dan shift number
-- **Combined API**: API terpadu untuk query data dari semua tipe production
+- **Production Management**: Liquid, Device, dan Cartridge
+- **Authenticity Tracking**: First/Last Authenticity dan Roll Number
+- **Buffer / Reject Management**
+- **Session Management**: leader name dan shift number
+- **Integrasi**: Odoo MO sync, external manufacturing API, WMS (admin)
 
-## 📋 Requirements
+## Requirements
 
-- Node.js >= 14.x
-- npm atau yarn
-- SQLite3
+- Node.js >= 18.x
+- npm
+- PostgreSQL
 
-## 🛠️ Installation
+## Installation
 
-### 1. Clone Repository
 ```bash
 git clone <repository-url>
 cd Manufacturing-Process-Production-Authenticity
-```
-
-### 2. Install Dependencies
-```bash
-# Install root dependencies
-npm install
-
-# Install client dependencies
-cd client && npm install && cd ..
-
-# Install server dependencies
-cd server && npm install && cd ..
-```
-
-Atau gunakan script:
-```bash
 npm run install-all
+cp server/env.example server/.env
+# Edit server/.env — set DB_*, JWT_SECRET, ADMIN_PASSWORD, PRODUCTION_PASSWORD, CORS_ORIGIN
 ```
 
-## 🏃 Running the Application
+## Running
 
-### Development Mode
+### Development
+
 ```bash
-# Run both client and server concurrently
 npm run dev
-
-# Or run separately:
-npm run server  # Backend on port 5000
-npm run client  # Frontend on port 3000
+# Backend default port 1234, React dev server 3000 (proxy ke backend)
 ```
 
-### Production Mode
+### Production (manual)
 
-#### Server
 ```bash
-cd server
-npm start
+cd client && npm run build && cd ..
+# Deploy client/build sebagai client-build di samping server/
+cd server && npm install --omit=dev
+pm2 start ecosystem.config.js --only manufacturing-app
+pm2 start ecosystem.config.js --only manufacturing-app-worker
 ```
 
-#### Client
-```bash
-cd client
-npm run build
-# Serve the build folder using a static server (nginx, apache, etc.)
-```
+PM2 **web** (`ENABLE_SCHEDULER=false`) melayani HTTP; **worker** (`ENABLE_SCHEDULER=true`, `ENABLE_HTTP=false`) menjalankan cron saja.
 
-## 📁 Project Structure
+## Authentication
 
-```
-├── client/                 # React frontend application
-│   ├── public/
-│   ├── src/
-│   │   ├── components/    # React components
-│   │   ├── App.js
-│   │   └── index.js
-│   └── package.json
-├── server/                 # Express backend server
-│   ├── index.js           # Main server file
-│   ├── database.sqlite    # SQLite database (gitignored)
-│   └── package.json
-└── package.json           # Root package.json
-```
+- `POST /api/login` — JWT + role (`admin` | `production`)
+- Semua `/api/*` kecuali `/api/login`, `/api/external/*`, `/api/receiver/*` membutuhkan `Authorization: Bearer <token>`
+- `/health` publik (probe DB)
+- Kredensial dari `server/.env` — jangan hardcode di dokumentasi
 
-## 🔌 API Endpoints
+## Database
 
-### Production Endpoints
-- `GET /api/production/liquid` - Get all liquid production data
-- `POST /api/production/liquid` - Create liquid production entry
-- `GET /api/production/device` - Get all device production data
-- `POST /api/production/device` - Create device production entry
-- `GET /api/production/cartridge` - Get all cartridge production data
-- `POST /api/production/cartridge` - Create cartridge production entry
+PostgreSQL. Variabel di `server/env.example`. Bootstrap schema lewat migrasi di `server/migrations/`.
 
-### Combined Production Endpoints
-- `GET /api/production/combined` - Query combined data (supports filters: moNumber, created_at, production_type)
-- `POST /api/production/combined` - Insert data to combined table
-- `POST /api/production/combined/sync` - Sync data from individual tables
+## CI/CD
 
-### Buffer Endpoints
-- `GET /api/buffer/liquid?moNumber=XXX` - Get buffer data for liquid
-- `POST /api/buffer/liquid` - Create buffer entry for liquid
-- Similar endpoints for device and cartridge
+- Push ke `staging` → deploy staging (port **3467**)
+- Push ke `main` → deploy production (port dari `.env`, biasanya 1234)
+- Lihat [docs/ci-cd/CI_CD_GUIDE.md](docs/ci-cd/CI_CD_GUIDE.md), [docs/deployment/DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md)
+- Rotasi kredensial: [docs/deployment/CREDENTIAL_ROTATION.md](docs/deployment/CREDENTIAL_ROTATION.md)
 
-### Authentication
-- `POST /api/login` — returns JWT (`token`) + `role`
-- Credentials come from server env: `ADMIN_USERNAME` / `ADMIN_PASSWORD`, `PRODUCTION_USERNAME` / `PRODUCTION_PASSWORD`
-- All `/api/*` routes (except `/api/login`, `/api/external/*`, `/api/receiver/*`) require `Authorization: Bearer <token>`
-- `/health` is public
+## License
 
-## 🗄️ Database
-
-Database menggunakan PostgreSQL. Lihat `server/env.example` untuk variabel yang wajib diisi.
-
-Tabel utama:
-- `production_liquid`, `production_device`, `production_cartridge`
-- `production_combined`
-- `buffer_liquid`, `buffer_device`, `buffer_cartridge`
-
-## 🔐 Credentials
-
-Jangan hardcode password di dokumentasi. Set di `server/.env`:
-- `JWT_SECRET`
-- `ADMIN_USERNAME` / `ADMIN_PASSWORD`
-- `PRODUCTION_USERNAME` / `PRODUCTION_PASSWORD`
-
-Untuk development lokal saja, jika password env kosong, fallback sementara `admin`/`admin123` dan `production`/`production123` masih aktif. **Staging/production wajib set password kuat via env.**
-
-## 🚀 Deployment
-
-### Manual Deployment
-1. Build client: `cd client && npm run build`
-2. Copy build folder dan server folder ke VPS
-3. Install dependencies di server
-4. Setup PM2 atau systemd untuk process management
-5. Setup Nginx sebagai reverse proxy
-
-### Automated Deployment (CI/CD)
-Project ini menggunakan GitHub Actions untuk automated deployment dengan staging environment untuk testing.
-
-**Features**:
-- ✅ **CI Pipeline**: Automated testing dan linting pada semua branches
-- ✅ **Staging Environment**: Auto-deploy ke staging (port 5678) untuk testing sebelum production
-- ✅ **Production Deployment**: Auto-deploy ke production (port 1234) dengan safety checks dan auto-rollback
-- ✅ **Health Checks**: Automatic health verification setelah deployment
-
-**Workflow**:
-```
-Development → Staging Branch → Test → Main Branch → Production
-```
-
-**Documentation**:
-- 📘 [CI/CD Guide](CI_CD_GUIDE.md) - Complete CI/CD documentation
-- 🧪 [Staging Setup](STAGING_SETUP.md) - Staging environment setup guide
-- 🚀 [Deployment Guide](DEPLOYMENT.md) - Manual deployment procedures
-
-**Quick Start**:
-- Deploy ke staging: Push ke branch `staging`
-- Deploy ke production: Push ke branch `main` (setelah CI pass)
-
-Lihat `.github/workflows/` untuk workflow files detail.
-
-## 📝 Environment Variables
-
-Buat file `.env` di root directory:
-```env
-NODE_ENV=production
-PORT=5000
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 License
-
-ISC
-
-## 👥 Authors
-
-- Your Name
-
-## 🙏 Acknowledgments
-
-- React
-- Express.js
-- SQLite3
-
+ISC — see [LICENSE](LICENSE)

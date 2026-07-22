@@ -4,6 +4,9 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+NEW_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Complete PostgreSQL Fix"
 echo "=========================================="
@@ -13,16 +16,16 @@ echo ""
 if [ "$EUID" -ne 0 ]; then 
     echo "⚠️  This script needs sudo privileges"
     echo "Running with sudo..."
-    sudo bash "$0"
+    sudo DB_PASSWORD="$DB_PASSWORD" bash "$0"
     exit $?
 fi
 
 echo "🔄 Step 1: Fixing PostgreSQL password..."
 
 # Update password
-sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';" 2>/dev/null || {
+sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD '$NEW_PASSWORD';" 2>/dev/null || {
     echo "   Creating user 'admin'..."
-    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'Admin123';"
+    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD '$NEW_PASSWORD';"
 }
 
 # Ensure database exists
@@ -85,7 +88,7 @@ echo "🔄 Step 5: Testing connection as admin user..."
 
 # Test with different methods
 echo "   Method 1: Using psql with PGPASSWORD..."
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1 as test;" > /dev/null 2>&1 && {
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -U admin -d manufacturing_db -c "SELECT 1 as test;" > /dev/null 2>&1 && {
     echo "   ✅ Connection as admin user: OK"
 } || {
     echo "   ❌ Connection as admin user: FAILED"
@@ -136,5 +139,5 @@ echo ""
 echo "If connection still fails, try:"
 echo "1. Check pg_hba.conf: sudo cat \$(sudo -u postgres psql -t -P format=unaligned -c 'SHOW hba_file;' | xargs)"
 echo "2. Restart PostgreSQL: sudo systemctl restart postgresql"
-echo "3. Test with: PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c \"SELECT 1;\""
+echo "3. Test with: PGPASSWORD=\"\$DB_PASSWORD\" psql -h localhost -U admin -d manufacturing_db -c \"SELECT 1;\""
 echo "4. Or use peer authentication: sudo -u postgres psql -d manufacturing_db"

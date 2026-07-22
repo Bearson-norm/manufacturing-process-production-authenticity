@@ -1,18 +1,47 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import './Login.css';
 import logoFoom from '../assets/Logo FOOM Hitam.webp';
+
+function resolveLoginError(err) {
+  const status = err.response?.status;
+  const message = err.response?.data?.message;
+
+  if (status === 401) {
+    return message || 'Username atau password salah';
+  }
+  if (status === 503) {
+    return message || 'Layanan sementara tidak tersedia. Coba lagi nanti.';
+  }
+  if (err.request && !err.response) {
+    return 'Tidak dapat terhubung ke server. Periksa koneksi jaringan Anda.';
+  }
+  return message || 'Terjadi kesalahan saat login. Silakan coba lagi.';
+}
 
 function Login({ setIsAuthenticated }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const sessionExpired =
+      searchParams.get('session') === 'expired' ||
+      sessionStorage.getItem('sessionExpired') === '1';
+    if (sessionExpired) {
+      sessionStorage.removeItem('sessionExpired');
+      setError('Sesi berakhir. Silakan login kembali.');
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
     try {
       const response = await axios.post('/api/login', { username, password });
@@ -23,10 +52,12 @@ function Login({ setIsAuthenticated }) {
         setIsAuthenticated(true);
         navigate('/dashboard');
       } else {
-        setError('Login failed: no token received');
+        setError('Login gagal: token tidak diterima');
       }
     } catch (err) {
-      setError('Invalid username or password');
+      setError(resolveLoginError(err));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -73,6 +104,7 @@ function Login({ setIsAuthenticated }) {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
+              disabled={loading}
             />
           </div>
           <div className="form-group">
@@ -83,10 +115,13 @@ function Login({ setIsAuthenticated }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              disabled={loading}
             />
           </div>
           {error && <div className="error-message">{error}</div>}
-          <button type="submit" className="login-button">Login</button>
+          <button type="submit" className="login-button" disabled={loading}>
+            {loading ? 'Memproses...' : 'Login'}
+          </button>
         </form>
         <div className="production-options">
           <p style={{ textAlign: 'center', fontSize: '16px', color: '#666', marginTop: '20px' }}>
@@ -100,4 +135,3 @@ function Login({ setIsAuthenticated }) {
 }
 
 export default Login;
-

@@ -14,7 +14,7 @@ sudo bash fix-postgresql-password.sh
 ```
 
 Script ini akan:
-- ✅ Reset password untuk user `admin` menjadi `Admin123`
+- ✅ Reset password untuk user `admin` menjadi `YOUR_DB_PASSWORD`
 - ✅ Pastikan database `manufacturing_db` ada
 - ✅ Grant semua privileges
 - ✅ Test connection
@@ -56,7 +56,7 @@ sudo bash fix-postgresql-password.sh
 
 ```bash
 sudo -u postgres psql << 'PSQL'
-    ALTER USER admin WITH PASSWORD 'Admin123';
+    ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     \c manufacturing_db
     GRANT ALL ON SCHEMA public TO admin;
 PSQL
@@ -66,7 +66,7 @@ PSQL
 
 ```bash
 # Test dengan psql
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 
 # Atau menggunakan script test
 cd ~/deployments/manufacturing-app/server
@@ -86,7 +86,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=manufacturing_db
 DB_USER=admin
-DB_PASSWORD=Admin123
+DB_PASSWORD=YOUR_DB_PASSWORD
 ```
 
 Jika tidak ada atau salah, update:
@@ -99,7 +99,7 @@ echo "DB_HOST=localhost" >> .env
 echo "DB_PORT=5432" >> .env
 echo "DB_NAME=manufacturing_db" >> .env
 echo "DB_USER=admin" >> .env
-echo "DB_PASSWORD=Admin123" >> .env
+echo "DB_PASSWORD=YOUR_DB_PASSWORD" >> .env
 ```
 
 ### 6. Run Migration Lagi
@@ -117,7 +117,7 @@ Jika user dan database sudah ada tapi password salah:
 
 ```bash
 sudo -u postgres psql << 'PSQL'
-    ALTER USER admin WITH PASSWORD 'Admin123';
+    ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     \c manufacturing_db
     GRANT ALL ON SCHEMA public TO admin;
     GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO admin;
@@ -133,7 +133,7 @@ PSQL
 
 ```bash
 sudo -u postgres psql << 'PSQL'
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     CREATE DATABASE manufacturing_db OWNER admin;
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
     \c manufacturing_db
@@ -171,7 +171,7 @@ PSQL
 - [ ] PostgreSQL running (`sudo systemctl status postgresql`)
 - [ ] User `admin` exists (`sudo -u postgres psql -c "\du"`)
 - [ ] Database `manufacturing_db` exists (`sudo -u postgres psql -c "\l"`)
-- [ ] Password sudah di-reset (`ALTER USER admin WITH PASSWORD 'Admin123'`)
+- [ ] Password sudah di-reset (`ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD'`)
 - [ ] .env file sudah benar (`cat .env | grep DB_`)
 - [ ] Connection test berhasil (`node test-postgresql-connection.js`)
 - [ ] Migration berhasil (`node migrate-to-postgresql.js`)

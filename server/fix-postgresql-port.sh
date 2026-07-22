@@ -3,6 +3,8 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Fix PostgreSQL Port Issue"
 echo "=========================================="
@@ -12,7 +14,7 @@ echo ""
 if [ "$EUID" -ne 0 ]; then 
     echo "⚠️  This script needs sudo privileges"
     echo "Running with sudo..."
-    sudo bash "$0"
+    sudo DB_PASSWORD="$DB_PASSWORD" bash "$0"
     exit $?
 fi
 
@@ -80,7 +82,7 @@ echo ""
 echo "🔄 Step 2: Testing connection with correct port..."
 if [ "$CURRENT_PORT" = "5433" ] && [ "$choice" != "2" ]; then
     echo "   Testing with port 5433..."
-    PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
+    PGPASSWORD="$DB_PASSWORD" psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
         echo "   ✅ Connection successful with port 5433!"
         echo ""
         echo "   💡 Update your .env file: DB_PORT=5433"
@@ -89,7 +91,7 @@ if [ "$CURRENT_PORT" = "5433" ] && [ "$choice" != "2" ]; then
     }
 else
     echo "   Testing with port 5432..."
-    PGPASSWORD=Admin123 psql -h localhost -p 5432 -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
+    PGPASSWORD="$DB_PASSWORD" psql -h localhost -p 5432 -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
         echo "   ✅ Connection successful!"
     } || {
         echo "   ❌ Connection failed"

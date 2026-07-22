@@ -4,6 +4,9 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+NEW_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Fix Admin Password Authentication"
 echo "=========================================="
@@ -13,7 +16,7 @@ echo ""
 if [ "$EUID" -ne 0 ]; then 
     echo "⚠️  This script needs sudo privileges"
     echo "Running with sudo..."
-    sudo bash "$0"
+    sudo DB_PASSWORD="$DB_PASSWORD" bash "$0"
     exit $?
 fi
 
@@ -33,19 +36,19 @@ if [ "$USER_EXISTS" = "1" ]; then
     echo "   ✅ User 'admin' exists"
 else
     echo "   Creating user 'admin'..."
-    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'Admin123';"
+    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD '$NEW_PASSWORD';"
 fi
 
 echo ""
 echo "🔄 Step 3: Resetting password (force update)..."
 # Force password update - drop and recreate if needed
-sudo -u postgres psql << 'PSQL'
+sudo -u postgres psql <<PSQL
     -- Drop user if exists (will recreate)
     DROP OWNED BY admin;
     DROP USER IF EXISTS admin;
     
     -- Create fresh user
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD '${NEW_PASSWORD}';
     
     -- Grant privileges
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
@@ -80,7 +83,7 @@ sudo -u postgres psql -d manufacturing_db -c "SELECT current_user, current_datab
 
 echo ""
 echo "   Test 2: As admin via TCP/IP with password..."
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 | head -3 && {
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 | head -3 && {
     echo "   ✅ OK"
 } || {
     echo "   ❌ FAILED"

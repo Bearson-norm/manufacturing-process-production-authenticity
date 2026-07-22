@@ -14,7 +14,7 @@ cat .env | grep DB_
 export DB_HOST=localhost
 export DB_PORT=5432  # atau 5433
 export DB_USER=admin
-export DB_PASSWORD=Admin123
+export DB_PASSWORD=YOUR_DB_PASSWORD
 export DB_NAME=manufacturing_db
 ```
 
@@ -41,10 +41,10 @@ node monitor-manual-latency.js production_liquid 13
 **Opsi C: Test Connection Manual**
 ```bash
 # Test dengan psql
-PGPASSWORD=Admin123 psql -h localhost -p 5432 -U admin -d manufacturing_db -c "SELECT 1"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5432 -U admin -d manufacturing_db -c "SELECT 1"
 
 # Jika gagal, coba port 5433
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1"
 
 # Jika masih gagal, coba Unix socket
 sudo -u postgres psql -d manufacturing_db -c "SELECT 1"
@@ -104,7 +104,7 @@ node monitor-manual-latency.js production_liquid 13
 sudo -u postgres psql -c "\du admin"
 
 # Reset password jika perlu
-sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';"
+sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';"
 ```
 
 **Solusi 3: Check pg_hba.conf**

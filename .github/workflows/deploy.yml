@@ -78,7 +78,7 @@ jobs:
         tar -czf deploy.tar.gz deploy/
         
     - name: Deploy to VPS
-      uses: appleboy/scp-action@master
+      uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.VPS_HOST }}
         username: ${{ secrets.VPS_USER }}
@@ -88,7 +88,7 @@ jobs:
         target: "/home/${{ secrets.VPS_USER }}/deployments"
         
     - name: Execute deployment script on VPS
-      uses: appleboy/ssh-action@master
+      uses: appleboy/ssh-action@v1.2.0
       with:
         host: ${{ secrets.VPS_HOST }}
         username: ${{ secrets.VPS_USER }}
@@ -127,7 +127,8 @@ jobs:
           else
             echo "❌ No production server/.env found."
             echo "   One-time on VPS: place your env at $ENV_CANONICAL, or run one successful deploy so manufacturing-app/server/.env exists (it is copied from the rotated backup next time)."
-            echo "   Include DB_*, PORT, NODE_ENV, and optional EXTERNAL_API_BASE_URL / EXTERNAL_API_BEARER_TOKEN."
+            echo "   Include DB_*, PORT, NODE_ENV, JWT_SECRET, ADMIN_PASSWORD, PRODUCTION_PASSWORD,"
+            echo "   and optional EXTERNAL_API_BASE_URL / EXTERNAL_API_BEARER_TOKEN / CORS_ORIGIN."
             exit 1
           fi
           
@@ -143,13 +144,18 @@ jobs:
           
           mkdir -p logs
           
-          # Delete existing process if exists
+          # Remove legacy single-process / old names
           pm2 delete manufacturing-app 2>/dev/null || true
+          pm2 delete manufacturing-app-worker 2>/dev/null || true
           
-          # Start application with PM2
-          # Use cluster mode with 2 instances for load balancing
-          echo "🚀 Starting application with PM2 (2 instances)..."
-          pm2 start index.js --name manufacturing-app --instances 2 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+          echo "🚀 Starting production web + worker via ecosystem.config.js..."
+          if [ -f ecosystem.config.js ]; then
+            pm2 start ecosystem.config.js --only manufacturing-app --update-env
+            pm2 start ecosystem.config.js --only manufacturing-app-worker --update-env
+          else
+            echo "❌ ecosystem.config.js missing"
+            exit 1
+          fi
           
           # Verify PM2 process started
           echo "⏳ Waiting 2 seconds for PM2 to register process..."
@@ -159,14 +165,15 @@ jobs:
           pm2 status
           
           # Check if process is running
-          if pm2 list | grep -q "manufacturing-app"; then
-            echo "✅ PM2 process 'manufacturing-app' is registered"
+          if pm2 list | grep -q "manufacturing-app" && pm2 list | grep -q "manufacturing-app-worker"; then
+            echo "✅ PM2 processes manufacturing-app and manufacturing-app-worker are registered"
           else
-            echo "❌ ERROR: PM2 process 'manufacturing-app' NOT found!"
+            echo "❌ ERROR: Expected PM2 processes not found!"
             echo "📋 PM2 list output:"
             pm2 list
             echo "📋 PM2 logs:"
             pm2 logs manufacturing-app --lines 20 --nostream || true
+            pm2 logs manufacturing-app-worker --lines 20 --nostream || true
             exit 1
           fi
           
@@ -192,7 +199,7 @@ jobs:
           
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             HEALTH_CHECK=$(curl -s http://localhost:$PROD_PORT/health || echo "failed")
-            if echo "$HEALTH_CHECK" | grep -q "healthy"; then
+            if echo "$HEALTH_CHECK" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
               echo "✅ PRODUCTION health check PASSED!"
               HEALTH_CHECK_PASSED=true
               break
@@ -214,10 +221,16 @@ jobs:
             if [ -n "$LATEST_BACKUP" ]; then
               echo "📦 Rolling back to: $LATEST_BACKUP"
               pm2 delete manufacturing-app 2>/dev/null || true
+              pm2 delete manufacturing-app-worker 2>/dev/null || true
               rm -rf manufacturing-app
               cp -r "$LATEST_BACKUP" manufacturing-app
               cd manufacturing-app/server
-              pm2 start index.js --name manufacturing-app --instances 2 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+              if [ -f ecosystem.config.js ]; then
+                pm2 start ecosystem.config.js --only manufacturing-app --update-env
+                pm2 start ecosystem.config.js --only manufacturing-app-worker --update-env
+              else
+                pm2 start index.js --name manufacturing-app --instances 2 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+              fi
               pm2 save
               echo "✅ Rollback completed. Please check the application manually."
             else

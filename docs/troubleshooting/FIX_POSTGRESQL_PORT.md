@@ -27,7 +27,7 @@ DB_PORT=5433
 
 Lalu test:
 ```bash
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ### Option 2: Ubah PostgreSQL ke Port 5432
@@ -84,7 +84,7 @@ cat .env | grep DB_PORT
 
 ```bash
 # Test dengan port 5433
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## ✅ Checklist
@@ -105,7 +105,7 @@ cd ~/deployments/manufacturing-app/server
 echo "DB_PORT=5433" >> .env
 
 # Test
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ---

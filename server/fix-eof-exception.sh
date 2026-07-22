@@ -2,13 +2,14 @@
 
 # Script untuk fix EOFException / Connection reset issues
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "🔧 Fix EOFException / Connection Reset Issues"
 echo "=============================================="
 echo ""
 
 DB_NAME="manufacturing_db"
 DB_USER="it_foom"
-DB_PASSWORD="FOOMIT"
 DB_PORT="5433"
 
 # Step 1: Check PostgreSQL status

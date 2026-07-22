@@ -39,7 +39,7 @@ echo ""
 echo "📋 Testing endpoints..."
 echo "   Testing /health:"
 HEALTH_RESPONSE=$(curl -s http://localhost:1234/health || echo "ERROR")
-if echo "$HEALTH_RESPONSE" | grep -q "healthy"; then
+if echo "$HEALTH_RESPONSE" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo "   ✅ Backend /health: OK"
 else
     echo "   ⚠️  Backend /health: $HEALTH_RESPONSE"
@@ -48,7 +48,7 @@ fi
 echo ""
 echo "   Testing /api/health via Nginx (HTTP):"
 API_HEALTH_HTTP=$(curl -s http://mpr.moof-set.web.id/api/health 2>/dev/null || echo "ERROR")
-if echo "$API_HEALTH_HTTP" | grep -q "healthy"; then
+if echo "$API_HEALTH_HTTP" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo "   ✅ Nginx /api/health (HTTP): OK"
     echo "   Response: $(echo $API_HEALTH_HTTP | head -c 100)..."
 else
@@ -58,7 +58,7 @@ fi
 echo ""
 echo "   Testing /api/health via Nginx (HTTPS, skip SSL verify):"
 API_HEALTH_HTTPS=$(curl -sk https://mpr.moof-set.web.id/api/health 2>/dev/null || echo "ERROR")
-if echo "$API_HEALTH_HTTPS" | grep -q "healthy"; then
+if echo "$API_HEALTH_HTTPS" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo "   ✅ Nginx /api/health (HTTPS): OK"
     echo "   Response: $(echo $API_HEALTH_HTTPS | head -c 100)..."
 else
@@ -68,7 +68,7 @@ fi
 echo ""
 echo "   Testing /health via Nginx (HTTP):"
 HEALTH_VIA_NGINX_HTTP=$(curl -s http://mpr.moof-set.web.id/health 2>/dev/null || echo "ERROR")
-if echo "$HEALTH_VIA_NGINX_HTTP" | grep -q "healthy"; then
+if echo "$HEALTH_VIA_NGINX_HTTP" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo "   ✅ Nginx /health (HTTP): OK"
 else
     echo "   ⚠️  Nginx /health (HTTP): $HEALTH_VIA_NGINX_HTTP"
@@ -77,7 +77,7 @@ fi
 echo ""
 echo "   Testing /health via Nginx (HTTPS, skip SSL verify):"
 HEALTH_VIA_NGINX_HTTPS=$(curl -sk https://mpr.moof-set.web.id/health 2>/dev/null || echo "ERROR")
-if echo "$HEALTH_VIA_NGINX_HTTPS" | grep -q "healthy"; then
+if echo "$HEALTH_VIA_NGINX_HTTPS" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo "   ✅ Nginx /health (HTTPS): OK"
 else
     echo "   ⚠️  Nginx /health (HTTPS): $HEALTH_VIA_NGINX_HTTPS"

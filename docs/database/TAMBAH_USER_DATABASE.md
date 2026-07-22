@@ -6,7 +6,7 @@ Dokumen ini menjelaskan cara menambahkan user baru untuk mengakses database `man
 
 - **Nama User**: IT FOOM
 - **Username PostgreSQL**: `it_foom` (PostgreSQL tidak mendukung spasi dalam username)
-- **Password**: `FOOMIT`
+- **Password**: `YOUR_DB_PASSWORD`
 - **Database**: `manufacturing_db`
 - **Port**: `5433` ⚠️ **PENTING**: Database ini menggunakan port 5433, bukan port default 5432!
 
@@ -16,7 +16,7 @@ Dokumen ini menjelaskan cara menambahkan user baru untuk mengakses database `man
 
 ### Jika Admin bisa login tapi it_foom tidak bisa
 
-Jika user `admin` bisa login dengan password `Admin123`, tapi `it_foom` tidak bisa, jalankan diagnose script:
+Jika user `admin` bisa login dengan password `YOUR_DB_PASSWORD`, tapi `it_foom` tidak bisa, jalankan diagnose script:
 
 ```bash
 cd ~/deployments/manufacturing-app/server
@@ -28,7 +28,7 @@ chmod +x diagnose-user-access.sh
 
 ```bash
 # 1. Update password dengan method yang sama seperti admin
-sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'FOOMIT';"
+sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';"
 
 # 2. Cek password encryption
 sudo -u postgres psql -c "SHOW password_encryption;"
@@ -40,7 +40,7 @@ sudo -u postgres psql -d manufacturing_db -c "GRANT CONNECT ON DATABASE manufact
 sudo systemctl reload postgresql
 
 # 5. Test koneksi
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user, current_database();"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user, current_database();"
 ```
 
 ### Jika Error "EOFException" atau "Connection reset"
@@ -59,7 +59,7 @@ chmod +x fix-eof-exception.sh
 sudo systemctl restart postgresql
 
 # 2. Test koneksi
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
 ```
 
 ### Jika Error "connection was aborted by the software in your host machine"
@@ -84,7 +84,7 @@ Script ini akan:
 
 ```bash
 # 1. Update password user
-sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'FOOMIT';"
+sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';"
 
 # 2. Fix pg_hba.conf (tambahkan baris jika belum ada)
 PG_HBA_FILE=$(sudo -u postgres psql -t -P format=unaligned -c 'SHOW hba_file;' | xargs)
@@ -94,7 +94,7 @@ echo "host    all             all             127.0.0.1/32            scram-sha-
 sudo systemctl reload postgresql
 
 # 4. Test koneksi
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
 ```
 
 ---
@@ -119,7 +119,7 @@ Setelah masuk ke psql prompt, jalankan perintah berikut:
 
 ```sql
 -- Buat user baru dengan password
-CREATE USER it_foom WITH PASSWORD 'FOOMIT';
+CREATE USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';
 
 -- Berikan hak akses ke database manufacturing_db
 GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO it_foom;
@@ -148,7 +148,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO it_foom;
 
 ```bash
 # Test koneksi dengan user baru (menggunakan port 5433)
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user, current_database();"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user, current_database();"
 ```
 
 Jika berhasil, Anda akan melihat output:
@@ -181,7 +181,7 @@ echo ""
 # Konfigurasi
 DB_NAME="manufacturing_db"
 NEW_USER="it_foom"
-NEW_PASSWORD="FOOMIT"
+NEW_PASSWORD="YOUR_DB_PASSWORD"
 
 echo "📋 Informasi User:"
 echo "   Username: $NEW_USER"
@@ -286,10 +286,10 @@ Buat file SQL untuk dijalankan:
 DO $$
 BEGIN
     IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'it_foom') THEN
-        ALTER USER it_foom WITH PASSWORD 'FOOMIT';
+        ALTER USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';
         RAISE NOTICE 'User it_foom already exists, password updated';
     ELSE
-        CREATE USER it_foom WITH PASSWORD 'FOOMIT';
+        CREATE USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';
         RAISE NOTICE 'User it_foom created';
     END IF;
 END
@@ -350,13 +350,13 @@ Output yang diharapkan:
 ### 2. Test Koneksi dengan Password
 
 ```bash
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user, current_database(), version();"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user, current_database(), version();"
 ```
 
 ### 3. Test Query Data
 
 ```bash
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT COUNT(*) FROM production_liquid;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT COUNT(*) FROM production_liquid;"
 ```
 
 ### 4. Cek Privileges
@@ -388,7 +388,7 @@ Host: localhost (atau 127.0.0.1)
 Port: 5433 ⚠️ PENTING: Jangan gunakan 5432!
 Database: manufacturing_db
 Username: it_foom
-Password: FOOMIT
+Password: YOUR_DB_PASSWORD
 ```
 
 **Driver Properties Tab:**
@@ -469,13 +469,13 @@ sudo -u postgres psql -c "SHOW listen_addresses;"
 **D. Test dengan psql dari komputer yang sama:**
 ```bash
 # Test dari komputer yang sama dengan DBeaver
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
 ```
 
 **E. Gunakan Connection String Langsung:**
 Di DBeaver, coba gunakan connection string:
 ```
-jdbc:postgresql://localhost:5433/manufacturing_db?user=it_foom&password=FOOMIT&connectTimeout=30&socketTimeout=60
+jdbc:postgresql://localhost:5433/manufacturing_db?user=it_foom&password=YOUR_DB_PASSWORD&connectTimeout=30&socketTimeout=60
 ```
 
 **F. Cek DBeaver Logs:**
@@ -507,7 +507,7 @@ Host: localhost (atau ProductionDashboard jika remote)
 Port: 5433
 Maintenance database: postgres
 Username: it_foom
-Password: FOOMIT
+Password: YOUR_DB_PASSWORD
 ```
 
 **Advanced Settings:**
@@ -526,7 +526,7 @@ DB_HOST=localhost
 DB_PORT=5433
 DB_NAME=manufacturing_db
 DB_USER=it_foom
-DB_PASSWORD=FOOMIT
+DB_PASSWORD=YOUR_DB_PASSWORD
 ```
 
 **Catatan**: Jika menggunakan Unix socket (untuk performa lebih baik), gunakan:
@@ -621,7 +621,7 @@ host    all             all             127.0.0.1/32            md5
 sudo -u postgres psql -c "SHOW password_encryption;"
 
 # Jika menggunakan scram-sha-256, pastikan user password sudah di-update
-sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'FOOMIT';"
+sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';"
 ```
 
 3. **Reload PostgreSQL setelah perubahan:**
@@ -649,7 +649,7 @@ sudo ufw status | grep 5433
 6. **Test dengan psql langsung:**
 ```bash
 # Test dengan verbose untuk melihat error detail
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -v ON_ERROR_STOP=1 -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -v ON_ERROR_STOP=1 -c "SELECT 1;"
 ```
 
 **Alternatif: Gunakan Unix Socket (Recommended untuk localhost)**
@@ -668,7 +668,7 @@ DB_HOST=/var/run/postgresql
 
 ### Issue 2: "Admin bisa login tapi it_foom tidak bisa"
 
-**Masalah:** User `admin` bisa login dengan password `Admin123`, tapi user `it_foom` tidak bisa login dengan password `FOOMIT`.
+**Masalah:** User `admin` bisa login dengan password `YOUR_DB_PASSWORD`, tapi user `it_foom` tidak bisa login dengan password `YOUR_DB_PASSWORD`.
 
 **Diagnosis:**
 ```bash
@@ -689,7 +689,7 @@ sudo -u postgres psql -c "SHOW password_encryption;"
 1. **Update password dengan method yang sama:**
 ```bash
 # Pastikan menggunakan encryption method yang sama dengan admin
-sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'FOOMIT';"
+sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';"
 ```
 
 2. **Pastikan CONNECT privilege diberikan:**
@@ -708,19 +708,19 @@ sudo grep -E "admin|it_foom" "$PG_HBA_FILE"
 ```bash
 # Force password update
 sudo -u postgres psql << 'EOF'
-ALTER USER it_foom WITH PASSWORD 'FOOMIT';
+ALTER USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';
 \password it_foom
 EOF
-# Ketik: FOOMIT (2x)
+# Ketik: YOUR_DB_PASSWORD (2x)
 ```
 
 5. **Coba dengan metode yang sama seperti admin:**
 ```bash
 # Lihat bagaimana admin login
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT current_user;" -v ON_ERROR_STOP=1
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT current_user;" -v ON_ERROR_STOP=1
 
 # Coba login it_foom dengan cara yang sama
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user;" -v ON_ERROR_STOP=1
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT current_user;" -v ON_ERROR_STOP=1
 ```
 
 6. **Gunakan Unix socket (workaround):**
@@ -818,7 +818,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO it_foom;
 sudo -u postgres psql -c "\du it_foom"
 
 -- Jika tidak ada, buat ulang:
-CREATE USER it_foom WITH PASSWORD 'FOOMIT';
+CREATE USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';
 ```
 
 ### Issue 7: "EOFException" atau "Connection reset by peer"
@@ -863,7 +863,7 @@ sudo systemctl restart postgresql
 
 # Tunggu beberapa detik, lalu test koneksi
 sleep 5
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
 ```
 
 2. **Cek max_connections dan tingkatkan jika perlu:**
@@ -913,7 +913,7 @@ sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity
 6. **Test dengan connection string yang lebih robust:**
 ```bash
 # Test dengan timeout yang lebih panjang
-PGPASSWORD=FOOMIT psql "host=localhost port=5433 dbname=manufacturing_db user=it_foom password=FOOMIT connect_timeout=10" -c "SELECT current_user, current_database();"
+PGPASSWORD=YOUR_DB_PASSWORD psql "host=localhost port=5433 dbname=manufacturing_db user=it_foom password=YOUR_DB_PASSWORD connect_timeout=10" -c "SELECT current_user, current_database();"
 ```
 
 7. **Gunakan connection pooling (untuk aplikasi):**
@@ -925,7 +925,7 @@ const pool = new Pool({
   port: 5433,
   database: 'manufacturing_db',
   user: 'it_foom',
-  password: 'FOOMIT',
+  password: 'YOUR_DB_PASSWORD',
   max: 20, // Maximum pool size
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
@@ -967,7 +967,7 @@ sudo -u postgres psql -d manufacturing_db -c "SET ROLE it_foom; SELECT current_u
 
 3. **Gunakan connection string dengan parameter:**
    ```
-   host=localhost port=5433 dbname=manufacturing_db user=it_foom password=FOOMIT connect_timeout=30
+   host=localhost port=5433 dbname=manufacturing_db user=it_foom password=YOUR_DB_PASSWORD connect_timeout=30
    ```
 
 **Quick Fix:**
@@ -975,7 +975,7 @@ sudo -u postgres psql -d manufacturing_db -c "SET ROLE it_foom; SELECT current_u
 # Restart PostgreSQL dan test
 sudo systemctl restart postgresql
 sleep 5
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
 ```
 
 ### Issue 8: "database does not exist"
@@ -995,7 +995,7 @@ sudo -u postgres psql -c "CREATE DATABASE manufacturing_db OWNER admin;"
 
 ```bash
 # Buat user baru
-sudo -u postgres psql -c "CREATE USER it_foom WITH PASSWORD 'FOOMIT';"
+sudo -u postgres psql -c "CREATE USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';"
 
 # Berikan hak akses
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO it_foom;"
@@ -1003,13 +1003,13 @@ sudo -u postgres psql -d manufacturing_db -c "GRANT ALL ON SCHEMA public TO it_f
 sudo -u postgres psql -d manufacturing_db -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO it_foom;"
 
 # Test koneksi
-PGPASSWORD=FOOMIT psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U it_foom -d manufacturing_db -c "SELECT 1;"
 
 # Hapus user (jika perlu)
 sudo -u postgres psql -c "DROP USER IF EXISTS it_foom;"
 
 # Update password
-sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'FOOMIT';"
+sudo -u postgres psql -c "ALTER USER it_foom WITH PASSWORD 'YOUR_DB_PASSWORD';"
 
 # Cek user privileges
 sudo -u postgres psql -d manufacturing_db -c "\du it_foom"
@@ -1052,14 +1052,14 @@ sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'YOUR_PASSWORD_HERE'
 ### User `admin` (Application User)
 
 - **Username:** `admin`
-- **Password:** `Admin123`
+- **Password:** `YOUR_DB_PASSWORD`
 - **Database:** `manufacturing_db`
 - **Port:** `5433`
 
 ### User `it_foom` (IT FOOM User)
 
 - **Username:** `it_foom`
-- **Password:** `FOOMIT`
+- **Password:** `YOUR_DB_PASSWORD`
 - **Database:** `manufacturing_db`
 - **Port:** `5433`
 
@@ -1093,4 +1093,4 @@ Setelah menambahkan user, pastikan:
 **Dibuat**: $(date)
 **Database**: manufacturing_db
 **User**: it_foom (IT FOOM)
-**Password**: FOOMIT
+**Password**: YOUR_DB_PASSWORD

@@ -115,7 +115,7 @@ Ini akan menampilkan:
    DB_HOST=localhost
    DB_PORT=5432
    DB_USER=admin
-   DB_PASSWORD=Admin123
+   DB_PASSWORD=YOUR_DB_PASSWORD
    ```
 
 2. **Restart server** (stop dengan Ctrl+C, lalu `npm run dev` lagi)

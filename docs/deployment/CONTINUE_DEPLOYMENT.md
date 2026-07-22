@@ -9,8 +9,8 @@ Setelah PostgreSQL sudah fix, lanjutkan deployment dengan langkah-langkah beriku
 Pastikan sudah selesai:
 - [x] PostgreSQL running di port 5433
 - [x] Database `manufacturing_db` exists
-- [x] User `admin` exists dengan password `Admin123`
-- [x] Connection test berhasil: `PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"`
+- [x] User `admin` exists dengan password `YOUR_DB_PASSWORD`
+- [x] Connection test berhasil: `PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"`
 - [x] .env file sudah dikonfigurasi dengan `DB_PORT=5433`
 
 ---
@@ -30,7 +30,7 @@ cat .env | grep DB_
 # DB_PORT=5433
 # DB_NAME=manufacturing_db
 # DB_USER=admin
-# DB_PASSWORD=Admin123
+# DB_PASSWORD=YOUR_DB_PASSWORD
 ```
 
 Jika belum ada atau salah, update:
@@ -48,7 +48,7 @@ DB_HOST=localhost
 DB_PORT=5433
 DB_NAME=manufacturing_db
 DB_USER=admin
-DB_PASSWORD=Admin123
+DB_PASSWORD=YOUR_DB_PASSWORD
 DB_POOL_MAX=20
 DB_IDLE_TIMEOUT=30000
 DB_CONNECTION_TIMEOUT=2000
@@ -69,7 +69,7 @@ node test-postgresql-connection.js
 
 Jika belum ada script, test manual:
 ```bash
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT current_user, current_database();"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT current_user, current_database();"
 ```
 
 ### Step 3: Migrasi Database SQLite ke PostgreSQL
@@ -101,9 +101,9 @@ cd ~/deployments/manufacturing-app/server
 node check-data.js
 
 # Atau manual
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT COUNT(*) FROM production_liquid;"
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT COUNT(*) FROM production_device;"
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT COUNT(*) FROM production_cartridge;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT COUNT(*) FROM production_liquid;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT COUNT(*) FROM production_device;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT COUNT(*) FROM production_cartridge;"
 ```
 
 ### Step 5: Build Client (Frontend)
@@ -250,7 +250,7 @@ ls -la ~/deployments/manufacturing-app/client/build
 sudo systemctl status postgresql
 
 # Test connection
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
 
 # Cek .env
 cat ~/deployments/manufacturing-app/server/.env | grep DB_
@@ -317,11 +317,11 @@ DB_HOST=localhost
 DB_PORT=5433
 DB_NAME=manufacturing_db
 DB_USER=admin
-DB_PASSWORD=Admin123
+DB_PASSWORD=YOUR_DB_PASSWORD
 EOF
 
 # 2. Test connection
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
 
 # 3. Stop app
 pm2 stop manufacturing-app || true

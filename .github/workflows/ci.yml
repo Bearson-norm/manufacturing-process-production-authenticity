@@ -17,87 +17,53 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-      
+      uses: actions/checkout@v4
+
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: package-lock.json
-        
+        cache-dependency-path: |
+          package-lock.json
+          client/package-lock.json
+          server/package-lock.json
+
     - name: Install root dependencies
-      run: npm install
-      
+      run: npm ci
+
     - name: Install client dependencies
-      run: |
-        cd client
-        npm install
-        
+      run: cd client && npm ci
+
     - name: Install server dependencies
-      run: |
-        if [ -d "server" ]; then
-          cd server
-          npm install
-        else
-          echo "⚠️  Server directory not found, skipping server dependencies"
-        fi
-        
-    - name: Check for linting errors (client)
-      run: |
-        if [ -d "client" ]; then
-          cd client
-          npm run build --dry-run || echo "Build check completed"
-        else
-          echo "⚠️  Client directory not found"
-          exit 1
-        fi
-      continue-on-error: true
-      
-    - name: Verify server dependencies
-      run: |
-        if [ -d "server" ]; then
-          cd server
-          node -e "console.log('Server dependencies verified')"
-          npm list --depth=0
-        else
-          echo "⚠️  Server directory not found, skipping verification"
-        fi
-        
-    - name: Test build (client)
-      run: |
-        cd client
-        npm run build
-        
-    - name: Check server startup (syntax check)
-      run: |
-        if [ -d "server" ] && [ -f "server/index.js" ]; then
-          cd server
-          node -c index.js
-          echo "✅ Server syntax check passed"
-        else
-          echo "⚠️  Server directory or index.js not found, skipping syntax check"
-        fi
-        
+      run: cd server && npm ci
+
+    - name: Server unit tests
+      run: cd server && npm test
+      env:
+        NODE_ENV: development
+        JWT_SECRET: ci-test-jwt-secret
+        ADMIN_PASSWORD: ci-admin-pass
+        PRODUCTION_PASSWORD: ci-prod-pass
+
+    - name: Server npm audit (high+)
+      run: cd server && npm audit --omit=dev --audit-level=high
+
+    - name: Client unit tests
+      run: cd client && npm test -- --watchAll=false
+      env:
+        CI: true
+
+    - name: Client build
+      run: cd client && npm run build
+
+    - name: Server syntax check
+      run: cd server && node --check index.js && node --check app.js
+
     - name: Verify health endpoint exists
       run: |
-        if [ -f "server/app.js" ]; then
-          if grep -q "app.get('/health'" server/app.js || grep -q 'app.get("/health"' server/app.js; then
-            echo "✅ Health endpoint found in server/app.js"
-          else
-            echo "⚠️  Health endpoint might be missing in server/app.js"
-            exit 1
-          fi
-        elif [ -f "server/index.js" ]; then
-          if grep -q "app.get('/health'" server/index.js || grep -q 'app.get("/health"' server/index.js; then
-            echo "✅ Health endpoint found in server/index.js"
-          else
-            echo "⚠️  Health endpoint might be missing"
-            exit 1
-          fi
-        else
-          echo "⚠️  server/app.js and server/index.js not found, skipping health endpoint check"
-        fi
+        grep -q "app.get('/health'" server/app.js
+        echo "✅ Health endpoint found in server/app.js"

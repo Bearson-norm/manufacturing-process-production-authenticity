@@ -56,7 +56,7 @@ else
 fi
 
 # Test connection
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔄 Complete Fix Script
@@ -90,7 +90,7 @@ echo "DB_PORT=5433" >> .env.tmp
 mv .env.tmp .env
 
 # Test
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ### Option 2: Fix Port 5432
@@ -155,7 +155,7 @@ cd ~/deployments/manufacturing-app/server
 sed -i 's/^DB_PORT=.*/DB_PORT=5433/' .env || echo "DB_PORT=5433" >> .env
 
 # 3. Test
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ---

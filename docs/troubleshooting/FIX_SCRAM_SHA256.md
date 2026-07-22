@@ -15,7 +15,7 @@ host    all             all             127.0.0.1/32            scram-sha-256
 
 ```bash
 # Password akan otomatis di-hash dengan scram-sha-256
-sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';"
+sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';"
 ```
 
 ### Step 2: Reload PostgreSQL
@@ -28,7 +28,7 @@ sudo systemctl reload postgresql
 
 ```bash
 # Test dengan TCP/IP (scram-sha-256)
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔄 Alternatif: Gunakan Unix Socket (Peer Auth)
@@ -82,7 +82,7 @@ sudo bash fix-postgresql-scram.sh
 
 1. **Pastikan password sudah di-set**:
    ```bash
-   sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';"
+   sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';"
    ```
 
 2. **Reload PostgreSQL**:
@@ -125,7 +125,7 @@ const pool = new Pool({
 
 ## ✅ Checklist
 
-- [ ] Password sudah di-set: `ALTER USER admin WITH PASSWORD 'Admin123';`
+- [ ] Password sudah di-set: `ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';`
 - [ ] PostgreSQL sudah reload: `sudo systemctl reload postgresql`
 - [ ] Test connection berhasil
 - [ ] .env file sudah benar
@@ -135,13 +135,13 @@ const pool = new Pool({
 
 ```bash
 # Fix password
-sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';"
+sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';"
 
 # Reload
 sudo systemctl reload postgresql
 
 # Test TCP/IP
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 
 # Test Unix socket
 sudo -u postgres psql -d manufacturing_db -c "SET ROLE admin; SELECT 1;"

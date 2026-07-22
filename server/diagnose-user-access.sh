@@ -2,15 +2,16 @@
 
 # Script untuk diagnose perbedaan antara user admin dan it_foom
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "🔍 Diagnose User Access Issue"
 echo "=============================="
 echo ""
 
 DB_NAME="manufacturing_db"
 DB_USER="it_foom"
-DB_PASSWORD="FOOMIT"
 ADMIN_USER="admin"
-ADMIN_PASSWORD="Admin123"
+ADMIN_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
 DB_PORT="5433"
 
 echo "📋 Configuration:"

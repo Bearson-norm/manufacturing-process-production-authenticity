@@ -13,7 +13,7 @@ Schema di script migrasi tidak sesuai dengan data SQLite.
 ```bash
 cd ~/deployments/manufacturing-app/server
 
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
     -- Add quantity column if not exists
     ALTER TABLE production_results ADD COLUMN IF NOT EXISTS quantity REAL;
     
@@ -44,7 +44,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     
     # 1. Fix table schema
     echo "Fixing table schema..."
-    PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
+    PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
         ALTER TABLE production_results ADD COLUMN IF NOT EXISTS quantity REAL;
         ALTER TABLE production_results ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 PSQL
@@ -60,7 +60,7 @@ ENDSSH
 ### 1. Add Columns
 
 ```bash
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
     ALTER TABLE production_results ADD COLUMN IF NOT EXISTS quantity REAL;
     ALTER TABLE production_results ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 PSQL
@@ -72,7 +72,7 @@ PSQL
 cd ~/deployments/manufacturing-app/server
 
 # Clear existing
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "DELETE FROM production_results;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "DELETE FROM production_results;"
 
 # Re-run migration for production_results only
 node -e "
@@ -87,7 +87,7 @@ const pool = new Pool({
   port: 5433,
   database: 'manufacturing_db',
   user: 'admin',
-  password: 'Admin123',
+  password: 'YOUR_DB_PASSWORD',
 });
 
 sqliteDb.all('SELECT * FROM production_results', [], async (err, rows) => {
@@ -123,13 +123,13 @@ sqliteDb.all('SELECT * FROM production_results', [], async (err, rows) => {
 
 ```bash
 # Cek jumlah data
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT COUNT(*) FROM production_results;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT COUNT(*) FROM production_results;"
 
 # Cek schema
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "\d production_results"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "\d production_results"
 
 # Cek data sample
-PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT id, mo_number, sku_name, quantity FROM production_results LIMIT 5;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT id, mo_number, sku_name, quantity FROM production_results LIMIT 5;"
 ```
 
 ---

@@ -6,7 +6,7 @@
 ```bash
 docker run --name manufacturing-postgres \
   -e POSTGRES_USER=admin \
-  -e POSTGRES_PASSWORD=Admin123 \
+  -e POSTGRES_PASSWORD=YOUR_DB_PASSWORD \
   -e POSTGRES_DB=manufacturing_db \
   -p 5432:5432 \
   -d postgres:15
@@ -21,7 +21,7 @@ docker ps
 
 # Setelah install, buat database:
 psql -U postgres
-CREATE USER admin WITH PASSWORD 'Admin123';
+CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
 CREATE DATABASE manufacturing_db OWNER admin;
 \c manufacturing_db
 GRANT ALL ON SCHEMA public TO admin;
@@ -73,7 +73,7 @@ npm run test:db     # Test database connection
 - **Port**: 5432
 - **Database**: manufacturing_db
 - **User**: admin
-- **Password**: Admin123
+- **Password**: YOUR_DB_PASSWORD
 
 ## Files
 

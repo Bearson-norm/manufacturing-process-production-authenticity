@@ -84,7 +84,7 @@ fi
 echo ""
 echo -e "${YELLOW}5️⃣ Testing health endpoint...${NC}"
 HEALTH_RESPONSE=$(curl -s http://localhost:$STAGING_PORT/health 2>/dev/null || echo "failed")
-if echo "$HEALTH_RESPONSE" | grep -q "healthy"; then
+if echo "$HEALTH_RESPONSE" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo -e "   ${GREEN}✅ Health check passed${NC}"
     echo -e "   ${GRAY}Response: $HEALTH_RESPONSE${NC}"
 else
@@ -200,7 +200,7 @@ if ! sudo netstat -tlnp 2>/dev/null | grep -q ":$STAGING_PORT "; then
     echo ""
 fi
 
-if ! echo "$HEALTH_RESPONSE" | grep -q "healthy"; then
+if ! echo "$HEALTH_RESPONSE" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     ISSUES_FOUND=$((ISSUES_FOUND + 1))
     echo -e "${RED}❌ Issue $ISSUES_FOUND: Health check failing${NC}"
     echo -e "   ${GRAY}Fix:${NC}"
@@ -297,7 +297,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}Health Check:${NC}"
     sleep 2
     HEALTH_RESPONSE=$(curl -s http://localhost:$STAGING_PORT/health 2>/dev/null || echo "failed")
-    if echo "$HEALTH_RESPONSE" | grep -q "healthy"; then
+    if echo "$HEALTH_RESPONSE" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
         echo -e "   ${GREEN}✅ Health check: PASSED${NC}"
         echo -e "   ${GRAY}$HEALTH_RESPONSE${NC}"
     else

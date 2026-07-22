@@ -3,6 +3,8 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Fix PostgreSQL Restart Issue"
 echo "=========================================="
@@ -12,7 +14,7 @@ echo ""
 if [ "$EUID" -ne 0 ]; then 
     echo "⚠️  This script needs sudo privileges"
     echo "Running with sudo..."
-    sudo bash "$0"
+    sudo DB_PASSWORD="$DB_PASSWORD" bash "$0"
     exit $?
 fi
 
@@ -77,11 +79,11 @@ if sudo systemctl is-active --quiet postgresql; then
         
         echo ""
         echo "🔄 Step 6: Testing connection..."
-        PGPASSWORD=Admin123 psql -h localhost -p 5432 -U admin -d manufacturing_db -c "SELECT 1;" 2>&1 && {
+        PGPASSWORD="$DB_PASSWORD" psql -h localhost -p 5432 -U admin -d manufacturing_db -c "SELECT 1;" 2>&1 && {
             echo "   ✅ Connection successful!"
         } || {
             echo "   ⚠️  Connection failed, but PostgreSQL is running"
-            echo "   Try: PGPASSWORD=Admin123 psql -h localhost -p $ACTUAL_PORT -U admin -d manufacturing_db -c \"SELECT 1;\""
+            echo "   Try: PGPASSWORD=\"\$DB_PASSWORD\" psql -h localhost -p $ACTUAL_PORT -U admin -d manufacturing_db -c \"SELECT 1;\""
         }
     else
         echo "   ⚠️  Port is $ACTUAL_PORT (not 5432)"

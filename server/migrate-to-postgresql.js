@@ -1,3 +1,10 @@
+require('dotenv').config();
+
+if (!process.env.DB_PASSWORD) {
+  console.error('Error: DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 const sqlite3 = require('sqlite3').verbose();
 const { Pool } = require('pg');
 const path = require('path');
@@ -8,11 +15,11 @@ const sqliteDbPath = path.join(__dirname, 'database.sqlite');
 
 // PostgreSQL connection
 const pgConfig = {
-  host: 'localhost',
-  port: 5432,
-  database: 'manufacturing_db',
-  user: 'admin',
-  password: 'Admin123',
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '5432', 10),
+  database: process.env.DB_NAME || 'manufacturing_db',
+  user: process.env.DB_USER || 'admin',
+  password: process.env.DB_PASSWORD,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,

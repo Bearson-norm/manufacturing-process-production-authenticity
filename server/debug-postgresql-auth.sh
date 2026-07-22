@@ -3,6 +3,9 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+NEW_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "PostgreSQL Authentication Debug & Fix"
 echo "=========================================="
@@ -12,7 +15,7 @@ echo ""
 if [ "$EUID" -ne 0 ]; then 
     echo "⚠️  This script needs sudo privileges"
     echo "Running with sudo..."
-    sudo bash "$0"
+    sudo DB_PASSWORD="$DB_PASSWORD" bash "$0"
     exit $?
 fi
 
@@ -71,7 +74,7 @@ fi
 echo ""
 
 echo "🔄 Step 5: Recreating user with fresh md5 password..."
-sudo -u postgres psql << 'PSQL'
+sudo -u postgres psql <<PSQL
     -- Reassign ownership
     \c manufacturing_db
     REASSIGN OWNED BY admin TO postgres;
@@ -85,7 +88,7 @@ sudo -u postgres psql << 'PSQL'
     DROP USER IF EXISTS admin;
     
     -- Create fresh user (will use md5 if password_encryption is md5)
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD '${NEW_PASSWORD}';
     
     -- Grant privileges
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
@@ -132,7 +135,7 @@ sudo -u postgres psql -d manufacturing_db -c "SELECT current_user, current_datab
 
 echo ""
 echo "   Test 2: As admin via TCP/IP with password..."
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 | head -3 && {
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 | head -3 && {
     echo "   ✅ Connection successful!"
 } || {
     echo "   ❌ FAILED"

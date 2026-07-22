@@ -92,7 +92,7 @@ fi
 echo ""
 echo "   Testing API health:"
 HEALTH_RESPONSE=$(curl -s https://mpr.moof-set.web.id/api/health || echo "ERROR")
-if echo "$HEALTH_RESPONSE" | grep -q "healthy"; then
+if echo "$HEALTH_RESPONSE" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo "   ✅ API health: OK"
     echo "   Response: $(echo $HEALTH_RESPONSE | head -c 100)..."
 else

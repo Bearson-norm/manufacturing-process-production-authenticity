@@ -9,21 +9,16 @@
     "client": "cd client && npm start",
     "install-all": "npm install && cd client && npm install && cd .. && cd server && npm install",
     "build": "cd client && npm run build",
-    "build:server": "cd server && npm install --production",
-    "start": "cd server && node index.js"
+    "build:server": "cd server && npm install --omit=dev",
+    "start": "cd server && node index.js",
+    "test": "cd server && npm test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "sqlite3": "^5.1.6",
-    "body-parser": "^1.20.2"
-  },
+  "dependencies": {},
   "devDependencies": {
     "nodemon": "^3.0.1",
     "concurrently": "^8.2.2"
   }
 }
-

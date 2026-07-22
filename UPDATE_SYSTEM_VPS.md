@@ -77,7 +77,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     TIMESTAMP=$(date +%Y%m%d-%H%M%S)
     
     # Backup PostgreSQL
-    PGPASSWORD=Admin123 pg_dump -h localhost -p 5433 -U admin manufacturing_db > \
+    PGPASSWORD=YOUR_DB_PASSWORD pg_dump -h localhost -p 5433 -U admin manufacturing_db > \
         ~/backups/manufacturing-app/postgresql-backup-$TIMESTAMP.sql
     
     echo "✅ Backup created: postgresql-backup-$TIMESTAMP.sql"

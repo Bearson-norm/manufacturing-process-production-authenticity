@@ -4,7 +4,7 @@
 
 Sistem Anda telah berhasil **dimigrasi dari SQLite ke PostgreSQL** dengan kredensial:
 - **User**: admin
-- **Password**: Admin123
+- **Password**: YOUR_DB_PASSWORD
 - **Database**: manufacturing_db
 - **Host**: localhost
 - **Port**: 5432
@@ -94,7 +94,7 @@ CREATE TABLE production_liquid (
 **Atau gunakan Docker:**
 ```bash
 docker run --name manufacturing-postgres \
-  -e POSTGRES_PASSWORD=Admin123 \
+  -e POSTGRES_PASSWORD=YOUR_DB_PASSWORD \
   -e POSTGRES_USER=admin \
   -e POSTGRES_DB=manufacturing_db \
   -p 5432:5432 \
@@ -108,7 +108,7 @@ docker run --name manufacturing-postgres \
 psql -U postgres
 
 -- Buat user jika belum ada
-CREATE USER admin WITH PASSWORD 'Admin123';
+CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
 
 -- Buat database
 CREATE DATABASE manufacturing_db OWNER admin;
@@ -144,7 +144,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=manufacturing_db
 DB_USER=admin
-DB_PASSWORD=Admin123
+DB_PASSWORD=YOUR_DB_PASSWORD
 
 # Server settings
 PORT=1234

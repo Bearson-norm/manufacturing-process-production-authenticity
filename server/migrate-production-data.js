@@ -6,6 +6,11 @@ const fs = require('fs');
 
 require('dotenv').config();
 
+if (!process.env.DB_PASSWORD) {
+  console.error('Error: DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 // SQLite database path
 const sqliteDbPath = path.join(__dirname, 'database.sqlite');
 
@@ -15,7 +20,7 @@ const pgConfig = {
   port: parseInt(process.env.DB_PORT || '5432', 10),
   database: process.env.DB_NAME || 'manufacturing_db',
   user: process.env.DB_USER || 'admin',
-  password: process.env.DB_PASSWORD || 'Admin123',
+  password: process.env.DB_PASSWORD,
   max: 20,
 };
 

@@ -105,7 +105,7 @@ Jika ingin fix di level database (lebih permanent):
 
 ```bash
 ssh foom@103.31.39.189 << 'ENDSSH'
-    PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
+    PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db << 'PSQL'
         -- Backup data
         CREATE TABLE odoo_mo_cache_backup AS SELECT * FROM odoo_mo_cache;
         

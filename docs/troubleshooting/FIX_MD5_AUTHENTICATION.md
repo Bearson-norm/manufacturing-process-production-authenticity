@@ -48,7 +48,7 @@ sudo -u postgres psql << 'PSQL'
     DROP USER IF EXISTS admin;
     
     -- Create fresh user (akan menggunakan md5)
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     
     -- Grant privileges
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
@@ -75,7 +75,7 @@ sudo systemctl restart postgresql
 ### Step 5: Test Connection
 
 ```bash
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔄 Complete Script
@@ -109,7 +109,7 @@ sudo -u postgres psql << 'PSQL'
     \c postgres
     ALTER DATABASE manufacturing_db OWNER TO postgres;
     DROP USER IF EXISTS admin;
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
     ALTER DATABASE manufacturing_db OWNER TO admin;
     \c manufacturing_db
@@ -122,7 +122,7 @@ PSQL
 sudo systemctl restart postgresql
 
 # 5. Test
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ## 🔍 Verifikasi

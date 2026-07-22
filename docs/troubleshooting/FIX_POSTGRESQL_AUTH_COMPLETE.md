@@ -23,7 +23,7 @@ Kemungkinan penyebab:
 cd ~/deployments/manufacturing-app/server
 
 # Fix password
-sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';"
+sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';"
 
 # Reload PostgreSQL (tanpa restart)
 sudo systemctl reload postgresql
@@ -75,7 +75,7 @@ sudo systemctl reload postgresql
 
 ```bash
 # Test dengan PGPASSWORD
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 
 # Atau test via Unix socket (peer auth)
 sudo -u postgres psql -d manufacturing_db -c "SET ROLE admin; SELECT 1;"
@@ -113,7 +113,7 @@ Atau update aplikasi untuk connect via Unix socket tanpa password (jika di local
 
 ## 📋 Checklist
 
-- [ ] Password sudah di-update: `ALTER USER admin WITH PASSWORD 'Admin123';`
+- [ ] Password sudah di-update: `ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';`
 - [ ] PostgreSQL sudah reload: `sudo systemctl reload postgresql`
 - [ ] pg_hba.conf sudah benar (md5 untuk localhost)
 - [ ] Test connection berhasil
@@ -133,7 +133,7 @@ sudo systemctl restart postgresql
 # Drop dan recreate user
 sudo -u postgres psql << 'PSQL'
     DROP USER IF EXISTS admin;
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
     \c manufacturing_db
     GRANT ALL ON SCHEMA public TO admin;
@@ -165,13 +165,13 @@ SELECT 1;
 
 ```bash
 # Fix password
-sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';"
+sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';"
 
 # Reload
 sudo systemctl reload postgresql
 
 # Test
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 Jika masih gagal, cek pg_hba.conf dan pastikan menggunakan md5 authentication.

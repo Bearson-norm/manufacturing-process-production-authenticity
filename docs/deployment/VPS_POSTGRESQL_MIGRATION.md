@@ -67,7 +67,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: admin
-      POSTGRES_PASSWORD: Admin123
+      POSTGRES_PASSWORD: YOUR_DB_PASSWORD
       POSTGRES_DB: manufacturing_db
     ports:
       - "5432:5432"
@@ -98,7 +98,7 @@ sudo docker logs manufacturing-postgres
 sudo -u postgres psql
 
 # Di dalam psql prompt:
-CREATE USER admin WITH PASSWORD 'Admin123';
+CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
 CREATE DATABASE manufacturing_db OWNER admin;
 \c manufacturing_db
 GRANT ALL ON SCHEMA public TO admin;
@@ -176,7 +176,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=manufacturing_db
 DB_USER=admin
-DB_PASSWORD=Admin123
+DB_PASSWORD=YOUR_DB_PASSWORD
 DB_POOL_MAX=20
 DB_IDLE_TIMEOUT=30000
 DB_CONNECTION_TIMEOUT=2000

@@ -4,6 +4,9 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+NEW_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Fix PostgreSQL Password (scram-sha-256)"
 echo "=========================================="
@@ -13,16 +16,16 @@ echo ""
 if [ "$EUID" -ne 0 ]; then 
     echo "⚠️  This script needs sudo privileges"
     echo "Running with sudo..."
-    sudo bash "$0"
+    sudo DB_PASSWORD="$DB_PASSWORD" bash "$0"
     exit $?
 fi
 
 echo "🔄 Step 1: Setting password for scram-sha-256..."
 
 # Update password (PostgreSQL akan otomatis hash dengan scram-sha-256)
-sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';" 2>/dev/null || {
+sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD '$NEW_PASSWORD';" 2>/dev/null || {
     echo "   Creating user 'admin'..."
-    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'Admin123';"
+    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD '$NEW_PASSWORD';"
 }
 
 echo "   ✅ Password set"
@@ -58,7 +61,7 @@ echo "🔄 Step 5: Testing connection..."
 
 # Test 1: Via TCP/IP dengan scram-sha-256
 echo "   Test 1: TCP/IP connection (scram-sha-256)..."
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -U admin -d manufacturing_db -c "SELECT current_user, current_database();" 2>&1 && {
     echo "   ✅ TCP/IP connection: OK"
 } || {
     echo "   ❌ TCP/IP connection: FAILED"

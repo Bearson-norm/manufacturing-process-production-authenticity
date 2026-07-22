@@ -106,6 +106,8 @@ function ProductionLiquid() {
     authenticityNumbers: ['']
   });
   const [savedData, setSavedData] = useState([]);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState('');
   const [bufferDataMap, setBufferDataMap] = useState({});
   const [rejectDataMap, setRejectDataMap] = useState({});
   const [moList, setMoList] = useState([]);
@@ -234,6 +236,7 @@ function ProductionLiquid() {
     try {
       const response = await axios.get('/api/production/liquid');
       setSavedData(response.data);
+      setDataError('');
       
       // Fetch buffer data for all MO Numbers
       const moNumbers = new Set();
@@ -258,6 +261,18 @@ function ProductionLiquid() {
       setRejectDataMap(rejectMap);
     } catch (error) {
       console.error('Error fetching data:', error);
+      const status = error.response?.status;
+      if (status === 401) {
+        setDataError('Sesi berakhir. Silakan login kembali.');
+      } else if (status === 503) {
+        setDataError('Layanan sementara tidak tersedia. Coba lagi nanti.');
+      } else if (error.request && !error.response) {
+        setDataError('Tidak dapat terhubung ke server.');
+      } else {
+        setDataError(error.response?.data?.error || 'Gagal memuat data produksi.');
+      }
+    } finally {
+      setDataLoading(false);
     }
   };
 
@@ -1760,6 +1775,12 @@ function ProductionLiquid() {
       </div>
 
       <div className="production-content">
+        {dataLoading && (
+          <p style={{ textAlign: 'center', color: '#64748b', marginBottom: '12px' }}>Memuat data...</p>
+        )}
+        {dataError && (
+          <div className="error-message" style={{ marginBottom: '12px', textAlign: 'center' }}>{dataError}</div>
+        )}
         {!manufacturingStarted ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
             <button onClick={handleStartManufacturing} className="start-button">

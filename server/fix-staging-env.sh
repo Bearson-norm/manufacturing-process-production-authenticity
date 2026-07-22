@@ -3,6 +3,8 @@
 # Script to fix staging .env file with correct database credentials
 # Run this on the VPS in the staging deployment directory
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+
 STAGING_DIR="/home/$(whoami)/deployments/manufacturing-app-staging/server"
 
 if [ ! -d "$STAGING_DIR" ]; then
@@ -31,7 +33,7 @@ grep -q "^DB_HOST=" .env 2>/dev/null && sed -i 's/^DB_HOST=.*/DB_HOST=localhost/
 grep -q "^DB_PORT=" .env 2>/dev/null && sed -i 's/^DB_PORT=.*/DB_PORT=5433/' .env || echo "DB_PORT=5433" >> .env
 grep -q "^DB_NAME=" .env 2>/dev/null && sed -i 's/^DB_NAME=.*/DB_NAME=manufacturing_db/' .env || echo "DB_NAME=manufacturing_db" >> .env
 grep -q "^DB_USER=" .env 2>/dev/null && sed -i 's/^DB_USER=.*/DB_USER=admin/' .env || echo "DB_USER=admin" >> .env
-grep -q "^DB_PASSWORD=" .env 2>/dev/null && sed -i 's/^DB_PASSWORD=.*/DB_PASSWORD=Admin123/' .env || echo "DB_PASSWORD=Admin123" >> .env
+grep -q "^DB_PASSWORD=" .env 2>/dev/null && sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env || echo "DB_PASSWORD=$DB_PASSWORD" >> .env
 
 echo "✅ .env file updated"
 echo ""

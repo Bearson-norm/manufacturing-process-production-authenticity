@@ -18,7 +18,7 @@ sudo bash fix-postgresql-password.sh
 ```
 
 Script ini akan:
-- ✅ Reset password user `admin` menjadi `Admin123`
+- ✅ Reset password user `admin` menjadi `YOUR_DB_PASSWORD`
 - ✅ Pastikan database `manufacturing_db` ada
 - ✅ Grant semua privileges
 - ✅ Test connection
@@ -31,7 +31,7 @@ Script ini akan:
 
 ```bash
 sudo -u postgres psql << 'PSQL'
-    ALTER USER admin WITH PASSWORD 'Admin123';
+    ALTER USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     \c manufacturing_db
     GRANT ALL ON SCHEMA public TO admin;
     GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO admin;
@@ -52,7 +52,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=manufacturing_db
 DB_USER=admin
-DB_PASSWORD=Admin123
+DB_PASSWORD=YOUR_DB_PASSWORD
 ```
 
 Jika tidak ada, tambahkan:
@@ -61,7 +61,7 @@ echo "DB_HOST=localhost" >> .env
 echo "DB_PORT=5432" >> .env
 echo "DB_NAME=manufacturing_db" >> .env
 echo "DB_USER=admin" >> .env
-echo "DB_PASSWORD=Admin123" >> .env
+echo "DB_PASSWORD=YOUR_DB_PASSWORD" >> .env
 ```
 
 ### 3. Test Connection
@@ -73,7 +73,7 @@ node test-postgresql-connection.js
 
 Atau manual:
 ```bash
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
+PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"
 ```
 
 ### 4. Run Migration
@@ -105,7 +105,7 @@ rsync -av /var/www/manufacturing-process-production-authenticity/server/*.sh \
 
 ```bash
 sudo -u postgres psql << 'PSQL'
-    CREATE USER admin WITH PASSWORD 'Admin123';
+    CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
     CREATE DATABASE manufacturing_db OWNER admin;
     GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
     \c manufacturing_db
@@ -138,7 +138,7 @@ PSQL
 ## ✅ Checklist
 
 - [ ] PostgreSQL running (`sudo systemctl status postgresql`)
-- [ ] User `admin` exists dan password = `Admin123`
+- [ ] User `admin` exists dan password = `YOUR_DB_PASSWORD`
 - [ ] Database `manufacturing_db` exists
 - [ ] .env file sudah benar
 - [ ] Connection test berhasil

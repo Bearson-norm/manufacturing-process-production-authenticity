@@ -1,6 +1,12 @@
 // Fix production_results table - add missing columns and re-migrate
 
 require('dotenv').config();
+
+if (!process.env.DB_PASSWORD) {
+  console.error('Error: DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 const sqlite3 = require('sqlite3').verbose();
 const { Pool } = require('pg');
 const path = require('path');
@@ -11,7 +17,7 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5433', 10),
   database: process.env.DB_NAME || 'manufacturing_db',
   user: process.env.DB_USER || 'admin',
-  password: process.env.DB_PASSWORD || 'Admin123',
+  password: process.env.DB_PASSWORD,
 });
 
 async function fixAndRemigrate() {

@@ -3,6 +3,8 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Setup Dependencies & Test PostgreSQL"
 echo "=========================================="
@@ -49,7 +51,7 @@ fi
 grep -q "^DB_HOST" .env || echo "DB_HOST=localhost" >> .env
 grep -q "^DB_NAME" .env || echo "DB_NAME=manufacturing_db" >> .env
 grep -q "^DB_USER" .env || echo "DB_USER=admin" >> .env
-grep -q "^DB_PASSWORD" .env || echo "DB_PASSWORD=Admin123" >> .env
+grep -q "^DB_PASSWORD" .env || echo "DB_PASSWORD=$DB_PASSWORD" >> .env
 
 echo "   ✅ .env file configured"
 echo ""
@@ -63,7 +65,7 @@ if [ -f test-postgresql-connection.js ]; then
 else
     echo "   ⚠️  test-postgresql-connection.js not found"
     echo "   Testing manually with psql..."
-    PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT current_user, current_database();" && {
+    PGPASSWORD="$DB_PASSWORD" psql -h localhost -p 5433 -U admin -d manufacturing_db -c "SELECT current_user, current_database();" && {
         echo "   ✅ Connection successful!"
     } || {
         echo "   ❌ Connection failed"

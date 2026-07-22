@@ -69,7 +69,7 @@ ENDSSH
 ### 2. Test PostgreSQL Connection
 
 ```bash
-ssh foom@103.31.39.189 "PGPASSWORD=Admin123 psql -h localhost -p 5433 -U admin -d manufacturing_db -c 'SELECT 1;'"
+ssh foom@103.31.39.189 "PGPASSWORD=YOUR_DB_PASSWORD psql -h localhost -p 5433 -U admin -d manufacturing_db -c 'SELECT 1;'"
 ```
 
 ### 3. Stop Aplikasi
@@ -119,7 +119,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     sudo systemctl enable postgresql
     
     sudo -u postgres psql << 'PSQL'
-        CREATE USER admin WITH PASSWORD 'Admin123';
+        CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
         CREATE DATABASE manufacturing_db OWNER admin;
         GRANT ALL PRIVILEGES ON DATABASE manufacturing_db TO admin;
         \c manufacturing_db

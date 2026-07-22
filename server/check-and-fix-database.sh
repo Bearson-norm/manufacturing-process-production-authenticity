@@ -3,6 +3,9 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+NEW_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "=========================================="
 echo "Check and Fix PostgreSQL Database"
 echo "=========================================="
@@ -57,10 +60,10 @@ USER_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='
 if [ "$USER_EXISTS" = "1" ]; then
     echo "   ✅ User 'admin' exists"
     echo "   Updating password..."
-    sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD 'Admin123';"
+    sudo -u postgres psql -c "ALTER USER admin WITH PASSWORD '$NEW_PASSWORD';"
 else
     echo "   Creating user 'admin'..."
-    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'Admin123';"
+    sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD '$NEW_PASSWORD';"
 fi
 
 echo ""
@@ -91,7 +94,7 @@ sudo -u postgres psql -d manufacturing_db -c "SELECT current_database(), current
 
 echo ""
 echo "Test 2: As admin user via TCP/IP..."
-PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT current_database(), current_user;" 2>&1 && {
+PGPASSWORD="$DB_PASSWORD" psql -h localhost -U admin -d manufacturing_db -c "SELECT current_database(), current_user;" 2>&1 && {
     echo "   ✅ OK"
 } || {
     echo "   ❌ FAILED"

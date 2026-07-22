@@ -7,6 +7,11 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+if (!process.env.DB_PASSWORD) {
+  console.error('Error: DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 // SQLite database path (di VPS)
 const sqliteDbPath = path.join(__dirname, 'database.sqlite');
 
@@ -17,7 +22,7 @@ const pgConfig = {
   port: parseInt(process.env.DB_PORT || '5432', 10),
   database: process.env.DB_NAME || 'manufacturing_db',
   user: process.env.DB_USER || 'admin',
-  password: process.env.DB_PASSWORD || 'Admin123',
+  password: process.env.DB_PASSWORD,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000, // Increased timeout
@@ -198,7 +203,7 @@ async function migrate() {
     console.error('      bash fix-postgresql-password.sh');
     console.error('');
     console.error('   3. Test connection manually:');
-    console.error('      PGPASSWORD=Admin123 psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"');
+    console.error('      PGPASSWORD=$DB_PASSWORD psql -h localhost -U admin -d manufacturing_db -c "SELECT 1;"');
     console.error('');
     console.error('   4. Check .env file:');
     console.error('      cat ~/deployments/manufacturing-app/server/.env | grep DB_');

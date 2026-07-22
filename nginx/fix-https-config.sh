@@ -100,7 +100,7 @@ echo ""
 echo "📋 Testing endpoints..."
 echo "   Testing HTTPS /api/health (skip SSL verify):"
 API_HEALTH=$(curl -sk https://mpr.moof-set.web.id/api/health 2>/dev/null || echo "ERROR")
-if echo "$API_HEALTH" | grep -q "healthy"; then
+if echo "$API_HEALTH" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo "   ✅ HTTPS /api/health: OK"
     echo "   Response: $(echo $API_HEALTH | head -c 80)..."
 else
@@ -110,7 +110,7 @@ fi
 echo ""
 echo "   Testing HTTPS /health (skip SSL verify):"
 HEALTH=$(curl -sk https://mpr.moof-set.web.id/health 2>/dev/null || echo "ERROR")
-if echo "$HEALTH" | grep -q "healthy"; then
+if echo "$HEALTH" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
     echo "   ✅ HTTPS /health: OK"
     echo "   Response: $(echo $HEALTH | head -c 80)..."
 else

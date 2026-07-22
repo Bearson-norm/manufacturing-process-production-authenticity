@@ -84,7 +84,7 @@ jobs:
         tar -czf deploy.tar.gz deploy/
         
     - name: Deploy to Staging VPS
-      uses: appleboy/scp-action@master
+      uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.VPS_HOST }}
         username: ${{ secrets.VPS_USER }}
@@ -94,7 +94,7 @@ jobs:
         target: "/home/${{ secrets.VPS_USER }}/deployments"
         
     - name: Execute staging deployment script on VPS
-      uses: appleboy/ssh-action@master
+      uses: appleboy/ssh-action@v1.2.0
       with:
         host: ${{ secrets.VPS_HOST }}
         username: ${{ secrets.VPS_USER }}
@@ -263,23 +263,24 @@ jobs:
           echo "🔄 Restarting staging application with PM2..."
           cd "$STAGING_DIR/server"
           
-          # Delete existing process if exists
-          pm2 delete manufacturing-app-staging 2>/dev/null || echo "No existing staging process to delete"
+          # Delete existing staging processes
+          pm2 delete manufacturing-app-staging 2>/dev/null || echo "No existing staging web to delete"
+          pm2 delete manufacturing-app-staging-worker 2>/dev/null || echo "No existing staging worker to delete"
           
           # Verify current directory and files
           echo "📋 Current directory: $(pwd)"
           echo "📋 Files in server directory:"
           ls -la
           
-          # Start application with PM2
-          echo "🚀 Starting application..."
+          # Start staging web + worker from ecosystem
+          echo "🚀 Starting staging web + worker..."
           if [ -f ecosystem.config.js ]; then
-            echo "📋 Using ecosystem.config.js (staging config)"
-            # Use --only to start only the staging app from ecosystem file
+            echo "📋 Using ecosystem.config.js (staging web + worker)"
             pm2 start ecosystem.config.js --only manufacturing-app-staging --update-env
+            pm2 start ecosystem.config.js --only manufacturing-app-staging-worker --update-env
           else
-            echo "📋 Using direct start with index.js"
-            pm2 start index.js --name manufacturing-app-staging --instances 1 --cwd "$STAGING_DIR/server" --env NODE_ENV=staging --env PORT=$STAGING_PORT
+            echo "❌ ecosystem.config.js missing"
+            exit 1
           fi
           
           # Verify PM2 process started
@@ -290,14 +291,15 @@ jobs:
           pm2 status
           
           # Check if process is running
-          if pm2 list | grep -q "manufacturing-app-staging"; then
-            echo "✅ PM2 process 'manufacturing-app-staging' is registered"
+          if pm2 list | grep -q "manufacturing-app-staging" && pm2 list | grep -q "manufacturing-app-staging-worker"; then
+            echo "✅ PM2 staging web and worker are registered"
           else
-            echo "❌ ERROR: PM2 process 'manufacturing-app-staging' NOT found!"
+            echo "❌ ERROR: Expected staging PM2 processes NOT found!"
             echo "📋 PM2 list output:"
             pm2 list
             echo "📋 PM2 logs:"
             pm2 logs manufacturing-app-staging --lines 20 --nostream || true
+            pm2 logs manufacturing-app-staging-worker --lines 20 --nostream || true
             exit 1
           fi
           
@@ -307,14 +309,28 @@ jobs:
           # Wait a bit for app to start
           sleep 5
           
-          # Health check
+          # Health check — REQUIRED (fail closed)
           echo "🏥 Checking staging health..."
-          HEALTH_CHECK=$(curl -s http://localhost:$STAGING_PORT/health || echo "failed")
-          if echo "$HEALTH_CHECK" | grep -q "healthy"; then
-            echo "✅ Staging health check passed!"
-          else
-            echo "⚠️  Staging health check failed, but continuing..."
-            echo "Response: $HEALTH_CHECK"
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          HEALTH_CHECK_PASSED=false
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HEALTH_CHECK=$(curl -s http://localhost:$STAGING_PORT/health || echo "failed")
+            if echo "$HEALTH_CHECK" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+              echo "✅ Staging health check passed!"
+              HEALTH_CHECK_PASSED=true
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "⏳ Health check attempt $RETRY_COUNT/$MAX_RETRIES failed..."
+              echo "   Response: $HEALTH_CHECK"
+              sleep 3
+            fi
+          done
+          if [ "$HEALTH_CHECK_PASSED" = false ]; then
+            echo "❌ CRITICAL: Staging health check FAILED after $MAX_RETRIES attempts!"
+            pm2 logs manufacturing-app-staging --lines 40 --nostream || true
+            exit 1
           fi
           
           # Setup nginx config for staging

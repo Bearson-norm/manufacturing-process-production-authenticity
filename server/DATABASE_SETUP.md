@@ -19,7 +19,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=manufacturing_db
 DB_USER=admin
-DB_PASSWORD=Admin123
+DB_PASSWORD=YOUR_DB_PASSWORD
 ```
 
 ### Default Configuration
@@ -32,7 +32,7 @@ database: {
   port: 5432,
   database: 'manufacturing_db',  // Default database name
   user: 'admin',
-  password: 'Admin123',
+  password: 'YOUR_DB_PASSWORD',
 }
 ```
 

@@ -38,7 +38,7 @@ Aplikasi Manufacturing Process telah berhasil dimigrasi dari **SQLite** ke **Pos
 #### Option A: Docker (Tercepat)
 ```bash
 # 1. Start PostgreSQL
-docker run --name postgres -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=Admin123 \
+docker run --name postgres -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=YOUR_DB_PASSWORD \
   -e POSTGRES_DB=manufacturing_db -p 5432:5432 -d postgres:15
 
 # 2. Install dependencies
@@ -61,7 +61,7 @@ npm start
 ```bash
 # 1. Create database
 psql -U postgres
-CREATE USER admin WITH PASSWORD 'Admin123';
+CREATE USER admin WITH PASSWORD 'YOUR_DB_PASSWORD';
 CREATE DATABASE manufacturing_db OWNER admin;
 \q
 
@@ -331,14 +331,14 @@ pm2 restart manufacturing-server
 - Port: 5432
 - Database: manufacturing_db
 - User: admin
-- Password: Admin123
+- Password: YOUR_DB_PASSWORD
 
 ### Production (VPS)
 - Host: localhost (internal)
 - Port: 5432
 - Database: manufacturing_db
 - User: admin
-- Password: Admin123 (⚠️ Ganti di production!)
+- Password: YOUR_DB_PASSWORD (⚠️ Ganti di production!)
 
 ---
 

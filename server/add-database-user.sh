@@ -5,6 +5,9 @@
 
 set -e
 
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+NEW_PASSWORD="${DB_PASSWORD:?DB_PASSWORD is required}"
+
 echo "🔧 Menambahkan User Database PostgreSQL"
 echo "========================================"
 echo ""
@@ -12,7 +15,6 @@ echo ""
 # Konfigurasi
 DB_NAME="manufacturing_db"
 NEW_USER="it_foom"
-NEW_PASSWORD="FOOMIT"
 
 echo "📋 Informasi User:"
 echo "   Username: $NEW_USER"

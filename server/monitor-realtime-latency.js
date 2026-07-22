@@ -7,6 +7,14 @@ const { Pool } = require('pg');
 const https = require('https');
 const config = require('./config');
 const fs = require('fs');
+require('dotenv').config();
+
+if (!process.env.DB_PASSWORD) {
+  console.error('Error: DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
+const dbPassword = process.env.DB_PASSWORD;
 
 const tableName = process.argv[2] || 'production_combined';
 const monitorDuration = parseInt(process.argv[3] || '300', 10); // Default 5 menit
@@ -38,7 +46,7 @@ function createDatabasePool() {
     port: parseInt(process.env.DB_PORT || config.database.port || '5432', 10),
     database: process.env.DB_NAME || config.database.database || 'manufacturing_db',
     user: process.env.DB_USER || config.database.user || 'admin',
-    password: process.env.DB_PASSWORD || config.database.password || 'Admin123'
+    password: dbPassword
   };
   
   console.log('📋 Database Configuration:');
@@ -268,7 +276,7 @@ async function monitorNewData() {
         port: parseInt(process.env.DB_PORT || config.database.port || '5432', 10),
         database: process.env.DB_NAME || config.database.database || 'manufacturing_db',
         user: process.env.DB_USER || config.database.user || 'admin',
-        password: process.env.DB_PASSWORD || config.database.password || 'Admin123'
+        password: dbPassword
       };
       
       // Try port 5433

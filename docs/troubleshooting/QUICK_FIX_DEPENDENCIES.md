@@ -50,7 +50,7 @@ ssh foom@103.31.39.189 << 'ENDSSH'
     grep -q "^DB_HOST" .env || echo "DB_HOST=localhost" >> .env
     grep -q "^DB_NAME" .env || echo "DB_NAME=manufacturing_db" >> .env
     grep -q "^DB_USER" .env || echo "DB_USER=admin" >> .env
-    grep -q "^DB_PASSWORD" .env || echo "DB_PASSWORD=Admin123" >> .env
+    grep -q "^DB_PASSWORD" .env || echo "DB_PASSWORD=YOUR_DB_PASSWORD" >> .env
     
     # 4. Verify .env
     echo ""
