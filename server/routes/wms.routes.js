@@ -11,6 +11,11 @@ const {
   createWmsAccuracySummaryPdfStream,
   buildExportFilename
 } = require('../utils/wms-accuracy-pdf.utils');
+const {
+  buildCartonsExportFilename,
+  buildWmsCartonsWorkbook,
+  writeWorkbookToBuffer
+} = require('../utils/wms-cartons-excel.utils');
 const { compareProductionQtyToWms } = require('../utils/wms-production-compare.utils');
 
 function parsePagination(query) {
@@ -521,6 +526,39 @@ router.get('/cartons', async (req, res) => {
   } catch (error) {
     console.error('GET /api/wms/cartons:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/wms/cartons/export — Excel export of all cartons + QR for one MO
+router.get('/cartons/export', async (req, res) => {
+  try {
+    const moNumber = (req.query.mo_number || req.query.moNumber || '').trim();
+    if (!moNumber) {
+      return res.status(400).json({ success: false, error: 'mo_number is required' });
+    }
+
+    const cartons = await getAllCartonsWithQrByMo(moNumber);
+    if (cartons.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Belum ada data WMS untuk MO ini.'
+      });
+    }
+
+    const filename = buildCartonsExportFilename(moNumber);
+    const workbook = buildWmsCartonsWorkbook({ moNumber, cartons });
+    const buffer = await writeWorkbookToBuffer(workbook);
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(Buffer.from(buffer));
+  } catch (error) {
+    console.error('GET /api/wms/cartons/export:', error);
+    res.status(500).json({ success: false, error: error.message || 'Export Excel gagal' });
   }
 });
 

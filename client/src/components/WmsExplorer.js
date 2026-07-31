@@ -66,6 +66,7 @@ function WmsExplorer() {
   const [activeMo, setActiveMo] = useState(searchParams.get('mo') || '');
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [downloadingExport, setDownloadingExport] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
 
   const [compare, setCompare] = useState(null);
@@ -282,6 +283,69 @@ function WmsExplorer() {
     }
   };
 
+  const handleDownloadExcel = async () => {
+    if (!activeMo) {
+      setMessage({ type: 'error', text: 'Cari MO terlebih dahulu' });
+      return;
+    }
+
+    setDownloadingExport(true);
+    setMessage({ type: '', text: '' });
+
+    try {
+      const response = await axios.get('/api/wms/cartons/export', {
+        params: { mo_number: activeMo },
+        responseType: 'blob',
+        timeout: 0
+      });
+
+      const contentType = response.headers['content-type'] || '';
+      if (contentType.includes('application/json')) {
+        const text = await response.data.text();
+        const parsed = JSON.parse(text);
+        setMessage({ type: 'error', text: parsed.error || 'Gagal mengunduh Excel' });
+        return;
+      }
+
+      const disposition = response.headers['content-disposition'] || '';
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch?.[1] || 'wms-cartons.xlsx';
+
+      const blobUrl = URL.createObjectURL(
+        new Blob([response.data], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        })
+      );
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+
+      setMessage({ type: 'success', text: 'Data WMS berhasil diekspor ke Excel.' });
+    } catch (error) {
+      let errorText = 'Gagal mengunduh Excel';
+
+      if (error.response?.data instanceof Blob) {
+        try {
+          const text = await error.response.data.text();
+          const parsed = JSON.parse(text);
+          errorText = parsed.error || errorText;
+        } catch {
+          // keep default message
+        }
+      } else if (error.response?.data?.error) {
+        errorText = error.response.data.error;
+      }
+
+      setMessage({ type: 'error', text: errorText });
+    } finally {
+      setDownloadingExport(false);
+    }
+  };
+
   const formatMatchedRange = (ranges) => {
     if (!ranges || ranges.length === 0) return '-';
     const r = ranges[0];
@@ -354,10 +418,10 @@ function WmsExplorer() {
           />
         </div>
         <div className="wms-toolbar-actions">
-          <button type="button" className="wms-btn wms-btn-primary" onClick={handleSearch} disabled={loading}>
+          <button type="button" className="wms-btn wms-btn-primary" onClick={handleSearch} disabled={loading || downloadingExport}>
             Cari
           </button>
-          <button type="button" className="wms-btn wms-btn-secondary" onClick={handleSync} disabled={syncing || loading}>
+          <button type="button" className="wms-btn wms-btn-secondary" onClick={handleSync} disabled={syncing || loading || downloadingExport}>
             {syncing ? 'Syncing...' : 'Sync dari WMS'}
           </button>
         </div>
@@ -379,7 +443,17 @@ function WmsExplorer() {
         {/* WMS Panel */}
         <div className="wms-panel">
           <div className="wms-panel-header">
-            <h2>Panel WMS — Repacking Carton</h2>
+            <div className="wms-panel-header-row">
+              <h2>Panel WMS — Repacking Carton</h2>
+              <button
+                type="button"
+                className="wms-btn wms-btn-secondary"
+                onClick={handleDownloadExcel}
+                disabled={!activeMo || wmsTotal === 0 || loading || syncing || downloadingExport}
+              >
+                {downloadingExport ? 'Mengunduh Excel...' : 'Export Excel'}
+              </button>
+            </div>
             <div className="wms-panel-meta">
               {activeMo ? (
                 <>

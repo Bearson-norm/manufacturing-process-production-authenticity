@@ -154,6 +154,18 @@
   background: #0f172a;
 }
 
+.wms-panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.wms-panel-header-row h2 {
+  margin: 0;
+}
+
 .wms-panel-header h2 {
   margin: 0 0 8px;
   color: #e2e8f0;
