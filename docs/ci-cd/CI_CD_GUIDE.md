@@ -5,11 +5,12 @@ Panduan lengkap untuk setup dan menggunakan CI/CD pipeline dengan staging enviro
 ## 📋 Overview
 
 Sistem CI/CD ini menyediakan:
-- ✅ **CI Pipeline**: Automated testing dan linting pada semua branches
-- ✅ **Staging Deployment**: Auto-deploy ke staging environment (port 5678)
+- ✅ **CI Pipeline**: Parallel gates (secret scan, syntax, unit tests, npm audit, client build) on `main`/`master`/`staging`/`develop` and PRs; docs-only changes are skipped
+- ✅ **Staging Deployment**: Auto-deploy ke staging environment (port 3467)
 - ✅ **Production Deployment**: Auto-deploy ke production dengan safety checks (port 1234)
 - ✅ **Health Checks**: Automatic health verification setelah deployment
 - ✅ **Auto Rollback**: Production akan auto-rollback jika health check gagal
+- ✅ **Branch protection**: Require GitHub status check named **`ci`** (aggregate job) before merge
 
 ## 🔄 Workflow Diagram
 
@@ -25,7 +26,7 @@ Sistem CI/CD ini menyediakan:
        │             │
        ├─── staging ─► ┌──────────────────┐
        │             │  Deploy Staging   │
-       │             │  Port: 5678       │
+       │             │  Port: 3467       │
        │             └───────────────────┘
        │
        └─── main ───► ┌──────────────────┐
@@ -43,9 +44,9 @@ Sistem CI/CD ini menyediakan:
 ```
 .github/
 ├── workflows/
-│   ├── ci.yml              # CI pipeline (testing, linting)
-│   ├── deploy-staging.yml  # Staging deployment
-│   └── deploy.yml          # Production deployment (updated with safety)
+│   ├── ci.yml              # CI pipeline (parallel jobs + aggregate ci)
+│   ├── deploy-staging.yml  # Staging deployment (build once + artifact)
+│   └── deploy.yml          # Production deployment (build once + artifact)
 └── scripts/
     └── deploy.sh           # Deployment helper script
 
@@ -105,7 +106,7 @@ Sebelum menggunakan CI/CD, setup GitHub Secrets di repository settings:
 **Auto Deploy**: ✅ Yes (on push)
 
 **Environment**:
-- Port: `5678`
+- Port: `3467`
 - Domain: `staging.mpr.moof-set.web.id` (setelah DNS setup)
 - Directory: `/home/foom/deployments/manufacturing-app-staging`
 - PM2 Name: `manufacturing-app-staging`
@@ -148,37 +149,41 @@ git push origin main
 File: `.github/workflows/ci.yml`
 
 **Triggers**:
-- Push ke semua branches
-- Pull requests ke main/master/staging
+- Push ke `main` / `master` / `staging` / `develop` (skips `**/*.md`, `docs/**`, `LICENSE`)
+- Pull requests ke `main` / `master` / `staging` (same path filters)
+- Concurrency: cancel in-progress runs on the same ref
 
-**Jobs**:
-1. Install dependencies (root, client, server)
-2. Build client
-3. Syntax check server
-4. Verify health endpoint exists
+**Jobs** (parallel, then aggregate):
+1. `instant_gates` — Gitleaks, server syntax check, health route grep
+2. `server` — `npm ci`, unit tests, `npm audit` (high+)
+3. `client` — `npm ci`, `npm audit` (high+), unit tests, CRA build (includes ESLint during build)
+4. `migrate_smoke` — on push to `main`/`master`/`staging` only; apply migrations on ephemeral Postgres
+5. `ci` — aggregate gate (required status check name: **`ci`**)
 
-**Result**: Pass/Fail (tidak deploy, hanya test)
+Node version is pinned via `.nvmrc` (18).
+
+**Result**: Pass/Fail (tidak deploy, hanya verifikasi)
 
 ## 🧪 Staging Deployment Details
 
 File: `.github/workflows/deploy-staging.yml`
 
 **Triggers**:
-- Push ke branch `staging`
+- Push ke branch `staging` (docs/md ignored)
 - Manual workflow dispatch
+- Concurrency: cancel in-progress staging deploys
 
 **Process**:
-1. ✅ Run CI tests
-2. ✅ Build client
-3. ✅ Create deployment package
-4. ✅ Deploy ke VPS staging directory
-5. ✅ Install dependencies
-6. ✅ Setup `.env` dengan port 5678
-7. ✅ Restart PM2 (`manufacturing-app-staging`)
-8. ⚠️ Health check (warning jika gagal, tapi tidak rollback)
+1. ✅ `build_package` once (`npm ci`, client build, pack `deploy.tar.gz`, upload artifact)
+2. ✅ `deploy-staging` downloads artifact (no second build)
+3. ✅ Deploy ke VPS staging directory
+4. ✅ Install production dependencies on VPS
+5. ✅ Setup `.env` dengan port 3467
+6. ✅ Restart PM2 (`manufacturing-app-staging` + worker)
+7. ✅ Health check (fail-closed)
 
 **Access**:
-- Direct: `http://103.31.39.189:5678` (jika port dibuka)
+- Direct: `http://103.31.39.189:3467` (jika port dibuka)
 - Domain: `http://staging.mpr.moof-set.web.id` (setelah DNS setup)
 
 ## 🚀 Production Deployment Details
@@ -186,24 +191,25 @@ File: `.github/workflows/deploy-staging.yml`
 File: `.github/workflows/deploy.yml`
 
 **Triggers**:
-- Push ke branch `main`/`master` (setelah CI pass)
+- Push ke branch `main`/`master` (docs/md ignored)
 - Manual workflow dispatch
+- Concurrency: cancel in-progress production deploys
 
 **Safety Features**:
-1. ✅ **CI Dependency**: Harus menunggu CI tests pass dulu
+1. ✅ **Build once**: `build_package` → artifact → deploy (no duplicate client rebuild)
 2. ✅ **Backup**: Backup deployment yang ada sebelum update
 3. ✅ **Health Check**: Verify health endpoint setelah deploy
 4. ✅ **Auto Rollback**: Jika health check gagal setelah 5 attempts, auto-rollback ke backup sebelumnya
+5. ✅ Prefer requiring branch-protection check **`ci`** so merges to `main` are gated by CI Pipeline
 
 **Process**:
-1. ✅ Wait for CI to pass
-2. ✅ Build client
-3. ✅ Create deployment package
-4. ✅ Backup existing production deployment
-5. ✅ Deploy ke VPS production directory
-6. ✅ Install dependencies
-7. ✅ Restart PM2 (`manufacturing-app`)
-8. ✅ **CRITICAL Health Check**:
+1. ✅ `build_package` (`npm ci`, syntax check, client build, pack artifact)
+2. ✅ Download artifact and SCP to VPS
+3. ✅ Backup existing production deployment
+4. ✅ Deploy ke VPS production directory
+5. ✅ Install dependencies
+6. ✅ Restart PM2 (`manufacturing-app` + worker)
+7. ✅ **CRITICAL Health Check**:
    - Retry 5 times dengan interval 3 seconds
    - Jika semua gagal → Auto rollback ke backup
    - Jika success → Deployment complete
@@ -229,7 +235,7 @@ pm2 logs manufacturing-app-staging  # Staging
 
 # Check ports
 sudo netstat -tlnp | grep 1234  # Production
-sudo netstat -tlnp | grep 5678  # Staging
+sudo netstat -tlnp | grep 3467  # Staging
 ```
 
 ### Check GitHub Actions
@@ -247,7 +253,7 @@ curl http://localhost:1234/health
 curl http://mpr.moof-set.web.id/health
 
 # Staging
-curl http://localhost:5678/health
+curl http://localhost:3467/health
 curl http://staging.mpr.moof-set.web.id/health
 ```
 
@@ -255,7 +261,7 @@ curl http://staging.mpr.moof-set.web.id/health
 
 ### Production Safety
 
-1. **CI Must Pass**: Production deployment hanya jalan jika CI tests pass
+1. **CI Must Pass**: Prefer requiring GitHub status check **`ci`** on protected branches; deploy workflows build once and health-check on the VPS
 2. **Health Check**: Verify aplikasi berjalan dengan benar setelah deploy
 3. **Auto Rollback**: Jika health check gagal, otomatis restore backup
 4. **Backup Retention**: Keep last 5 backups

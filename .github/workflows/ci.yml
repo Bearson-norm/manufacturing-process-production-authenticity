@@ -7,63 +7,180 @@ on:
       - master
       - staging
       - develop
-      - '**'
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
   pull_request:
     branches:
       - main
       - master
       - staging
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  instant_gates:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: |
-          package-lock.json
-          client/package-lock.json
-          server/package-lock.json
+      - name: Secret scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Install root dependencies
-      run: npm ci
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
 
-    - name: Install client dependencies
-      run: cd client && npm ci
+      - name: Server syntax check
+        run: cd server && node --check index.js && node --check app.js
 
-    - name: Install server dependencies
-      run: cd server && npm ci
+      - name: Verify health endpoint exists
+        run: |
+          grep -q "app.get('/health'" server/app.js
+          echo "✅ Health endpoint found in server/app.js"
 
-    - name: Server unit tests
-      run: cd server && npm test
-      env:
-        NODE_ENV: development
-        JWT_SECRET: ci-test-jwt-secret
-        ADMIN_PASSWORD: ci-admin-pass
-        PRODUCTION_PASSWORD: ci-prod-pass
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Server npm audit (high+)
-      run: cd server && npm audit --omit=dev --audit-level=high
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
 
-    - name: Client unit tests
-      run: cd client && npm test -- --watchAll=false
-      env:
-        CI: true
+      - name: Install root dependencies
+        run: npm ci
 
-    - name: Client build
-      run: cd client && npm run build
+      - name: Install server dependencies
+        run: cd server && npm ci
 
-    - name: Server syntax check
-      run: cd server && node --check index.js && node --check app.js
+      - name: Server unit tests
+        run: cd server && npm test
+        env:
+          NODE_ENV: development
+          JWT_SECRET: ci-test-jwt-secret
+          ADMIN_PASSWORD: ci-admin-pass
+          PRODUCTION_PASSWORD: ci-prod-pass
 
-    - name: Verify health endpoint exists
-      run: |
-        grep -q "app.get('/health'" server/app.js
-        echo "✅ Health endpoint found in server/app.js"
+      - name: Server npm audit (high+)
+        run: cd server && npm audit --omit=dev --audit-level=high
+
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install client dependencies
+        run: cd client && npm ci
+
+      - name: Client npm audit (high+)
+        run: cd client && npm audit --omit=dev --audit-level=high
+
+      - name: Client unit tests
+        run: cd client && npm test -- --watchAll=false
+        env:
+          CI: true
+
+      - name: Client build
+        run: cd client && npm run build
+
+  migrate_smoke:
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' ||
+       github.ref == 'refs/heads/master' ||
+       github.ref == 'refs/heads/staging')
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ci_migrate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install server dependencies
+        run: cd server && npm ci
+
+      - name: Run migrations against ephemeral Postgres
+        run: node scripts/ci-migrate-smoke.js
+        working-directory: server
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ci_migrate
+
+  ci:
+    needs: [instant_gates, server, client, migrate_smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate CI status
+        run: |
+          set -euo pipefail
+          echo "instant_gates → ${{ needs.instant_gates.result }}"
+          echo "server → ${{ needs.server.result }}"
+          echo "client → ${{ needs.client.result }}"
+          echo "migrate_smoke → ${{ needs.migrate_smoke.result }}"
+          fail=0
+          [ "${{ needs.instant_gates.result }}" = "success" ] || fail=1
+          [ "${{ needs.server.result }}" = "success" ] || fail=1
+          [ "${{ needs.client.result }}" = "success" ] || fail=1
+          migrate="${{ needs.migrate_smoke.result }}"
+          if [ "$migrate" != "success" ] && [ "$migrate" != "skipped" ]; then
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "❌ One or more required CI jobs failed"
+            exit 1
+          fi
+          echo "✅ All required CI jobs passed"

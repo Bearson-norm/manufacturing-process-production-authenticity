@@ -4,399 +4,397 @@ on:
   push:
     branches:
       - staging
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch:
-    inputs:
-      skip_tests:
-        description: 'Skip tests (not recommended)'
-        required: false
-        default: 'false'
+
+concurrency:
+  group: deploy-staging-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # Quick validation before deployment
-  validate:
+  build_package:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        cache: 'npm'
-        
-    - name: Install dependencies
-      run: |
-        npm install
-        cd client && npm install && cd ..
-        cd server && npm install && cd ..
-        
-    - name: Quick validation
-      run: |
-        echo "🔍 Quick validation before deployment..."
-        cd server && node -c index.js && echo "✅ Server syntax OK"
-        cd ../client && npm run build && echo "✅ Client build OK"
-      continue-on-error: false
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            server/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install client dependencies
+        run: cd client && npm ci
+
+      - name: Install server dependencies
+        run: cd server && npm ci
+
+      - name: Server syntax check
+        run: cd server && node --check index.js && node --check app.js
+
+      - name: Build client
+        run: cd client && npm run build
+
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy
+          cp -r server deploy/
+          cp -r client/build deploy/client-build
+          cp package.json deploy/
+          cp -r .github/scripts deploy/scripts || true
+          if [ -f server/ecosystem.config.js ]; then
+            cp server/ecosystem.config.js deploy/server/
+          fi
+          mkdir -p deploy/nginx
+          if [ -f nginx/manufacturing-app-staging.conf ]; then
+            cp nginx/manufacturing-app-staging.conf deploy/nginx/
+          fi
+          tar -czf deploy.tar.gz deploy/
+
+      - name: Upload deployment package
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-package-staging
+          path: deploy.tar.gz
+          retention-days: 1
 
   deploy-staging:
-    needs: validate
+    needs: build_package
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/staging' || github.event_name == 'workflow_dispatch'
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: package-lock.json
-        
-    - name: Install dependencies
-      run: |
-        npm install
-        cd client && npm install && cd ..
-        cd server && npm install && cd ..
-        
-    - name: Build client
-      run: |
-        cd client
-        npm run build
-        
-    - name: Create deployment package
-      run: |
-        mkdir -p deploy
-        cp -r server deploy/
-        cp -r client/build deploy/client-build
-        cp package.json deploy/
-        cp -r .github/scripts deploy/scripts || true
-        # Ensure ecosystem.config.js is included
-        if [ -f server/ecosystem.config.js ]; then
-          cp server/ecosystem.config.js deploy/server/
-        fi
-        # Copy nginx config for staging
-        mkdir -p deploy/nginx
-        if [ -f nginx/manufacturing-app-staging.conf ]; then
-          cp nginx/manufacturing-app-staging.conf deploy/nginx/
-        fi
-        tar -czf deploy.tar.gz deploy/
-        
-    - name: Deploy to Staging VPS
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USER }}
-        key: ${{ secrets.VPS_SSH_KEY }}
-        port: ${{ secrets.VPS_PORT || 22 }}
-        source: "deploy.tar.gz"
-        target: "/home/${{ secrets.VPS_USER }}/deployments"
-        
-    - name: Execute staging deployment script on VPS
-      uses: appleboy/ssh-action@v1.2.0
-      with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USER }}
-        key: ${{ secrets.VPS_SSH_KEY }}
-        port: ${{ secrets.VPS_PORT || 22 }}
-        script: |
-          set -e
-          
-          STAGING_DIR="/home/${{ secrets.VPS_USER }}/deployments/manufacturing-app-staging"
-          STAGING_PORT=3467
-          STAGING_DB_NAME="Staging_Manufacturing_Order"
-          DB_USER="${{ secrets.STAGING_DB_USER }}"
-          DB_PASSWORD="${{ secrets.STAGING_DB_PASSWORD }}"
-          DB_PORT="${{ secrets.STAGING_DB_PORT }}"
-          DB_USER="${DB_USER:-admin}"
-          DB_PORT="${DB_PORT:-5433}"
-          
-          if [ -z "$DB_PASSWORD" ]; then
-            echo "❌ STAGING_DB_PASSWORD GitHub secret is required"
-            exit 1
-          fi
-          
-          echo "🚀 Starting STAGING deployment..."
-          echo "📍 Staging directory: $STAGING_DIR"
-          echo "📍 Staging port: $STAGING_PORT"
-          echo "📍 Staging database: $STAGING_DB_NAME"
-          
-          cd /home/${{ secrets.VPS_USER }}/deployments
-          tar -xzf deploy.tar.gz
-          
-          # Verify extracted files
-          echo "📋 Checking extracted files..."
-          ls -la deploy/ || echo "⚠️  Deploy directory check"
-          ls -la deploy/server/ || echo "⚠️  Server directory check"
-          
-          BACKUP_NAME=""
-          # Backup existing staging deployment
-          if [ -d "$STAGING_DIR" ]; then
-            echo "📦 Creating staging backup..."
-            BACKUP_NAME="${STAGING_DIR}-backup-$(date +%Y%m%d-%H%M%S)"
-            mv "$STAGING_DIR" "$BACKUP_NAME"
-          fi
-          
-          # Create new staging deployment directory
-          echo "📁 Creating staging directory..."
-          mkdir -p "$STAGING_DIR"
-          mv deploy/* "$STAGING_DIR/"
-          
-          # Verify files moved correctly
-          echo "📋 Verifying deployment files..."
-          if [ ! -d "$STAGING_DIR/server" ]; then
-            echo "❌ ERROR: Server directory not found in $STAGING_DIR"
-            ls -la "$STAGING_DIR/"
-            exit 1
-          fi
-          
-          if [ ! -f "$STAGING_DIR/server/index.js" ]; then
-            echo "❌ ERROR: index.js not found in $STAGING_DIR/server"
-            ls -la "$STAGING_DIR/server/"
-            exit 1
-          fi
-          
-          # Verify client-build exists
-          if [ ! -d "$STAGING_DIR/client-build" ]; then
-            echo "❌ ERROR: client-build directory not found in $STAGING_DIR"
-            ls -la "$STAGING_DIR/"
-            exit 1
-          fi
-          
-          if [ ! -f "$STAGING_DIR/client-build/index.html" ]; then
-            echo "❌ ERROR: index.html not found in $STAGING_DIR/client-build"
-            ls -la "$STAGING_DIR/client-build/" | head -10
-            exit 1
-          fi
-          
-          echo "✅ Client build verified: $(ls -1 $STAGING_DIR/client-build | wc -l) files"
-          
-          # Setup staging database
-          echo "🗄️  Setting up staging database..."
-          export PGPASSWORD="$DB_PASSWORD"
-          
-          # Check if database exists
-          DB_EXISTS=$(psql -h localhost -p $DB_PORT -U "$DB_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$STAGING_DB_NAME'" | grep -q 1 && echo "yes" || echo "no")
-          
-          if [ "$DB_EXISTS" = "no" ]; then
-            # Create database if it doesn't exist
-            echo "   📋 Creating database $STAGING_DB_NAME..."
+      - name: Download deployment package
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-package-staging
+          path: .
+
+      - name: Deploy to Staging VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "deploy.tar.gz"
+          target: "/home/${{ secrets.VPS_USER }}/deployments"
+
+      - name: Execute staging deployment script on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+
+            STAGING_DIR="/home/${{ secrets.VPS_USER }}/deployments/manufacturing-app-staging"
+            STAGING_PORT=3467
+            STAGING_DB_NAME="Staging_Manufacturing_Order"
+            DB_USER="${{ secrets.STAGING_DB_USER }}"
+            DB_PASSWORD="${{ secrets.STAGING_DB_PASSWORD }}"
+            DB_PORT="${{ secrets.STAGING_DB_PORT }}"
+            DB_USER="${DB_USER:-admin}"
+            DB_PORT="${DB_PORT:-5433}"
+
+            if [ -z "$DB_PASSWORD" ]; then
+              echo "❌ STAGING_DB_PASSWORD GitHub secret is required"
+              exit 1
+            fi
+
+            echo "🚀 Starting STAGING deployment..."
+            echo "📍 Staging directory: $STAGING_DIR"
+            echo "📍 Staging port: $STAGING_PORT"
+            echo "📍 Staging database: $STAGING_DB_NAME"
+
+            cd /home/${{ secrets.VPS_USER }}/deployments
+            tar -xzf deploy.tar.gz
+
+            # Verify extracted files
+            echo "📋 Checking extracted files..."
+            ls -la deploy/ || echo "⚠️  Deploy directory check"
+            ls -la deploy/server/ || echo "⚠️  Server directory check"
+
+            BACKUP_NAME=""
+            # Backup existing staging deployment
+            if [ -d "$STAGING_DIR" ]; then
+              echo "📦 Creating staging backup..."
+              BACKUP_NAME="${STAGING_DIR}-backup-$(date +%Y%m%d-%H%M%S)"
+              mv "$STAGING_DIR" "$BACKUP_NAME"
+            fi
+
+            # Create new staging deployment directory
+            echo "📁 Creating staging directory..."
+            mkdir -p "$STAGING_DIR"
+            mv deploy/* "$STAGING_DIR/"
+
+            # Verify files moved correctly
+            echo "📋 Verifying deployment files..."
+            if [ ! -d "$STAGING_DIR/server" ]; then
+              echo "❌ ERROR: Server directory not found in $STAGING_DIR"
+              ls -la "$STAGING_DIR/"
+              exit 1
+            fi
+
+            if [ ! -f "$STAGING_DIR/server/index.js" ]; then
+              echo "❌ ERROR: index.js not found in $STAGING_DIR/server"
+              ls -la "$STAGING_DIR/server/"
+              exit 1
+            fi
+
+            # Verify client-build exists
+            if [ ! -d "$STAGING_DIR/client-build" ]; then
+              echo "❌ ERROR: client-build directory not found in $STAGING_DIR"
+              ls -la "$STAGING_DIR/"
+              exit 1
+            fi
+
+            if [ ! -f "$STAGING_DIR/client-build/index.html" ]; then
+              echo "❌ ERROR: index.html not found in $STAGING_DIR/client-build"
+              ls -la "$STAGING_DIR/client-build/" | head -10
+              exit 1
+            fi
+
+            echo "✅ Client build verified: $(ls -1 $STAGING_DIR/client-build | wc -l) files"
+
+            # Setup staging database
+            echo "🗄️  Setting up staging database..."
+            export PGPASSWORD="$DB_PASSWORD"
+
+            # Check if database exists
+            DB_EXISTS=$(psql -h localhost -p $DB_PORT -U "$DB_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$STAGING_DB_NAME'" | grep -q 1 && echo "yes" || echo "no")
+
+            if [ "$DB_EXISTS" = "no" ]; then
+              # Create database if it doesn't exist
+              echo "   📋 Creating database $STAGING_DB_NAME..."
+              # Try with admin user first, fallback to superuser if needed
+              if ! psql -h localhost -p $DB_PORT -U "$DB_USER" -d postgres -c "CREATE DATABASE \"$STAGING_DB_NAME\";" 2>/dev/null; then
+                echo "   ⚠️  User $DB_USER doesn't have permission to create database"
+                echo "   📋 Using superuser (postgres) to create database..."
+                sudo -u postgres psql -h localhost -p $DB_PORT -d postgres -c "CREATE DATABASE \"$STAGING_DB_NAME\";"
+              fi
+              echo "   ✅ Database $STAGING_DB_NAME created"
+            else
+              echo "   ✅ Database $STAGING_DB_NAME already exists"
+            fi
+
+            # Grant privileges to admin user
+            echo "   🔐 Granting privileges to user $DB_USER..."
             # Try with admin user first, fallback to superuser if needed
-            if ! psql -h localhost -p $DB_PORT -U "$DB_USER" -d postgres -c "CREATE DATABASE \"$STAGING_DB_NAME\";" 2>/dev/null; then
-              echo "   ⚠️  User $DB_USER doesn't have permission to create database"
-              echo "   📋 Using superuser (postgres) to create database..."
-              sudo -u postgres psql -h localhost -p $DB_PORT -d postgres -c "CREATE DATABASE \"$STAGING_DB_NAME\";"
+            if ! psql -h localhost -p $DB_PORT -U "$DB_USER" -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"$STAGING_DB_NAME\" TO \"$DB_USER\";" 2>/dev/null; then
+              echo "   ⚠️  Using superuser to grant privileges..."
+              sudo -u postgres psql -h localhost -p $DB_PORT -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"$STAGING_DB_NAME\" TO \"$DB_USER\";"
             fi
-            echo "   ✅ Database $STAGING_DB_NAME created"
-          else
-            echo "   ✅ Database $STAGING_DB_NAME already exists"
-          fi
-          
-          # Grant privileges to admin user
-          echo "   🔐 Granting privileges to user $DB_USER..."
-          # Try with admin user first, fallback to superuser if needed
-          if ! psql -h localhost -p $DB_PORT -U "$DB_USER" -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"$STAGING_DB_NAME\" TO \"$DB_USER\";" 2>/dev/null; then
-            echo "   ⚠️  Using superuser to grant privileges..."
-            sudo -u postgres psql -h localhost -p $DB_PORT -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"$STAGING_DB_NAME\" TO \"$DB_USER\";"
-          fi
-          
-          # Connect to the database and grant schema privileges
-          echo "   🔐 Granting schema privileges..."
-          psql -h localhost -p $DB_PORT -U "$DB_USER" -d "$STAGING_DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$DB_USER\";" || \
-          sudo -u postgres psql -h localhost -p $DB_PORT -d "$STAGING_DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$DB_USER\";"
-          
-          psql -h localhost -p $DB_PORT -U "$DB_USER" -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"$DB_USER\";" || \
-          sudo -u postgres psql -h localhost -p $DB_PORT -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"$DB_USER\";"
-          
-          psql -h localhost -p $DB_PORT -U "$DB_USER" -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"$DB_USER\";" || \
-          sudo -u postgres psql -h localhost -p $DB_PORT -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"$DB_USER\";"
-          
-          echo "✅ Database setup completed"
-          unset PGPASSWORD
-          
-          # Install/update dependencies
-          echo "📦 Installing staging dependencies..."
-          cd "$STAGING_DIR/server"
-          npm install --production
-          
-          # Restore or require staging .env (never print secret values)
-          ENV_CANONICAL="/home/${{ secrets.VPS_USER }}/deployments/.manufacturing-app-staging.env"
-          if [ -n "$BACKUP_NAME" ] && [ -f "$BACKUP_NAME/server/.env" ]; then
-            echo "📋 Restoring server/.env from previous staging release"
-            cp -f "$BACKUP_NAME/server/.env" .env
-            chmod 600 .env || true
-          elif [ -f "$ENV_CANONICAL" ]; then
-            echo "📋 Using canonical staging env file"
-            cp -f "$ENV_CANONICAL" .env
-            chmod 600 .env || true
-          elif [ ! -f .env ]; then
-            echo "❌ No staging server/.env found."
-            echo "   One-time on VPS: create $ENV_CANONICAL with NODE_ENV=staging, PORT, DB_*, JWT_SECRET, ADMIN_PASSWORD, PRODUCTION_PASSWORD, CORS_ORIGIN."
-            exit 1
-          fi
-          
-          # Ensure critical non-secret keys for staging runtime
-          if grep -q "^PORT=" .env; then
-            sed -i "s/^PORT=.*/PORT=$STAGING_PORT/" .env
-          else
-            echo "PORT=$STAGING_PORT" >> .env
-          fi
-          if grep -q "^NODE_ENV=" .env; then
-            sed -i "s/^NODE_ENV=.*/NODE_ENV=staging/" .env
-          else
-            echo "NODE_ENV=staging" >> .env
-          fi
-          if grep -q "^DB_NAME=" .env; then
-            sed -i "s/^DB_NAME=.*/DB_NAME=$STAGING_DB_NAME/" .env
-          else
-            echo "DB_NAME=$STAGING_DB_NAME" >> .env
-          fi
-          
-          echo "📝 Verifying .env (names only, no values)..."
-          grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env | cut -d= -f1 | sort -u | head -50 || true
-          
-          # Create logs directory
-          mkdir -p logs
-          
-          # Restart staging application with PM2
-          echo "🔄 Restarting staging application with PM2..."
-          cd "$STAGING_DIR/server"
-          
-          # Delete existing staging processes
-          pm2 delete manufacturing-app-staging 2>/dev/null || echo "No existing staging web to delete"
-          pm2 delete manufacturing-app-staging-worker 2>/dev/null || echo "No existing staging worker to delete"
-          
-          # Verify current directory and files
-          echo "📋 Current directory: $(pwd)"
-          echo "📋 Files in server directory:"
-          ls -la
-          
-          # Start staging web + worker from ecosystem
-          echo "🚀 Starting staging web + worker..."
-          if [ -f ecosystem.config.js ]; then
-            echo "📋 Using ecosystem.config.js (staging web + worker)"
-            pm2 start ecosystem.config.js --only manufacturing-app-staging --update-env
-            pm2 start ecosystem.config.js --only manufacturing-app-staging-worker --update-env
-          else
-            echo "❌ ecosystem.config.js missing"
-            exit 1
-          fi
-          
-          # Verify PM2 process started
-          echo "⏳ Waiting 2 seconds for PM2 to register process..."
-          sleep 2
-          
-          echo "📊 PM2 Status:"
-          pm2 status
-          
-          # Check if process is running
-          if pm2 list | grep -q "manufacturing-app-staging" && pm2 list | grep -q "manufacturing-app-staging-worker"; then
-            echo "✅ PM2 staging web and worker are registered"
-          else
-            echo "❌ ERROR: Expected staging PM2 processes NOT found!"
-            echo "📋 PM2 list output:"
-            pm2 list
-            echo "📋 PM2 logs:"
-            pm2 logs manufacturing-app-staging --lines 20 --nostream || true
-            pm2 logs manufacturing-app-staging-worker --lines 20 --nostream || true
-            exit 1
-          fi
-          
-          pm2 save
-          echo "✅ PM2 process saved"
-          
-          # Wait a bit for app to start
-          sleep 5
-          
-          # Health check — REQUIRED (fail closed)
-          echo "🏥 Checking staging health..."
-          MAX_RETRIES=5
-          RETRY_COUNT=0
-          HEALTH_CHECK_PASSED=false
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HEALTH_CHECK=$(curl -s http://localhost:$STAGING_PORT/health || echo "failed")
-            if echo "$HEALTH_CHECK" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
-              echo "✅ Staging health check passed!"
-              HEALTH_CHECK_PASSED=true
-              break
+
+            # Connect to the database and grant schema privileges
+            echo "   🔐 Granting schema privileges..."
+            psql -h localhost -p $DB_PORT -U "$DB_USER" -d "$STAGING_DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$DB_USER\";" || \
+            sudo -u postgres psql -h localhost -p $DB_PORT -d "$STAGING_DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$DB_USER\";"
+
+            psql -h localhost -p $DB_PORT -U "$DB_USER" -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"$DB_USER\";" || \
+            sudo -u postgres psql -h localhost -p $DB_PORT -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"$DB_USER\";"
+
+            psql -h localhost -p $DB_PORT -U "$DB_USER" -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"$DB_USER\";" || \
+            sudo -u postgres psql -h localhost -p $DB_PORT -d "$STAGING_DB_NAME" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"$DB_USER\";"
+
+            echo "✅ Database setup completed"
+            unset PGPASSWORD
+
+            # Install/update dependencies
+            echo "📦 Installing staging dependencies..."
+            cd "$STAGING_DIR/server"
+            npm install --production
+
+            # Restore or require staging .env (never print secret values)
+            ENV_CANONICAL="/home/${{ secrets.VPS_USER }}/deployments/.manufacturing-app-staging.env"
+            if [ -n "$BACKUP_NAME" ] && [ -f "$BACKUP_NAME/server/.env" ]; then
+              echo "📋 Restoring server/.env from previous staging release"
+              cp -f "$BACKUP_NAME/server/.env" .env
+              chmod 600 .env || true
+            elif [ -f "$ENV_CANONICAL" ]; then
+              echo "📋 Using canonical staging env file"
+              cp -f "$ENV_CANONICAL" .env
+              chmod 600 .env || true
+            elif [ ! -f .env ]; then
+              echo "❌ No staging server/.env found."
+              echo "   One-time on VPS: create $ENV_CANONICAL with NODE_ENV=staging, PORT, DB_*, JWT_SECRET, ADMIN_PASSWORD, PRODUCTION_PASSWORD, CORS_ORIGIN."
+              exit 1
+            fi
+
+            # Ensure critical non-secret keys for staging runtime
+            if grep -q "^PORT=" .env; then
+              sed -i "s/^PORT=.*/PORT=$STAGING_PORT/" .env
             else
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              echo "⏳ Health check attempt $RETRY_COUNT/$MAX_RETRIES failed..."
-              echo "   Response: $HEALTH_CHECK"
-              sleep 3
+              echo "PORT=$STAGING_PORT" >> .env
             fi
-          done
-          if [ "$HEALTH_CHECK_PASSED" = false ]; then
-            echo "❌ CRITICAL: Staging health check FAILED after $MAX_RETRIES attempts!"
-            pm2 logs manufacturing-app-staging --lines 40 --nostream || true
-            exit 1
-          fi
-          
-          # Setup nginx config for staging
-          echo "📝 Setting up nginx config for staging..."
-          NGINX_CONF_SOURCE=""
-          NGINX_CONF_AVAILABLE="/etc/nginx/sites-available/manufacturing-app-staging.conf"
-          NGINX_CONF_ENABLED="/etc/nginx/sites-enabled/manufacturing-app-staging.conf"
-          
-          # Try to find nginx config - check deployment package first
-          if [ -f "$STAGING_DIR/nginx/manufacturing-app-staging.conf" ]; then
-            NGINX_CONF_SOURCE="$STAGING_DIR/nginx/manufacturing-app-staging.conf"
-            echo "   ✅ Found nginx config in deployment package"
-          elif [ -f "/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-staging.conf" ]; then
-            NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-staging.conf"
-            echo "   ✅ Found nginx config in deployments/nginx"
-          elif [ -f "/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf" ]; then
-            NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf"
-            echo "   ✅ Found nginx config in user nginx directory"
-          else
-            echo "   ⚠️  Nginx config not found, skipping nginx setup"
-            echo "   💡 Please setup manually: cp nginx/manufacturing-app-staging.conf /etc/nginx/sites-available/"
-          fi
-          
-          if [ -n "$NGINX_CONF_SOURCE" ] && [ -f "$NGINX_CONF_SOURCE" ]; then
-            # Copy nginx config
-            echo "   📋 Copying nginx config from: $NGINX_CONF_SOURCE"
-            sudo cp "$NGINX_CONF_SOURCE" "$NGINX_CONF_AVAILABLE"
-            echo "   ✅ Nginx config copied to $NGINX_CONF_AVAILABLE"
-            
-            # Verify config doesn't have default_server (for isolation)
-            if grep -q "default_server" "$NGINX_CONF_AVAILABLE"; then
-              echo "   ⚠️  WARNING: Config contains 'default_server' - removing for isolation"
-              sudo sed -i 's/listen 80 default_server/listen 80/g' "$NGINX_CONF_AVAILABLE"
-              sudo sed -i 's/listen \[::\]:80 default_server/listen [::]:80/g' "$NGINX_CONF_AVAILABLE"
-            fi
-            
-            # Enable config
-            if [ ! -L "$NGINX_CONF_ENABLED" ] && [ ! -f "$NGINX_CONF_ENABLED" ]; then
-              sudo ln -s "$NGINX_CONF_AVAILABLE" "$NGINX_CONF_ENABLED"
-              echo "   ✅ Nginx config enabled"
-            fi
-            
-            # Test and reload nginx
-            echo "   🧪 Testing nginx configuration..."
-            if sudo nginx -t 2>&1 | grep -q "successful"; then
-              echo "   ✅ Nginx config test passed"
-              sudo systemctl reload nginx
-              echo "   ✅ Nginx reloaded successfully"
-              # Verify nginx is running
-              sudo systemctl status nginx --no-pager -l | head -5
+            if grep -q "^NODE_ENV=" .env; then
+              sed -i "s/^NODE_ENV=.*/NODE_ENV=staging/" .env
             else
-              echo "   ❌ Nginx config test failed!"
-              sudo nginx -t
-              echo "   ⚠️  Nginx not reloaded - please fix config manually"
+              echo "NODE_ENV=staging" >> .env
             fi
-          fi
-          
-          # Cleanup old staging backups (keep last 3)
-          echo "🧹 Cleaning up old staging backups..."
-          cd /home/${{ secrets.VPS_USER }}/deployments
-          ls -dt manufacturing-app-staging-backup-* 2>/dev/null | tail -n +4 | xargs rm -rf || true
-          
-          # Cleanup
-          rm -f deploy.tar.gz
-          
-          echo "✅ Staging deployment completed!"
-          echo "📍 Staging app running on port: $STAGING_PORT"
-          echo "📍 Database: $STAGING_DB_NAME"
-          pm2 status | grep manufacturing-app-staging || echo "⚠️  Check PM2 status manually"
+            if grep -q "^DB_NAME=" .env; then
+              sed -i "s/^DB_NAME=.*/DB_NAME=$STAGING_DB_NAME/" .env
+            else
+              echo "DB_NAME=$STAGING_DB_NAME" >> .env
+            fi
+
+            echo "📝 Verifying .env (names only, no values)..."
+            grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env | cut -d= -f1 | sort -u | head -50 || true
+
+            # Create logs directory
+            mkdir -p logs
+
+            # Restart staging application with PM2
+            echo "🔄 Restarting staging application with PM2..."
+            cd "$STAGING_DIR/server"
+
+            # Delete existing staging processes
+            pm2 delete manufacturing-app-staging 2>/dev/null || echo "No existing staging web to delete"
+            pm2 delete manufacturing-app-staging-worker 2>/dev/null || echo "No existing staging worker to delete"
+
+            # Verify current directory and files
+            echo "📋 Current directory: $(pwd)"
+            echo "📋 Files in server directory:"
+            ls -la
+
+            # Start staging web + worker from ecosystem
+            echo "🚀 Starting staging web + worker..."
+            if [ -f ecosystem.config.js ]; then
+              echo "📋 Using ecosystem.config.js (staging web + worker)"
+              pm2 start ecosystem.config.js --only manufacturing-app-staging --update-env
+              pm2 start ecosystem.config.js --only manufacturing-app-staging-worker --update-env
+            else
+              echo "❌ ecosystem.config.js missing"
+              exit 1
+            fi
+
+            # Verify PM2 process started
+            echo "⏳ Waiting 2 seconds for PM2 to register process..."
+            sleep 2
+
+            echo "📊 PM2 Status:"
+            pm2 status
+
+            # Check if process is running
+            if pm2 list | grep -q "manufacturing-app-staging" && pm2 list | grep -q "manufacturing-app-staging-worker"; then
+              echo "✅ PM2 staging web and worker are registered"
+            else
+              echo "❌ ERROR: Expected staging PM2 processes NOT found!"
+              echo "📋 PM2 list output:"
+              pm2 list
+              echo "📋 PM2 logs:"
+              pm2 logs manufacturing-app-staging --lines 20 --nostream || true
+              pm2 logs manufacturing-app-staging-worker --lines 20 --nostream || true
+              exit 1
+            fi
+
+            pm2 save
+            echo "✅ PM2 process saved"
+
+            # Wait a bit for app to start
+            sleep 5
+
+            # Health check — REQUIRED (fail closed)
+            echo "🏥 Checking staging health..."
+            MAX_RETRIES=5
+            RETRY_COUNT=0
+            HEALTH_CHECK_PASSED=false
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              HEALTH_CHECK=$(curl -s http://localhost:$STAGING_PORT/health || echo "failed")
+              if echo "$HEALTH_CHECK" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+                echo "✅ Staging health check passed!"
+                HEALTH_CHECK_PASSED=true
+                break
+              else
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                echo "⏳ Health check attempt $RETRY_COUNT/$MAX_RETRIES failed..."
+                echo "   Response: $HEALTH_CHECK"
+                sleep 3
+              fi
+            done
+            if [ "$HEALTH_CHECK_PASSED" = false ]; then
+              echo "❌ CRITICAL: Staging health check FAILED after $MAX_RETRIES attempts!"
+              pm2 logs manufacturing-app-staging --lines 40 --nostream || true
+              exit 1
+            fi
+
+            # Setup nginx config for staging
+            echo "📝 Setting up nginx config for staging..."
+            NGINX_CONF_SOURCE=""
+            NGINX_CONF_AVAILABLE="/etc/nginx/sites-available/manufacturing-app-staging.conf"
+            NGINX_CONF_ENABLED="/etc/nginx/sites-enabled/manufacturing-app-staging.conf"
+
+            # Try to find nginx config - check deployment package first
+            if [ -f "$STAGING_DIR/nginx/manufacturing-app-staging.conf" ]; then
+              NGINX_CONF_SOURCE="$STAGING_DIR/nginx/manufacturing-app-staging.conf"
+              echo "   ✅ Found nginx config in deployment package"
+            elif [ -f "/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-staging.conf" ]; then
+              NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/deployments/nginx/manufacturing-app-staging.conf"
+              echo "   ✅ Found nginx config in deployments/nginx"
+            elif [ -f "/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf" ]; then
+              NGINX_CONF_SOURCE="/home/${{ secrets.VPS_USER }}/nginx/manufacturing-app-staging.conf"
+              echo "   ✅ Found nginx config in user nginx directory"
+            else
+              echo "   ⚠️  Nginx config not found, skipping nginx setup"
+              echo "   💡 Please setup manually: cp nginx/manufacturing-app-staging.conf /etc/nginx/sites-available/"
+            fi
+
+            if [ -n "$NGINX_CONF_SOURCE" ] && [ -f "$NGINX_CONF_SOURCE" ]; then
+              # Copy nginx config
+              echo "   📋 Copying nginx config from: $NGINX_CONF_SOURCE"
+              sudo cp "$NGINX_CONF_SOURCE" "$NGINX_CONF_AVAILABLE"
+              echo "   ✅ Nginx config copied to $NGINX_CONF_AVAILABLE"
+
+              # Verify config doesn't have default_server (for isolation)
+              if grep -q "default_server" "$NGINX_CONF_AVAILABLE"; then
+                echo "   ⚠️  WARNING: Config contains 'default_server' - removing for isolation"
+                sudo sed -i 's/listen 80 default_server/listen 80/g' "$NGINX_CONF_AVAILABLE"
+                sudo sed -i 's/listen \[::\]:80 default_server/listen [::]:80/g' "$NGINX_CONF_AVAILABLE"
+              fi
+
+              # Enable config
+              if [ ! -L "$NGINX_CONF_ENABLED" ] && [ ! -f "$NGINX_CONF_ENABLED" ]; then
+                sudo ln -s "$NGINX_CONF_AVAILABLE" "$NGINX_CONF_ENABLED"
+                echo "   ✅ Nginx config enabled"
+              fi
+
+              # Test and reload nginx
+              echo "   🧪 Testing nginx configuration..."
+              if sudo nginx -t 2>&1 | grep -q "successful"; then
+                echo "   ✅ Nginx config test passed"
+                sudo systemctl reload nginx
+                echo "   ✅ Nginx reloaded successfully"
+                # Verify nginx is running
+                sudo systemctl status nginx --no-pager -l | head -5
+              else
+                echo "   ❌ Nginx config test failed!"
+                sudo nginx -t
+                echo "   ⚠️  Nginx not reloaded - please fix config manually"
+              fi
+            fi
+
+            # Cleanup old staging backups (keep last 3)
+            echo "🧹 Cleaning up old staging backups..."
+            cd /home/${{ secrets.VPS_USER }}/deployments
+            ls -dt manufacturing-app-staging-backup-* 2>/dev/null | tail -n +4 | xargs rm -rf || true
+
+            # Cleanup
+            rm -f deploy.tar.gz
+
+            echo "✅ Staging deployment completed!"
+            echo "📍 Staging app running on port: $STAGING_PORT"
+            echo "📍 Database: $STAGING_DB_NAME"
+            pm2 status | grep manufacturing-app-staging || echo "⚠️  Check PM2 status manually"

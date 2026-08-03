@@ -5,244 +5,248 @@ on:
     branches:
       - main
       - master
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch:
-    inputs:
-      skip_tests:
-        description: 'Skip tests (DANGEROUS - only use if CI passed)'
-        required: false
-        default: 'false'
+
+concurrency:
+  group: deploy-prod-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  ci:
+  build_package:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        cache: 'npm'
-        
-    - name: Install and test
-      run: |
-        npm install
-        cd client && npm install && npm run build
-        cd ../server && npm install && node -c index.js
-    continue-on-error: false
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            server/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install client dependencies
+        run: cd client && npm ci
+
+      - name: Install server dependencies
+        run: cd server && npm ci
+
+      - name: Server syntax check
+        run: cd server && node --check index.js && node --check app.js
+
+      - name: Build client
+        run: cd client && npm run build
+
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy
+          cp -r server deploy/
+          cp -r client/build deploy/client-build
+          cp package.json deploy/
+          cp -r .github/scripts deploy/scripts || true
+          if [ -f server/ecosystem.config.js ]; then
+            cp server/ecosystem.config.js deploy/server/
+          fi
+          mkdir -p deploy/nginx
+          if [ -f nginx/manufacturing-app.conf ]; then
+            cp nginx/manufacturing-app.conf deploy/nginx/
+          fi
+          tar -czf deploy.tar.gz deploy/
+
+      - name: Upload deployment package
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-package
+          path: deploy.tar.gz
+          retention-days: 1
 
   deploy:
-    needs: ci
+    needs: build_package
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: package-lock.json
-        
-    - name: Install dependencies
-      run: |
-        npm install
-        cd client && npm install && cd ..
-        cd server && npm install && cd ..
-        
-    - name: Build client
-      run: |
-        cd client
-        npm run build
-        
-    - name: Create deployment package
-      run: |
-        mkdir -p deploy
-        cp -r server deploy/
-        cp -r client/build deploy/client-build
-        cp package.json deploy/
-        cp -r .github/scripts deploy/scripts || true
-        # Ensure ecosystem.config.js is included
-        if [ -f server/ecosystem.config.js ]; then
-          cp server/ecosystem.config.js deploy/server/
-        fi
-        # Copy nginx config for production
-        mkdir -p deploy/nginx
-        if [ -f nginx/manufacturing-app.conf ]; then
-          cp nginx/manufacturing-app.conf deploy/nginx/
-        fi
-        tar -czf deploy.tar.gz deploy/
-        
-    - name: Deploy to VPS
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USER }}
-        key: ${{ secrets.VPS_SSH_KEY }}
-        port: ${{ secrets.VPS_PORT || 22 }}
-        source: "deploy.tar.gz"
-        target: "/home/${{ secrets.VPS_USER }}/deployments"
-        
-    - name: Execute deployment script on VPS
-      uses: appleboy/ssh-action@v1.2.0
-      with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USER }}
-        key: ${{ secrets.VPS_SSH_KEY }}
-        port: ${{ secrets.VPS_PORT || 22 }}
-        script: |
-          set -e
-          DEPLOY_ROOT="/home/${{ secrets.VPS_USER }}/deployments"
-          cd "$DEPLOY_ROOT"
-          tar -xzf deploy.tar.gz
-          
-          # Optional: fixed path on VPS if you ever deploy without a prior manufacturing-app (first machine).
-          ENV_CANONICAL="$DEPLOY_ROOT/.manufacturing-app.env"
-          
-          BACKUP_NAME=""
-          if [ -d "manufacturing-app" ]; then
-            BACKUP_NAME="manufacturing-app-backup-$(date +%Y%m%d-%H%M%S)"
-            mv manufacturing-app "$BACKUP_NAME"
-          fi
-          
-          mkdir -p manufacturing-app
-          mv deploy/* manufacturing-app/
-          mkdir -p manufacturing-app/server
-          
-          # Restore VPS .env from the directory we just rotated off (always latest live config)
-          if [ -n "$BACKUP_NAME" ] && [ -f "$BACKUP_NAME/server/.env" ]; then
-            echo "📋 Restoring server/.env from previous live release: $BACKUP_NAME"
-            cp -f "$BACKUP_NAME/server/.env" manufacturing-app/server/.env
-            chmod 600 manufacturing-app/server/.env || true
-          elif [ -f "$ENV_CANONICAL" ]; then
-            echo "📋 Using canonical VPS env file (first deploy / no backup): $ENV_CANONICAL"
-            cp -f "$ENV_CANONICAL" manufacturing-app/server/.env
-            chmod 600 manufacturing-app/server/.env || true
-          elif [ -f manufacturing-app/server/.env ]; then
-            echo "📋 Using server/.env from deployment package"
-          else
-            echo "❌ No production server/.env found."
-            echo "   One-time on VPS: place your env at $ENV_CANONICAL, or run one successful deploy so manufacturing-app/server/.env exists (it is copied from the rotated backup next time)."
-            echo "   Include DB_*, PORT, NODE_ENV, JWT_SECRET, ADMIN_PASSWORD, PRODUCTION_PASSWORD,"
-            echo "   and optional EXTERNAL_API_BASE_URL / EXTERNAL_API_BEARER_TOKEN / CORS_ORIGIN."
-            exit 1
-          fi
-          
-          # Never print .env values in CI logs
-          echo "📝 Verifying server/.env (names only, no values)..."
-          if [ -f manufacturing-app/server/.env ]; then
-            echo "   Lines: $(wc -l < manufacturing-app/server/.env)"
-            grep -E '^[A-Za-z_][A-Za-z0-9_]*=' manufacturing-app/server/.env | cut -d= -f1 | sort -u | head -50 || true
-          fi
-          
-          cd manufacturing-app/server
-          npm install --production
-          
-          mkdir -p logs
-          
-          # Remove legacy single-process / old names
-          pm2 delete manufacturing-app 2>/dev/null || true
-          pm2 delete manufacturing-app-worker 2>/dev/null || true
-          
-          echo "🚀 Starting production web + worker via ecosystem.config.js..."
-          if [ -f ecosystem.config.js ]; then
-            pm2 start ecosystem.config.js --only manufacturing-app --update-env
-            pm2 start ecosystem.config.js --only manufacturing-app-worker --update-env
-          else
-            echo "❌ ecosystem.config.js missing"
-            exit 1
-          fi
-          
-          # Verify PM2 process started
-          echo "⏳ Waiting 2 seconds for PM2 to register process..."
-          sleep 2
-          
-          echo "📊 PM2 Status:"
-          pm2 status
-          
-          # Check if process is running
-          if pm2 list | grep -q "manufacturing-app" && pm2 list | grep -q "manufacturing-app-worker"; then
-            echo "✅ PM2 processes manufacturing-app and manufacturing-app-worker are registered"
-          else
-            echo "❌ ERROR: Expected PM2 processes not found!"
-            echo "📋 PM2 list output:"
-            pm2 list
-            echo "📋 PM2 logs:"
-            pm2 logs manufacturing-app --lines 20 --nostream || true
-            pm2 logs manufacturing-app-worker --lines 20 --nostream || true
-            exit 1
-          fi
-          
-          pm2 save
-          echo "✅ PM2 process saved"
-          
-          # Cleanup old backups (keep last 5)
-          cd /home/${{ secrets.VPS_USER }}/deployments
-          ls -dt manufacturing-app-backup-* | tail -n +6 | xargs rm -rf || true
-          
-          # Wait a bit for app to start
-          sleep 5
-          
-          # Health check - REQUIRED for production (PORT from VPS .env)
-          echo "🏥 Performing PRODUCTION health check..."
-          ENV_FILE="$DEPLOY_ROOT/manufacturing-app/server/.env"
-          PROD_PORT=$(grep -E '^[[:space:]]*PORT=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
-          PROD_PORT=${PROD_PORT:-1234}
-          echo "   Using PORT=$PROD_PORT (from .env or default 1234)"
-          MAX_RETRIES=5
-          RETRY_COUNT=0
-          HEALTH_CHECK_PASSED=false
-          
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HEALTH_CHECK=$(curl -s http://localhost:$PROD_PORT/health || echo "failed")
-            if echo "$HEALTH_CHECK" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
-              echo "✅ PRODUCTION health check PASSED!"
-              HEALTH_CHECK_PASSED=true
-              break
-            else
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              echo "⏳ Health check attempt $RETRY_COUNT/$MAX_RETRIES failed, retrying in 3 seconds..."
-              echo "   Response: $HEALTH_CHECK"
-              sleep 3
-            fi
-          done
-          
-          if [ "$HEALTH_CHECK_PASSED" = false ]; then
-            echo "❌ CRITICAL: PRODUCTION health check FAILED after $MAX_RETRIES attempts!"
-            echo "🔄 Attempting rollback to previous version..."
-            
-            # Find latest backup
-            cd /home/${{ secrets.VPS_USER }}/deployments
-            LATEST_BACKUP=$(ls -dt manufacturing-app-backup-* 2>/dev/null | head -1)
-            if [ -n "$LATEST_BACKUP" ]; then
-              echo "📦 Rolling back to: $LATEST_BACKUP"
-              pm2 delete manufacturing-app 2>/dev/null || true
-              pm2 delete manufacturing-app-worker 2>/dev/null || true
-              rm -rf manufacturing-app
-              cp -r "$LATEST_BACKUP" manufacturing-app
-              cd manufacturing-app/server
-              if [ -f ecosystem.config.js ]; then
-                pm2 start ecosystem.config.js --only manufacturing-app --update-env
-                pm2 start ecosystem.config.js --only manufacturing-app-worker --update-env
-              else
-                pm2 start index.js --name manufacturing-app --instances 2 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
-              fi
-              pm2 save
-              echo "✅ Rollback completed. Please check the application manually."
-            else
-              echo "⚠️  No backup found for rollback. Manual intervention required!"
-            fi
-            
-            exit 1
-          fi
-          
-          # Cleanup
-          rm -f deploy.tar.gz
-          
-          echo "✅ PRODUCTION deployment completed successfully!"
-          echo "📍 Production app verified and running on port: $PROD_PORT"
 
+    steps:
+      - name: Download deployment package
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-package
+          path: .
+
+      - name: Deploy to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "deploy.tar.gz"
+          target: "/home/${{ secrets.VPS_USER }}/deployments"
+
+      - name: Execute deployment script on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            DEPLOY_ROOT="/home/${{ secrets.VPS_USER }}/deployments"
+            cd "$DEPLOY_ROOT"
+            tar -xzf deploy.tar.gz
+
+            # Optional: fixed path on VPS if you ever deploy without a prior manufacturing-app (first machine).
+            ENV_CANONICAL="$DEPLOY_ROOT/.manufacturing-app.env"
+
+            BACKUP_NAME=""
+            if [ -d "manufacturing-app" ]; then
+              BACKUP_NAME="manufacturing-app-backup-$(date +%Y%m%d-%H%M%S)"
+              mv manufacturing-app "$BACKUP_NAME"
+            fi
+
+            mkdir -p manufacturing-app
+            mv deploy/* manufacturing-app/
+            mkdir -p manufacturing-app/server
+
+            # Restore VPS .env from the directory we just rotated off (always latest live config)
+            if [ -n "$BACKUP_NAME" ] && [ -f "$BACKUP_NAME/server/.env" ]; then
+              echo "📋 Restoring server/.env from previous live release: $BACKUP_NAME"
+              cp -f "$BACKUP_NAME/server/.env" manufacturing-app/server/.env
+              chmod 600 manufacturing-app/server/.env || true
+            elif [ -f "$ENV_CANONICAL" ]; then
+              echo "📋 Using canonical VPS env file (first deploy / no backup): $ENV_CANONICAL"
+              cp -f "$ENV_CANONICAL" manufacturing-app/server/.env
+              chmod 600 manufacturing-app/server/.env || true
+            elif [ -f manufacturing-app/server/.env ]; then
+              echo "📋 Using server/.env from deployment package"
+            else
+              echo "❌ No production server/.env found."
+              echo "   One-time on VPS: place your env at $ENV_CANONICAL, or run one successful deploy so manufacturing-app/server/.env exists (it is copied from the rotated backup next time)."
+              echo "   Include DB_*, PORT, NODE_ENV, JWT_SECRET, ADMIN_PASSWORD, PRODUCTION_PASSWORD,"
+              echo "   and optional EXTERNAL_API_BASE_URL / EXTERNAL_API_BEARER_TOKEN / CORS_ORIGIN."
+              exit 1
+            fi
+
+            # Never print .env values in CI logs
+            echo "📝 Verifying server/.env (names only, no values)..."
+            if [ -f manufacturing-app/server/.env ]; then
+              echo "   Lines: $(wc -l < manufacturing-app/server/.env)"
+              grep -E '^[A-Za-z_][A-Za-z0-9_]*=' manufacturing-app/server/.env | cut -d= -f1 | sort -u | head -50 || true
+            fi
+
+            cd manufacturing-app/server
+            npm install --production
+
+            mkdir -p logs
+
+            # Remove legacy single-process / old names
+            pm2 delete manufacturing-app 2>/dev/null || true
+            pm2 delete manufacturing-app-worker 2>/dev/null || true
+
+            echo "🚀 Starting production web + worker via ecosystem.config.js..."
+            if [ -f ecosystem.config.js ]; then
+              pm2 start ecosystem.config.js --only manufacturing-app --update-env
+              pm2 start ecosystem.config.js --only manufacturing-app-worker --update-env
+            else
+              echo "❌ ecosystem.config.js missing"
+              exit 1
+            fi
+
+            # Verify PM2 process started
+            echo "⏳ Waiting 2 seconds for PM2 to register process..."
+            sleep 2
+
+            echo "📊 PM2 Status:"
+            pm2 status
+
+            # Check if process is running
+            if pm2 list | grep -q "manufacturing-app" && pm2 list | grep -q "manufacturing-app-worker"; then
+              echo "✅ PM2 processes manufacturing-app and manufacturing-app-worker are registered"
+            else
+              echo "❌ ERROR: Expected PM2 processes not found!"
+              echo "📋 PM2 list output:"
+              pm2 list
+              echo "📋 PM2 logs:"
+              pm2 logs manufacturing-app --lines 20 --nostream || true
+              pm2 logs manufacturing-app-worker --lines 20 --nostream || true
+              exit 1
+            fi
+
+            pm2 save
+            echo "✅ PM2 process saved"
+
+            # Cleanup old backups (keep last 5)
+            cd /home/${{ secrets.VPS_USER }}/deployments
+            ls -dt manufacturing-app-backup-* | tail -n +6 | xargs rm -rf || true
+
+            # Wait a bit for app to start
+            sleep 5
+
+            # Health check - REQUIRED for production (PORT from VPS .env)
+            echo "🏥 Performing PRODUCTION health check..."
+            ENV_FILE="$DEPLOY_ROOT/manufacturing-app/server/.env"
+            PROD_PORT=$(grep -E '^[[:space:]]*PORT=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+            PROD_PORT=${PROD_PORT:-1234}
+            echo "   Using PORT=$PROD_PORT (from .env or default 1234)"
+            MAX_RETRIES=5
+            RETRY_COUNT=0
+            HEALTH_CHECK_PASSED=false
+
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              HEALTH_CHECK=$(curl -s http://localhost:$PROD_PORT/health || echo "failed")
+              if echo "$HEALTH_CHECK" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+                echo "✅ PRODUCTION health check PASSED!"
+                HEALTH_CHECK_PASSED=true
+                break
+              else
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                echo "⏳ Health check attempt $RETRY_COUNT/$MAX_RETRIES failed, retrying in 3 seconds..."
+                echo "   Response: $HEALTH_CHECK"
+                sleep 3
+              fi
+            done
+
+            if [ "$HEALTH_CHECK_PASSED" = false ]; then
+              echo "❌ CRITICAL: PRODUCTION health check FAILED after $MAX_RETRIES attempts!"
+              echo "🔄 Attempting rollback to previous version..."
+
+              # Find latest backup
+              cd /home/${{ secrets.VPS_USER }}/deployments
+              LATEST_BACKUP=$(ls -dt manufacturing-app-backup-* 2>/dev/null | head -1)
+              if [ -n "$LATEST_BACKUP" ]; then
+                echo "📦 Rolling back to: $LATEST_BACKUP"
+                pm2 delete manufacturing-app 2>/dev/null || true
+                pm2 delete manufacturing-app-worker 2>/dev/null || true
+                rm -rf manufacturing-app
+                cp -r "$LATEST_BACKUP" manufacturing-app
+                cd manufacturing-app/server
+                if [ -f ecosystem.config.js ]; then
+                  pm2 start ecosystem.config.js --only manufacturing-app --update-env
+                  pm2 start ecosystem.config.js --only manufacturing-app-worker --update-env
+                else
+                  pm2 start index.js --name manufacturing-app --instances 2 --cwd /home/${{ secrets.VPS_USER }}/deployments/manufacturing-app/server
+                fi
+                pm2 save
+                echo "✅ Rollback completed. Please check the application manually."
+              else
+                echo "⚠️  No backup found for rollback. Manual intervention required!"
+              fi
+
+              exit 1
+            fi
+
+            # Cleanup
+            rm -f deploy.tar.gz
+
+            echo "✅ PRODUCTION deployment completed successfully!"
+            echo "📍 Production app verified and running on port: $PROD_PORT"
