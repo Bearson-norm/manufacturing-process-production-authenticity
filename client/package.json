@@ -10,14 +10,16 @@
     "react": "^18.2.0",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^7.18.2",
+    "react-router-dom": "6.30.4",
     "react-scripts": "5.0.1"
   },
   "overrides": {
     "nth-check": "^2.1.1",
     "postcss": "^8.4.31",
     "webpack-dev-server": "^4.15.1",
-    "@pmmmwh/react-refresh-webpack-plugin": "^0.5.11"
+    "@pmmmwh/react-refresh-webpack-plugin": "^0.5.11",
+    "react-router": "6.30.4",
+    "react-router-dom": "6.30.4"
   },
   "scripts": {
     "start": "cross-env DANGEROUSLY_DISABLE_HOST_CHECK=true react-scripts start",
