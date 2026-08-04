@@ -93,7 +93,7 @@ function calculateDoneQty(authenticityDataArray) {
         const lastNum = parseInt(lastAuth);
         
         if (!isNaN(firstNum) && !isNaN(lastNum) && lastNum >= firstNum) {
-          totalDoneQty += (lastNum - firstNum);
+          totalDoneQty += (lastNum - firstNum + 1);
         }
       }
     });
