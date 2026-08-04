@@ -12,6 +12,11 @@ const {
   finalizeLiquidManufacturingExternal
 } = require('../services/liquid-external-manufacturing.service');
 const { convertDBTimestampToJakarta } = require('../utils/timezone.utils');
+const {
+  enqueueSyncSourceRow,
+  enqueueSyncSession,
+  enqueueSyncMo,
+} = require('../services/production-results-sync.service');
 
 function loadActiveVendorMap(callback) {
   loadActiveVendorMapDb(db, callback);
@@ -314,12 +319,13 @@ router.post('/liquid', (req, res) => {
           return new Promise((resolve, reject) => {
             db.run(
               `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'active') RETURNING id`,
               [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([authRow])],
               function(insertErr) {
                 if (insertErr) {
                   reject(insertErr);
                 } else {
+                  enqueueSyncSourceRow('liquid', this.lastID);
                   resolve({ id: this.lastID, row: authRow });
                 }
               }
@@ -383,12 +389,13 @@ router.post('/device', (req, res) => {
         return new Promise((resolve, reject) => {
           db.run(
             `INSERT INTO production_device (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active') RETURNING id`,
             [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
             function(err) {
               if (err) {
                 reject(err);
               } else {
+                enqueueSyncSourceRow('device', this.lastID);
                 resolve({ id: this.lastID, row });
               }
             }
@@ -449,12 +456,13 @@ router.post('/cartridge', (req, res) => {
         return new Promise((resolve, reject) => {
           db.run(
             `INSERT INTO production_cartridge (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active') RETURNING id`,
             [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([row])],
             function(err) {
               if (err) {
                 reject(err);
               } else {
+                enqueueSyncSourceRow('cartridge', this.lastID);
                 resolve({ id: this.lastID, row });
               }
             }
@@ -499,6 +507,7 @@ router.put('/liquid/end-session', (req, res) => {
         res.status(500).json({ error: err.message });
         return;
       }
+      enqueueSyncSession('liquid', session_id);
       res.json({ message: 'Session ended successfully' });
     }
   );
@@ -516,6 +525,7 @@ router.put('/device/end-session', (req, res) => {
         res.status(500).json({ error: err.message });
         return;
       }
+      enqueueSyncSession('device', session_id);
       res.json({ message: 'Session ended successfully' });
     }
   );
@@ -533,6 +543,7 @@ router.put('/cartridge/end-session', (req, res) => {
         res.status(500).json({ error: err.message });
         return;
       }
+      enqueueSyncSession('cartridge', session_id);
       res.json({ message: 'Session ended successfully' });
     }
   );
@@ -565,6 +576,8 @@ router.put('/liquid/update-status/:id', (req, res) => {
         if (updateErr) {
           return res.status(500).json({ error: updateErr.message });
         }
+
+        enqueueSyncSourceRow('liquid', id);
         
         if (status === 'completed') {
           try {
@@ -597,6 +610,7 @@ router.put('/liquid/update-status/:id', (req, res) => {
                       }
                       
                       console.log(`🔄 [Auto Revert] Reverted ${this.changes} records for MO ${row.mo_number} (active_count: ${checkRow.active_count})`);
+                      enqueueSyncMo('liquid', row.mo_number);
                       return res.json({ 
                         message: 'Status updated but auto reverted due to active records', 
                         id: id, 
@@ -725,6 +739,7 @@ router.put('/liquid/submit-mo-group', (req, res) => {
           
           const updatedCount = this.changes;
           console.log(`✅ [Submit MO] Updated ${updatedCount} records for MO ${mo_number}`);
+          enqueueSyncMo('liquid', mo_number);
           
           // Now check again if there are any active records left (from other sessions)
           db.get(
@@ -763,6 +778,7 @@ router.put('/liquid/submit-mo-group', (req, res) => {
                     }
                     
                     console.log(`🔄 [Submit MO] Auto-reverted ${this.changes} records for MO ${mo_number} (active_count: ${finalActiveCount})`);
+                    enqueueSyncMo('liquid', mo_number);
                     return res.json({ 
                       message: 'MO submitted but auto-reverted due to active records in other sessions', 
                       mo_number: mo_number,
@@ -869,6 +885,7 @@ router.put('/liquid/revert-mo-group/:mo_number', (req, res) => {
       }
       
       console.log(`🔄 [Revert MO Group] Admin reverted ${this.changes} records for MO ${mo_number}`);
+      enqueueSyncMo('liquid', mo_number);
       res.json({ 
         message: `Successfully reverted ${this.changes} record(s) for MO ${mo_number}`, 
         mo_number: mo_number,
@@ -897,6 +914,7 @@ router.put('/device/update-status/:id', (req, res) => {
         res.status(500).json({ error: err.message });
         return;
       }
+      enqueueSyncSourceRow('device', id);
       res.json({ message: 'Status updated successfully', id: id, status: status });
     }
   );
@@ -921,6 +939,7 @@ router.put('/cartridge/update-status/:id', (req, res) => {
         res.status(500).json({ error: err.message });
         return;
       }
+      enqueueSyncSourceRow('cartridge', id);
       res.json({ message: 'Status updated successfully', id: id, status: status });
     }
   );
@@ -965,6 +984,7 @@ router.put('/liquid/:id', (req, res) => {
           res.status(500).json({ error: err.message });
           return;
         }
+        enqueueSyncSourceRow('liquid', id);
         res.json({ message: 'Data updated successfully', id: id });
       }
     );
@@ -1024,6 +1044,7 @@ router.put('/device/:id', (req, res) => {
           res.status(500).json({ error: err.message });
           return;
         }
+        enqueueSyncSourceRow('device', id);
         res.json({ message: 'Data updated successfully', id: id });
       }
     );
@@ -1083,6 +1104,7 @@ router.put('/cartridge/:id', (req, res) => {
           res.status(500).json({ error: err.message });
           return;
         }
+        enqueueSyncSourceRow('cartridge', id);
         res.json({ message: 'Data updated successfully', id: id });
       }
     );

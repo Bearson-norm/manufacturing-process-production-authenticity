@@ -142,11 +142,12 @@ async function applyBootstrapSchema(client) {
       )
     `);
 
-    // Production Results table
+    // Production Results table (source_id = stable link to liquid/device/cartridge row)
     await client.query(`
       CREATE TABLE IF NOT EXISTS production_results (
         id SERIAL PRIMARY KEY,
         production_type TEXT NOT NULL,
+        source_id INTEGER,
         session_id TEXT,
         leader_name TEXT,
         shift_number TEXT,
@@ -160,7 +161,7 @@ async function applyBootstrapSchema(client) {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         synced_at TIMESTAMP,
-        UNIQUE(production_type, session_id, mo_number, created_at)
+        UNIQUE(production_type, source_id)
       )
     `);
 
@@ -197,7 +198,19 @@ async function applyBootstrapSchema(client) {
                        WHERE table_schema = 'public' AND table_name='production_results' AND column_name='updated_at') THEN
           ALTER TABLE production_results ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
         END IF;
+
+        -- source_id links to production_liquid/device/cartridge.id
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_schema = 'public' AND table_name='production_results' AND column_name='source_id') THEN
+          ALTER TABLE production_results ADD COLUMN source_id INTEGER;
+        END IF;
       END $$;
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS production_results_type_source_id_uidx
+      ON production_results (production_type, source_id)
+      WHERE source_id IS NOT NULL
     `);
 
     // Odoo MO Cache table

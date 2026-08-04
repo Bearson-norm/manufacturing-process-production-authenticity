@@ -19,6 +19,7 @@ const {
   backfillMoCacheTeamNames,
   buildDeviceSyncDomain,
 } = require('../utils/odoo-mo.helpers');
+const { runFullProductionSync } = require('../services/production-results-sync.service');
 
 // Helper function to get admin config
 function getAdminConfig(callback) {
@@ -837,203 +838,29 @@ router.post('/cleanup-mo', async (req, res) => {
 });
 
 // POST /api/admin/sync-production-data
-// Incremental sync: only inserts new rows + updates changed rows
+// Full sync by source_id: upsert missing/changed rows + orphan cleanup
 router.post('/sync-production-data', async (req, res) => {
-  const client = await pool.connect();
   try {
     console.log('📥 [Sync Endpoint] Received sync request from admin panel');
+    const results = await runFullProductionSync();
 
-    const sourceTables = [
-      { name: 'production_liquid', type: 'liquid' },
-      { name: 'production_device', type: 'device' },
-      { name: 'production_cartridge', type: 'cartridge' }
-    ];
-
-    let totalNew = 0;
-    let syncedCount = 0;
-    let updatedCount = 0;
-    let errorCount = 0;
-
-    // Helper: parse authenticity_data for JSONB
-    function parseAuthData(authenticityData) {
-      let authData = authenticityData;
-      if (typeof authData === 'string') {
-        try { authData = JSON.parse(authData); } catch (e) { authData = []; }
-      }
-      if (!authData || typeof authData !== 'object') authData = [];
-      return authData;
+    if (results.error) {
+      return res.status(500).json({
+        success: false,
+        error: results.error,
+        ...results,
+      });
     }
 
-    // Helper: calculate quantity from authenticity_data
-    function calcQuantity(authenticityData) {
-      try {
-        let quantity = 0;
-        let authData = authenticityData;
-        if (typeof authData === 'string') {
-          try { authData = JSON.parse(authData); } catch (e) { return 0; }
-        }
-        if (Array.isArray(authData)) {
-          authData.forEach(auth => {
-            if (auth && auth.firstAuthenticity && auth.lastAuthenticity) {
-              const firstMatch = String(auth.firstAuthenticity).trim().match(/\d+/);
-              const lastMatch = String(auth.lastAuthenticity).trim().match(/\d+/);
-              if (firstMatch && lastMatch) {
-                const first = parseInt(firstMatch[0], 10) || 0;
-                const last = parseInt(lastMatch[0], 10) || 0;
-                if (last >= first) quantity += (last - first + 1);
-              }
-            }
-          });
-        } else if (authData && authData.firstAuthenticity && authData.lastAuthenticity) {
-          const firstMatch = String(authData.firstAuthenticity).trim().match(/\d+/);
-          const lastMatch = String(authData.lastAuthenticity).trim().match(/\d+/);
-          if (firstMatch && lastMatch) {
-            const first = parseInt(firstMatch[0], 10) || 0;
-            const last = parseInt(lastMatch[0], 10) || 0;
-            if (last >= first) quantity = (last - first + 1);
-          }
-        }
-        return quantity;
-      } catch (e) { return 0; }
-    }
-
-    // ── STEP 1: Insert new rows ──
-    for (const table of sourceTables) {
-      const newRowsResult = await client.query(
-        `SELECT s.*
-         FROM ${table.name} s
-         LEFT JOIN production_results pr
-           ON pr.production_type = $1
-           AND pr.session_id = s.session_id
-           AND pr.mo_number = s.mo_number
-           AND pr.created_at = s.created_at
-         WHERE pr.id IS NULL
-           AND s.session_id IS NOT NULL
-           AND s.mo_number IS NOT NULL
-           AND s.pic IS NOT NULL
-           AND s.created_at IS NOT NULL`,
-        [table.type]
-      );
-
-      const newRows = newRowsResult.rows || [];
-      totalNew += newRows.length;
-
-      if (newRows.length > 0) {
-        console.log(`📊 [Sync] Found ${newRows.length} new records from ${table.name}`);
-      }
-
-      for (const row of newRows) {
-        try {
-          const authData = parseAuthData(row.authenticity_data);
-          const quantity = calcQuantity(row.authenticity_data);
-          const completedAt = (row.status === 'completed' && row.completed_at)
-            ? row.completed_at
-            : (row.status === 'completed' ? new Date().toISOString() : null);
-
-          await client.query(
-            `INSERT INTO production_results
-             (production_type, session_id, leader_name, shift_number, pic, mo_number, sku_name,
-              authenticity_data, status, quantity, completed_at, created_at, synced_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, CURRENT_TIMESTAMP)
-             ON CONFLICT (production_type, session_id, mo_number, created_at) DO NOTHING`,
-            [
-              table.type,
-              row.session_id || '',
-              row.leader_name || '',
-              row.shift_number || '',
-              row.pic || '',
-              row.mo_number || '',
-              row.sku_name || '',
-              JSON.stringify(authData),
-              row.status || 'active',
-              quantity,
-              completedAt,
-              row.created_at
-            ]
-          );
-          syncedCount++;
-        } catch (rowErr) {
-          errorCount++;
-          console.error(`❌ [Sync] Insert error from ${table.name} (MO: ${row.mo_number}):`, rowErr.message);
-        }
-      }
-    }
-
-    // ── STEP 2: Update existing rows where source data has changed OR status is 'active' ──
-    // Active rows are always refreshed so ongoing production data stays current
-    for (const table of sourceTables) {
-      try {
-        const deltaResult = await client.query(
-          `SELECT s.session_id, s.mo_number, s.created_at,
-                  s.authenticity_data AS source_auth, s.status AS source_status,
-                  s.completed_at AS source_completed_at,
-                  s.leader_name AS source_leader, s.shift_number AS source_shift,
-                  s.pic AS source_pic, s.sku_name AS source_sku,
-                  pr.id AS pr_id, pr.status AS pr_status
-           FROM ${table.name} s
-           INNER JOIN production_results pr
-             ON pr.production_type = $1
-             AND pr.session_id = s.session_id
-             AND pr.mo_number = s.mo_number
-             AND pr.created_at = s.created_at
-           WHERE pr.status = 'active'
-              OR pr.status IS DISTINCT FROM s.status
-              OR pr.quantity IS NULL
-              OR pr.authenticity_data IS DISTINCT FROM s.authenticity_data::jsonb
-              OR (
-                COALESCE(pr.quantity, 0) = 0
-                AND s.authenticity_data IS NOT NULL
-                AND s.authenticity_data::text NOT IN ('[]', 'null', '', '{}')
-              )
-              OR (pr.completed_at IS NULL AND s.status = 'completed')`,
-          [table.type]
-        );
-
-        if (deltaResult.rows.length > 0) {
-          console.log(`📊 [Sync] Found ${deltaResult.rows.length} records to update from ${table.name} (including active)`);
-        }
-
-        for (const row of deltaResult.rows) {
-          try {
-            const authData = parseAuthData(row.source_auth);
-            const quantity = calcQuantity(row.source_auth);
-            const completedAt = row.source_completed_at ||
-              (row.source_status === 'completed' ? new Date().toISOString() : null);
-
-            await client.query(
-              `UPDATE production_results
-               SET status = $1, quantity = $2, completed_at = $3,
-                   authenticity_data = $4::jsonb,
-                   leader_name = $5, shift_number = $6, pic = $7, sku_name = $8,
-                   updated_at = CURRENT_TIMESTAMP, synced_at = CURRENT_TIMESTAMP
-               WHERE id = $9`,
-              [
-                row.source_status || 'active',
-                quantity,
-                completedAt,
-                JSON.stringify(authData),
-                row.source_leader || '',
-                row.source_shift || '',
-                row.source_pic || '',
-                row.source_sku || '',
-                row.pr_id
-              ]
-            );
-            updatedCount++;
-          } catch (updErr) {
-            errorCount++;
-            console.error(`❌ [Sync] Update error PR id ${row.pr_id}:`, updErr.message);
-          }
-        }
-      } catch (deltaErr) {
-        console.error(`❌ [Sync] Delta query error for ${table.name}:`, deltaErr.message);
-      }
-    }
-
-    const message = totalNew === 0 && updatedCount === 0
+    const syncedCount = results.sync?.syncedCount || 0;
+    const totalNew = results.sync?.totalNew || 0;
+    const errorCount = results.sync?.errorCount || 0;
+    const updatedCount = results.delta?.dataUpdated || 0;
+    const orphansDeleted = results.orphans?.deleted || 0;
+    const message = (totalNew === 0 && updatedCount === 0 && orphansDeleted === 0)
       ? 'Production results already up to date'
-      : `Synced ${syncedCount} new + ${updatedCount} updated records`;
-    console.log(`✅ [Sync] ${message}`);
+      : `Synced ${syncedCount} new + ${updatedCount} updated` +
+        (orphansDeleted ? ` + ${orphansDeleted} orphans removed` : '');
 
     res.json({
       success: true,
@@ -1041,13 +868,13 @@ router.post('/sync-production-data', async (req, res) => {
       updatedCount,
       totalNew,
       errorCount,
-      message
+      orphansDeleted,
+      duration: results.duration,
+      message,
     });
   } catch (error) {
     console.error('❌ [Sync Endpoint] Fatal error:', error.message, error.stack);
     res.status(500).json({ success: false, error: error.message });
-  } finally {
-    client.release();
   }
 });
 
