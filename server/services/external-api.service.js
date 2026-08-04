@@ -97,7 +97,7 @@ function logExternalApiHttpSuccess(opts) {
   console.log(`✅ [External API] ==========================================\n`);
 }
 
-function getExternalManufacturingConfig(callback) {
+function getLegacyExternalManufacturingConfig(callback) {
   db.get(
     'SELECT config_value FROM admin_config WHERE config_key = $1',
     ['external_api_base_url'],
@@ -109,11 +109,128 @@ function getExternalManufacturingConfig(callback) {
         ['external_api_bearer_token'],
         (err2, row2) => {
           const bearerToken = row2 && row2.config_value ? String(row2.config_value) : (process.env.EXTERNAL_API_BEARER_TOKEN || '');
-          callback(err || err2, { baseUrl, bearerToken: bearerToken || '' });
+          callback(err || err2, { baseUrl, bearerToken: bearerToken || '', id: 'default', label: 'Default' });
         }
       );
     }
   );
+}
+
+/**
+ * Normalize one target entry from JSON / Admin payload.
+ * @returns {{ id: string, label: string, baseUrl: string, bearerToken: string, enabled: boolean }|null}
+ */
+function normalizeExternalManufacturingTargetEntry(raw, index) {
+  if (!raw || typeof raw !== 'object') return null;
+  const idRaw = raw.id != null ? String(raw.id).trim() : '';
+  const id = idRaw || (index === 0 ? 'default' : `target-${index + 1}`);
+  const baseUrl = normalizeExternalApiBaseUrl(raw.baseUrl != null ? String(raw.baseUrl) : '');
+  const bearerToken = raw.bearerToken != null ? String(raw.bearerToken) : '';
+  const label = raw.label != null && String(raw.label).trim() !== '' ? String(raw.label).trim() : id;
+  const enabled = raw.enabled === false || raw.enabled === 0 || raw.enabled === 'false' ? false : true;
+  return { id, label, baseUrl, bearerToken, enabled };
+}
+
+function parseExternalManufacturingTargetsJson(raw) {
+  if (!raw || typeof raw !== 'string' || raw.trim() === '') return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const out = [];
+    const seen = new Set();
+    parsed.forEach((item, index) => {
+      const norm = normalizeExternalManufacturingTargetEntry(item, index);
+      if (!norm) return;
+      let id = norm.id;
+      if (seen.has(id)) {
+        id = `${id}-${index + 1}`;
+        norm.id = id;
+      }
+      seen.add(id);
+      out.push(norm);
+    });
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * All configured outbound manufacturing targets (enabled + disabled).
+ * Prefers admin_config.external_api_targets (JSON); falls back to EXTERNAL_API_TARGETS env,
+ * then legacy single base URL + bearer.
+ * @param {(err: Error|null, targets: Array<{id:string,label:string,baseUrl:string,bearerToken:string,enabled:boolean}>) => void} callback
+ */
+function getExternalManufacturingTargets(callback) {
+  db.get(
+    'SELECT config_value FROM admin_config WHERE config_key = $1',
+    ['external_api_targets'],
+    (err, row) => {
+      if (err) {
+        return callback(err, []);
+      }
+      const fromDb = row && row.config_value ? String(row.config_value) : '';
+      let targets = parseExternalManufacturingTargetsJson(fromDb);
+      if (!targets) {
+        targets = parseExternalManufacturingTargetsJson((process.env.EXTERNAL_API_TARGETS || '').trim());
+      }
+      if (targets && targets.length > 0) {
+        return callback(null, targets);
+      }
+      getLegacyExternalManufacturingConfig((legacyErr, cfg) => {
+        if (legacyErr) {
+          return callback(legacyErr, []);
+        }
+        if (cfg && cfg.baseUrl) {
+          return callback(null, [
+            {
+              id: 'default',
+              label: 'Default',
+              baseUrl: cfg.baseUrl,
+              bearerToken: cfg.bearerToken || '',
+              enabled: true
+            }
+          ]);
+        }
+        callback(null, []);
+      });
+    }
+  );
+}
+
+/**
+ * Enabled targets with non-empty baseUrl (used by sync loops).
+ */
+function getEnabledExternalManufacturingTargets(callback) {
+  getExternalManufacturingTargets((err, targets) => {
+    if (err) {
+      return callback(err, []);
+    }
+    const enabled = (targets || []).filter((t) => t && t.enabled && t.baseUrl);
+    callback(null, enabled);
+  });
+}
+
+/**
+ * First enabled target (compat for admin resolve-id / manual sender).
+ * Shape: { baseUrl, bearerToken, id, label }
+ */
+function getExternalManufacturingConfig(callback) {
+  getEnabledExternalManufacturingTargets((err, targets) => {
+    if (err) {
+      return callback(err, { baseUrl: '', bearerToken: '', id: 'default', label: 'Default' });
+    }
+    if (targets && targets.length > 0) {
+      const first = targets[0];
+      return callback(null, {
+        baseUrl: first.baseUrl,
+        bearerToken: first.bearerToken || '',
+        id: first.id,
+        label: first.label
+      });
+    }
+    getLegacyExternalManufacturingConfig(callback);
+  });
 }
 
 /** Legacy URL resolution (pre–base-url config) when external_api_base_url is not set. */
@@ -955,6 +1072,10 @@ module.exports = {
   buildManufacturingItemUrl,
   buildManufacturingItemStatusUrl,
   parseExternalManufacturingId,
+  normalizeExternalManufacturingTargetEntry,
+  parseExternalManufacturingTargetsJson,
+  getExternalManufacturingTargets,
+  getEnabledExternalManufacturingTargets,
   getExternalManufacturingConfig,
   getExternalAPIUrl,
   getFallbackUrl,

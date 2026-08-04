@@ -8,9 +8,9 @@ function Admin() {
   const [sessionId, setSessionId] = useState('');
   const [sessionIdConfigured, setSessionIdConfigured] = useState(false);
   const [odooBaseUrl, setOdooBaseUrl] = useState('');
-  const [externalApiBaseUrl, setExternalApiBaseUrl] = useState('');
-  const [externalApiBearerTokenInput, setExternalApiBearerTokenInput] = useState('');
-  const [externalApiBearerConfigured, setExternalApiBearerConfigured] = useState(false);
+  const [externalApiTargets, setExternalApiTargets] = useState([
+    { id: 'default', label: 'Default', baseUrl: '', bearerTokenInput: '', bearerTokenConfigured: false, enabled: true }
+  ]);
   const [apiKey, setApiKey] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [generatedApiKey, setGeneratedApiKey] = useState('');
@@ -49,9 +49,30 @@ function Admin() {
         setSessionId('');
         setSessionIdConfigured(!!response.data.config.sessionIdConfigured);
         setOdooBaseUrl(response.data.config.odooBaseUrl || '');
-        setExternalApiBaseUrl(response.data.config.externalApiBaseUrl || '');
-        setExternalApiBearerTokenInput('');
-        setExternalApiBearerConfigured(!!response.data.config.externalApiBearerTokenConfigured);
+        const targetsFromApi = response.data.config.externalApiTargets;
+        if (Array.isArray(targetsFromApi) && targetsFromApi.length > 0) {
+          setExternalApiTargets(
+            targetsFromApi.map((t) => ({
+              id: t.id || 'default',
+              label: t.label || t.id || '',
+              baseUrl: t.baseUrl || '',
+              bearerTokenInput: '',
+              bearerTokenConfigured: !!t.bearerTokenConfigured,
+              enabled: t.enabled !== false
+            }))
+          );
+        } else {
+          setExternalApiTargets([
+            {
+              id: 'default',
+              label: 'Default',
+              baseUrl: response.data.config.externalApiBaseUrl || '',
+              bearerTokenInput: '',
+              bearerTokenConfigured: !!response.data.config.externalApiBearerTokenConfigured,
+              enabled: true
+            }
+          ]);
+        }
         setApiKey(response.data.config.apiKey || '');
         setApiKeyConfigured(response.data.config.apiKeyConfigured || false);
         setWmsApiBaseUrl(response.data.config.wmsApiBaseUrl || 'https://wms.foom.id/api');
@@ -267,16 +288,24 @@ function Admin() {
     try {
       const payload = {
         odooBaseUrl: odooBaseUrl.trim() || 'https://foomx.odoo.com',
-        externalApiBaseUrl: externalApiBaseUrl.trim(),
+        externalApiTargets: externalApiTargets.map((t) => {
+          const entry = {
+            id: String(t.id || '').trim() || 'default',
+            label: String(t.label || '').trim() || String(t.id || 'default'),
+            baseUrl: String(t.baseUrl || '').trim(),
+            enabled: t.enabled !== false
+          };
+          if (String(t.bearerTokenInput || '').trim() !== '') {
+            entry.bearerToken = String(t.bearerTokenInput).trim();
+          }
+          return entry;
+        })
       };
       if (sessionId.trim()) {
         payload.sessionId = sessionId.trim();
       }
       if (apiKey.trim() && !apiKey.includes('*')) {
         payload.apiKey = apiKey.trim();
-      }
-      if (externalApiBearerTokenInput.trim() !== '') {
-        payload.externalApiBearerToken = externalApiBearerTokenInput.trim();
       }
       payload.wmsApiBaseUrl = wmsApiBaseUrl.trim() || 'https://wms.foom.id/api';
       payload.wmsUsername = wmsUsername.trim();
@@ -289,7 +318,6 @@ function Admin() {
 
       if (response.data.success) {
         setMessage({ type: 'success', text: 'Configuration saved successfully!' });
-        setExternalApiBearerTokenInput('');
         setWmsAccessTokenInput('');
         await fetchConfig();
         await testConnection();
@@ -415,7 +443,7 @@ function Admin() {
   const handlePushExternalManufacturingIdle = async () => {
     if (
       !window.confirm(
-        'Register liquid MOs from cache to the external manufacturing API (POST idle where missing)? Requires external_api_base_url and token.'
+        'Register liquid MOs from cache to all enabled external manufacturing endpoints (POST idle where missing)?'
       )
     ) {
       return;
@@ -431,6 +459,7 @@ function Admin() {
         const lim = response.data.limitUsed != null ? response.data.limitUsed : '';
         const parts = [
           lim !== '' ? `MO rows scanned (max): ${lim}` : '',
+          response.data.targetsProcessed != null ? `targets: ${response.data.targetsProcessed}` : '',
           `posted: ${response.data.posted}`,
           `skipped (already mapped): ${response.data.skipped}`,
           `linked from API: ${response.data.linkedFromRemote}`,
@@ -511,36 +540,149 @@ function Admin() {
             </small>
           </div>
           <div className="form-group">
-            <label>External manufacturing API — Base URL (produksi liquid)</label>
-            <input
-              type="text"
-              value={externalApiBaseUrl}
-              onChange={(e) => setExternalApiBaseUrl(e.target.value)}
-              placeholder="http://127.0.0.1:8083"
-              style={{ width: '100%', padding: '8px', fontSize: '14px' }}
-            />
-            <small style={{ color: '#94a3b8', fontSize: '12px' }}>
-              Server menambahkan path tetap <code>/api/v1/manufacturing</code> untuk POST/PUT sinkron MO liquid (confirm input &amp; submit MO). Device/cartridge tidak memakai konfigurasi ini.
+            <label>External manufacturing API endpoints (produksi liquid)</label>
+            <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginBottom: '12px' }}>
+              Setiap endpoint memakai path tetap <code>/api/v1/manufacturing</code> untuk POST/PUT/PATCH sinkron MO liquid
+              (confirm input, submit MO, idle push). Device/cartridge tidak memakai konfigurasi ini. Id target harus unik
+              (dipakai di map UUID lokal).
             </small>
-          </div>
-          <div className="form-group">
-            <label>Bearer token (API eksternal)</label>
-            {externalApiBearerConfigured && (
-              <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '8px' }}>
-                Token tersimpan (ditampilkan termasking di server). Isi field di bawah hanya jika ingin mengganti token.
-              </p>
-            )}
-            <input
-              type="password"
-              value={externalApiBearerTokenInput}
-              onChange={(e) => setExternalApiBearerTokenInput(e.target.value)}
-              placeholder={externalApiBearerConfigured ? '•••••••• (kosongkan jika tidak diubah)' : 'Bearer token'}
-              autoComplete="off"
-              style={{ width: '100%', padding: '8px', fontSize: '14px' }}
-            />
-            <small style={{ color: '#94a3b8', fontSize: '12px' }}>
-              Authorization: Bearer … untuk <code>POST/GET/PUT /api/v1/manufacturing</code>.
-            </small>
+            {externalApiTargets.map((target, index) => (
+              <div
+                key={target.id + '-' + index}
+                style={{
+                  border: '1px solid #334155',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  marginBottom: '12px',
+                  background: '#0f172a'
+                }}
+              >
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '8px', alignItems: 'center' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>
+                    <input
+                      type="checkbox"
+                      checked={target.enabled !== false}
+                      onChange={(e) => {
+                        const next = [...externalApiTargets];
+                        next[index] = { ...next[index], enabled: e.target.checked };
+                        setExternalApiTargets(next);
+                      }}
+                    />
+                    Enabled
+                  </label>
+                  {externalApiTargets.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setExternalApiTargets(externalApiTargets.filter((_, i) => i !== index))}
+                      style={{
+                        marginLeft: 'auto',
+                        background: 'transparent',
+                        border: '1px solid #7f1d1d',
+                        color: '#fca5a5',
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        cursor: 'pointer',
+                        fontSize: '12px'
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#94a3b8' }}>Id (stabil)</label>
+                    <input
+                      type="text"
+                      value={target.id}
+                      onChange={(e) => {
+                        const next = [...externalApiTargets];
+                        next[index] = { ...next[index], id: e.target.value };
+                        setExternalApiTargets(next);
+                      }}
+                      placeholder="default"
+                      style={{ width: '100%', padding: '8px', fontSize: '14px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', color: '#94a3b8' }}>Label</label>
+                    <input
+                      type="text"
+                      value={target.label}
+                      onChange={(e) => {
+                        const next = [...externalApiTargets];
+                        next[index] = { ...next[index], label: e.target.value };
+                        setExternalApiTargets(next);
+                      }}
+                      placeholder="FOOM primary"
+                      style={{ width: '100%', padding: '8px', fontSize: '14px' }}
+                    />
+                  </div>
+                </div>
+                <div className="form-group" style={{ marginBottom: '8px' }}>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Base URL</label>
+                  <input
+                    type="text"
+                    value={target.baseUrl}
+                    onChange={(e) => {
+                      const next = [...externalApiTargets];
+                      next[index] = { ...next[index], baseUrl: e.target.value };
+                      setExternalApiTargets(next);
+                    }}
+                    placeholder="http://127.0.0.1:8083"
+                    style={{ width: '100%', padding: '8px', fontSize: '14px' }}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>Bearer token</label>
+                  {target.bearerTokenConfigured && (
+                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '6px' }}>
+                      Token tersimpan. Isi field hanya jika ingin mengganti.
+                    </p>
+                  )}
+                  <input
+                    type="password"
+                    value={target.bearerTokenInput}
+                    onChange={(e) => {
+                      const next = [...externalApiTargets];
+                      next[index] = { ...next[index], bearerTokenInput: e.target.value };
+                      setExternalApiTargets(next);
+                    }}
+                    placeholder={target.bearerTokenConfigured ? '•••••••• (kosongkan jika tidak diubah)' : 'Bearer token'}
+                    autoComplete="off"
+                    style={{ width: '100%', padding: '8px', fontSize: '14px' }}
+                  />
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                const n = externalApiTargets.length + 1;
+                setExternalApiTargets([
+                  ...externalApiTargets,
+                  {
+                    id: `target-${n}`,
+                    label: `Endpoint ${n}`,
+                    baseUrl: '',
+                    bearerTokenInput: '',
+                    bearerTokenConfigured: false,
+                    enabled: true
+                  }
+                ]);
+              }}
+              style={{
+                background: '#1e293b',
+                border: '1px solid #475569',
+                color: '#e2e8f0',
+                borderRadius: '6px',
+                padding: '8px 14px',
+                cursor: 'pointer',
+                fontSize: '13px'
+              }}
+            >
+              Add endpoint
+            </button>
           </div>
 
           <div className="form-group" style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #334155' }}>

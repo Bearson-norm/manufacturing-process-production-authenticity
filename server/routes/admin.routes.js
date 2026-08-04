@@ -5,6 +5,8 @@ const { db, pool } = require('../database');
 const { pushIdleManufacturingForLiquidMosFromCache, getExternalManufacturingMapRow } = require('../services/liquid-external-manufacturing.service');
 const {
   getExternalManufacturingConfig,
+  getExternalManufacturingTargets,
+  normalizeExternalManufacturingTargetEntry,
   buildManufacturingItemUrl,
   buildManufacturingItemStatusUrl,
   sendToExternalAPIWithUrl,
@@ -62,7 +64,8 @@ router.get('/config', (req, res) => {
             odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com',
             externalApiBaseUrl: process.env.EXTERNAL_API_BASE_URL || '',
             externalApiBearerToken: null,
-            externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN
+            externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN,
+            externalApiTargets: []
           }
         });
       }
@@ -77,7 +80,8 @@ router.get('/config', (req, res) => {
             odooBaseUrl: process.env.ODOO_API_URL || 'https://foomx.odoo.com',
             externalApiBaseUrl: process.env.EXTERNAL_API_BASE_URL || '',
             externalApiBearerToken: null,
-            externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN
+            externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN,
+            externalApiTargets: []
           }
         });
       }
@@ -88,83 +92,93 @@ router.get('/config', (req, res) => {
           db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['odoo_base_url'], (err2, row2) => {
           const odooBaseUrl = row2 ? row2.config_value : process.env.ODOO_API_URL || 'https://foomx.odoo.com';
 
-          db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_base_url'], (ebErr, ebRow) => {
-            const externalApiBaseUrl =
-              ebRow && ebRow.config_value ? String(ebRow.config_value).trim() : (process.env.EXTERNAL_API_BASE_URL || '').trim();
+          getExternalManufacturingTargets((_targetsErr, targetsRaw) => {
+            const targets = Array.isArray(targetsRaw) ? targetsRaw : [];
+            const externalApiTargets = targets.map((t) => ({
+              id: t.id,
+              label: t.label,
+              baseUrl: t.baseUrl,
+              bearerToken: maskSecret(t.bearerToken || ''),
+              bearerTokenConfigured: !!(t.bearerToken && String(t.bearerToken).trim()),
+              enabled: t.enabled !== false
+            }));
+            const firstEnabled = targets.find((t) => t.enabled && t.baseUrl) || targets[0] || null;
+            const externalApiBaseUrl = firstEnabled
+              ? firstEnabled.baseUrl
+              : (process.env.EXTERNAL_API_BASE_URL || '').trim();
+            const bearerRaw = firstEnabled
+              ? firstEnabled.bearerToken || ''
+              : process.env.EXTERNAL_API_BEARER_TOKEN || '';
+            const maskedBearer = maskSecret(bearerRaw);
 
-            db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_bearer_token'], (btErr, btRow) => {
-              const bearerRaw =
-                btRow && btRow.config_value ? String(btRow.config_value) : process.env.EXTERNAL_API_BEARER_TOKEN || '';
-              const maskedBearer = maskSecret(bearerRaw);
+            db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url_active'], (err3, row3) => {
+              const externalApiUrlActive = row3
+                ? row3.config_value
+                : process.env.EXTERNAL_API_URL_ACTIVE || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
 
-              db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url_active'], (err3, row3) => {
-                const externalApiUrlActive = row3
-                  ? row3.config_value
-                  : process.env.EXTERNAL_API_URL_ACTIVE || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
+              db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url_completed'], (err4, row4) => {
+                const externalApiUrlCompleted = row4
+                  ? row4.config_value
+                  : process.env.EXTERNAL_API_URL_COMPLETED || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
 
-                db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url_completed'], (err4, row4) => {
-                  const externalApiUrlCompleted = row4
-                    ? row4.config_value
-                    : process.env.EXTERNAL_API_URL_COMPLETED || process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
+                db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url'], (err5, row5) => {
+                  const externalApiUrl = row5
+                    ? row5.config_value
+                    : process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
 
-                  db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['external_api_url'], (err5, row5) => {
-                    const externalApiUrl = row5
-                      ? row5.config_value
-                      : process.env.EXTERNAL_API_URL || 'https://foom-dash.vercel.app/API';
+                  db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['api_key'], (err6, row6) => {
+                    const apiKey = row6 ? row6.config_value : null;
+                    const maskedApiKey = maskSecret(apiKey);
 
-                    db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['api_key'], (err6, row6) => {
-                      const apiKey = row6 ? row6.config_value : null;
-                      const maskedApiKey = maskSecret(apiKey);
+                    db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_api_base_url'], (wmsUrlErr, wmsUrlRow) => {
+                      const wmsApiBaseUrl = wmsUrlRow && wmsUrlRow.config_value
+                        ? wmsUrlRow.config_value
+                        : (process.env.WMS_API_BASE_URL || 'https://wms.foom.id/api');
 
-                      db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_api_base_url'], (wmsUrlErr, wmsUrlRow) => {
-                        const wmsApiBaseUrl = wmsUrlRow && wmsUrlRow.config_value
-                          ? wmsUrlRow.config_value
-                          : (process.env.WMS_API_BASE_URL || 'https://wms.foom.id/api');
+                      db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_access_token'], (wmsTokErr, wmsTokRow) => {
+                        const wmsTokenRaw = wmsTokRow && wmsTokRow.config_value
+                          ? String(wmsTokRow.config_value)
+                          : (process.env.WMS_ACCESS_TOKEN || '');
+                        const maskedWmsToken = maskSecret(wmsTokenRaw);
 
-                        db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_access_token'], (wmsTokErr, wmsTokRow) => {
-                          const wmsTokenRaw = wmsTokRow && wmsTokRow.config_value
-                            ? String(wmsTokRow.config_value)
-                            : (process.env.WMS_ACCESS_TOKEN || '');
-                          const maskedWmsToken = maskSecret(wmsTokenRaw);
+                        db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_username'], (wmsUserErr, wmsUserRow) => {
+                          const wmsUsername = wmsUserRow && wmsUserRow.config_value
+                            ? wmsUserRow.config_value
+                            : (process.env.WMS_USERNAME || '');
 
-                          db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_username'], (wmsUserErr, wmsUserRow) => {
-                            const wmsUsername = wmsUserRow && wmsUserRow.config_value
-                              ? wmsUserRow.config_value
-                              : (process.env.WMS_USERNAME || '');
+                          db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_company_id'], (wmsCoErr, wmsCoRow) => {
+                            const wmsCompanyId = wmsCoRow && wmsCoRow.config_value
+                              ? wmsCoRow.config_value
+                              : (process.env.WMS_COMPANY_ID || 'FOOM');
 
-                            db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_company_id'], (wmsCoErr, wmsCoRow) => {
-                              const wmsCompanyId = wmsCoRow && wmsCoRow.config_value
-                                ? wmsCoRow.config_value
-                                : (process.env.WMS_COMPANY_ID || 'FOOM');
+                            db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_site'], (wmsSiteErr, wmsSiteRow) => {
+                              const wmsSite = wmsSiteRow && wmsSiteRow.config_value
+                                ? wmsSiteRow.config_value
+                                : (process.env.WMS_SITE || 'PROD');
 
-                              db.get('SELECT config_value FROM admin_config WHERE config_key = $1', ['wms_site'], (wmsSiteErr, wmsSiteRow) => {
-                                const wmsSite = wmsSiteRow && wmsSiteRow.config_value
-                                  ? wmsSiteRow.config_value
-                                  : (process.env.WMS_SITE || 'PROD');
-
-                                res.json({
-                                  success: true,
-                                  config: {
-                                    sessionId: null,
-                                    sessionIdMasked: maskSecret(sessionId),
-                                    sessionIdConfigured: !!sessionId,
-                                    odooBaseUrl: odooBaseUrl,
-                                    externalApiBaseUrl: externalApiBaseUrl,
-                                    externalApiBearerToken: maskedBearer,
-                                    externalApiBearerTokenConfigured: !!bearerRaw,
-                                    externalApiUrl: externalApiUrl,
-                                    externalApiUrlActive: externalApiUrlActive,
-                                    externalApiUrlCompleted: externalApiUrlCompleted,
-                                    apiKey: maskedApiKey,
-                                    apiKeyConfigured: !!apiKey,
-                                    wmsApiBaseUrl,
-                                    wmsAccessToken: maskedWmsToken,
-                                    wmsAccessTokenConfigured: !!wmsTokenRaw,
-                                    wmsUsername,
-                                    wmsCompanyId,
-                                    wmsSite
-                                  }
-                                });
+                              res.json({
+                                success: true,
+                                config: {
+                                  sessionId: null,
+                                  sessionIdMasked: maskSecret(sessionId),
+                                  sessionIdConfigured: !!sessionId,
+                                  odooBaseUrl: odooBaseUrl,
+                                  externalApiBaseUrl: externalApiBaseUrl,
+                                  externalApiBearerToken: maskedBearer,
+                                  externalApiBearerTokenConfigured: !!bearerRaw,
+                                  externalApiTargets,
+                                  externalApiUrl: externalApiUrl,
+                                  externalApiUrlActive: externalApiUrlActive,
+                                  externalApiUrlCompleted: externalApiUrlCompleted,
+                                  apiKey: maskedApiKey,
+                                  apiKeyConfigured: !!apiKey,
+                                  wmsApiBaseUrl,
+                                  wmsAccessToken: maskedWmsToken,
+                                  wmsAccessTokenConfigured: !!wmsTokenRaw,
+                                  wmsUsername,
+                                  wmsCompanyId,
+                                  wmsSite
+                                }
                               });
                             });
                           });
@@ -195,6 +209,7 @@ router.put('/config', (req, res) => {
     odooBaseUrl,
     externalApiBaseUrl,
     externalApiBearerToken,
+    externalApiTargets,
     externalApiUrl,
     externalApiUrlActive,
     externalApiUrlCompleted,
@@ -266,6 +281,9 @@ router.put('/config', (req, res) => {
     }
 
     function saveExternalManufacturingV1() {
+      if (Array.isArray(externalApiTargets)) {
+        return saveExternalApiTargetsList();
+      }
       if (externalApiBaseUrl !== undefined) {
         db.run(
           `INSERT INTO admin_config (config_key, config_value, updated_at) 
@@ -282,6 +300,92 @@ router.put('/config', (req, res) => {
       } else {
         saveExternalBearerToken();
       }
+    }
+
+    function saveExternalApiTargetsList() {
+      getExternalManufacturingTargets((existingErr, existingTargets) => {
+        if (existingErr) {
+          return res.status(500).json({ success: false, error: existingErr.message });
+        }
+        const existingById = {};
+        (existingTargets || []).forEach((t) => {
+          existingById[t.id] = t;
+        });
+
+        const seenIds = new Set();
+        const normalized = [];
+        for (let i = 0; i < externalApiTargets.length; i++) {
+          const raw = externalApiTargets[i] || {};
+          const entry = normalizeExternalManufacturingTargetEntry(raw, i);
+          if (!entry) continue;
+          if (seenIds.has(entry.id)) {
+            return res.status(400).json({ success: false, error: `Duplicate external API target id: ${entry.id}` });
+          }
+          seenIds.add(entry.id);
+
+          let bearerToken = entry.bearerToken;
+          if (isMaskedOrEmptySecret(bearerToken)) {
+            bearerToken = existingById[entry.id] ? existingById[entry.id].bearerToken || '' : '';
+          }
+          if (entry.enabled && !entry.baseUrl) {
+            return res.status(400).json({
+              success: false,
+              error: `Base URL is required for enabled target "${entry.label || entry.id}"`
+            });
+          }
+          normalized.push({
+            id: entry.id,
+            label: entry.label,
+            baseUrl: entry.baseUrl,
+            bearerToken,
+            enabled: entry.enabled
+          });
+        }
+
+        const jsonVal = JSON.stringify(normalized);
+        const firstEnabled = normalized.find((t) => t.enabled && t.baseUrl) || normalized[0] || null;
+        const legacyBase = firstEnabled ? firstEnabled.baseUrl : '';
+        const legacyToken = firstEnabled ? firstEnabled.bearerToken || '' : '';
+
+        db.run(
+          `INSERT INTO admin_config (config_key, config_value, updated_at)
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+          ['external_api_targets', jsonVal],
+          function(errT) {
+            if (errT) {
+              return res.status(500).json({ success: false, error: errT.message });
+            }
+            db.run(
+              `INSERT INTO admin_config (config_key, config_value, updated_at)
+               VALUES ($1, $2, CURRENT_TIMESTAMP)
+               ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+              ['external_api_base_url', legacyBase],
+              function(errB) {
+                if (errB) {
+                  return res.status(500).json({ success: false, error: errB.message });
+                }
+                if (legacyToken && !isMaskedOrEmptySecret(legacyToken)) {
+                  db.run(
+                    `INSERT INTO admin_config (config_key, config_value, updated_at)
+                     VALUES ($1, $2, CURRENT_TIMESTAMP)
+                     ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+                    ['external_api_bearer_token', legacyToken],
+                    function(errTok) {
+                      if (errTok) {
+                        return res.status(500).json({ success: false, error: errTok.message });
+                      }
+                      saveLegacyExternalApiUrls();
+                    }
+                  );
+                } else {
+                  saveLegacyExternalApiUrls();
+                }
+              }
+            );
+          }
+        );
+      });
     }
 
     function saveExternalBearerToken() {
@@ -959,6 +1063,7 @@ router.post('/push-external-manufacturing-idle', async (req, res) => {
       skipped: summary.skipped,
       linkedFromRemote: summary.linkedFromRemote,
       limitUsed: summary.limitUsed,
+      targetsProcessed: summary.targetsProcessed,
       dateWindow: summary.dateWindow,
       errors: summary.errors.slice(0, 50),
       errorCount: summary.errors.length

@@ -258,16 +258,61 @@ async function applyBootstrapSchema(client) {
     `);
 
     // Map MO (liquid) to external API manufacturing row UUID (POST create response)
+    // `target` = stable endpoint id from external_api_targets config (multi-host sync).
     await client.query(`
       CREATE TABLE IF NOT EXISTS external_manufacturing_map (
         id SERIAL PRIMARY KEY,
         mo_number TEXT NOT NULL,
         production_type TEXT NOT NULL DEFAULT 'liquid',
+        target TEXT NOT NULL DEFAULT 'default',
         external_resource_id TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (mo_number, production_type)
+        UNIQUE (mo_number, production_type, target)
       )
+    `);
+
+    // Migrate existing external_manufacturing_map: add target + widen unique key
+    await client.query(`
+      DO $$
+      DECLARE
+        has_triple_unique boolean;
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'external_manufacturing_map' AND column_name = 'target'
+        ) THEN
+          ALTER TABLE external_manufacturing_map ADD COLUMN target TEXT NOT NULL DEFAULT 'default';
+        END IF;
+
+        -- Drop legacy UNIQUE (mo_number, production_type) if present
+        IF EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = 'public.external_manufacturing_map'::regclass
+            AND contype = 'u'
+            AND conname = 'external_manufacturing_map_mo_number_production_type_key'
+        ) THEN
+          ALTER TABLE external_manufacturing_map
+            DROP CONSTRAINT external_manufacturing_map_mo_number_production_type_key;
+        END IF;
+
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_constraint c
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+          WHERE c.conrelid = 'public.external_manufacturing_map'::regclass
+            AND c.contype = 'u'
+          GROUP BY c.oid
+          HAVING COUNT(*) = 3
+            AND bool_and(a.attname IN ('mo_number', 'production_type', 'target'))
+        ) INTO has_triple_unique;
+
+        IF NOT COALESCE(has_triple_unique, false) THEN
+          ALTER TABLE external_manufacturing_map
+            ADD CONSTRAINT external_manufacturing_map_mo_prod_target_key
+            UNIQUE (mo_number, production_type, target);
+        END IF;
+      END $$;
     `);
 
     // Admin Configuration table
@@ -411,6 +456,7 @@ async function applyBootstrapSchema(client) {
       'CREATE INDEX IF NOT EXISTS idx_manufacturing_identity_created_at ON manufacturing_identity(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_external_mfg_map_mo ON external_manufacturing_map(mo_number)',
       'CREATE INDEX IF NOT EXISTS idx_external_mfg_map_type ON external_manufacturing_map(production_type)',
+      'CREATE INDEX IF NOT EXISTS idx_external_mfg_map_target ON external_manufacturing_map(target)',
       'CREATE INDEX IF NOT EXISTS idx_authenticity_vendor_active ON authenticity_vendor(is_active)',
       'CREATE INDEX IF NOT EXISTS idx_wms_carton_mo ON wms_repacking_carton(manufacturing_order_id)',
       'CREATE INDEX IF NOT EXISTS idx_wms_carton_prieds_id ON wms_repacking_carton(prieds_id)',
