@@ -183,6 +183,42 @@ router.get('/cartridge', (req, res) => {
   });
 });
 
+// GET /api/production/active-mo-status
+// Latest active MO per production type by created_at (input time), not update time
+router.get('/active-mo-status', (req, res) => {
+  const types = [
+    { key: 'liquid', table: 'production_liquid' },
+    { key: 'device', table: 'production_device' },
+    { key: 'cartridge', table: 'production_cartridge' }
+  ];
+
+  const fetchLatestActive = (table) => new Promise((resolve, reject) => {
+    db.get(
+      `SELECT mo_number, sku_name, session_id, leader_name, shift_number, pic, created_at
+       FROM ${table}
+       WHERE status = 'active'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row || null);
+      }
+    );
+  });
+
+  Promise.all(types.map((t) => fetchLatestActive(t.table)))
+    .then((rows) => {
+      const result = {};
+      types.forEach((t, i) => {
+        result[t.key] = rows[i];
+      });
+      res.json(result);
+    })
+    .catch((err) => {
+      res.status(500).json({ error: err.message });
+    });
+});
+
 // GET /api/production/report
 router.get('/report', (req, res) => {
   const { type, mo_number, pic, date_from, date_to, status, limit, offset } = req.query;

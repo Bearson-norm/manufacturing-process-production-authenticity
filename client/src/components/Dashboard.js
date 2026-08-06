@@ -1,12 +1,72 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from '../axiosAuth';
 import './Dashboard.css';
+
+const ADMIN_MENU_ITEMS = [
+  { path: '/admin', icon: '⚙️', label: 'Admin Configuration' },
+  { path: '/report-dashboard', icon: '📊', label: 'Laporan Manufacturing' },
+  { path: '/production-chart', icon: '📈', label: 'Grafik Statistik Produksi Pabrik' },
+  { path: '/wms-explorer', icon: '🔍', label: 'WMS vs Production Explorer' },
+  { path: '/wms-accuracy-report', icon: '📋', label: 'Laporan Keakuratan QR WMS' },
+  { path: '/wms-production-compare', icon: '⚖️', label: 'Pembanding Qty Production vs WMS' },
+  { path: '/external-manufacturing-sender', icon: '📡', label: 'External Manufacturing Sender' },
+];
+
+const MO_STATUS_TYPES = [
+  { key: 'liquid', label: 'Production Liquid', icon: '💧', path: '/production/liquid' },
+  { key: 'device', label: 'Production Device', icon: '📱', path: '/production/device' },
+  { key: 'cartridge', label: 'Production Cartridge', icon: '🔋', path: '/production/cartridge' },
+];
+
+function formatInputTime(value) {
+  if (!value) return '—';
+  try {
+    return new Date(value).toLocaleString('id-ID', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+  } catch {
+    return String(value);
+  }
+}
 
 function Dashboard({ setIsAuthenticated }) {
   const navigate = useNavigate();
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [moStatus, setMoStatus] = useState({ liquid: null, device: null, cartridge: null });
+  const [moStatusLoading, setMoStatusLoading] = useState(true);
+  const [moStatusError, setMoStatusError] = useState('');
   const userRole = localStorage.getItem('userRole') || 'production';
   const isAdmin = userRole === 'admin';
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadMoStatus = async () => {
+      setMoStatusLoading(true);
+      setMoStatusError('');
+      try {
+        const response = await axios.get('/api/production/active-mo-status');
+        if (!cancelled) {
+          setMoStatus(response.data || { liquid: null, device: null, cartridge: null });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setMoStatusError(err.response?.data?.error || 'Gagal memuat status MO aktif');
+        }
+      } finally {
+        if (!cancelled) {
+          setMoStatusLoading(false);
+        }
+      }
+    };
+
+    loadMoStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
@@ -24,89 +84,124 @@ function Dashboard({ setIsAuthenticated }) {
           Logout
         </button>
       </div>
-      <div className="dashboard-content">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2 style={{ margin: 0 }}>Select Production Type</h2>
-          <button 
-            onClick={() => setShowHelpModal(true)}
-            style={{
-              padding: '10px 20px',
-              background: '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '5px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <span style={{ fontSize: '18px' }}>ℹ️</span>
-            Petunjuk Pengisian Authenticity
-          </button>
-        </div>
-        <div className="production-cards">
-          <div className="production-card" onClick={() => navigate('/production/liquid')}>
-            <div className="card-icon">💧</div>
-            <h3>Production Liquid</h3>
-            <p>Manage liquid production processes</p>
-          </div>
-          <div className="production-card" onClick={() => navigate('/production/device')}>
-            <div className="card-icon">📱</div>
-            <h3>Production Device</h3>
-            <p>Manage device production processes</p>
-          </div>
-          <div className="production-card" onClick={() => navigate('/production/cartridge')}>
-            <div className="card-icon">🔋</div>
-            <h3>Production Cartridge</h3>
-            <p>Manage cartridge production processes</p>
-          </div>
-        </div>
 
+      <div className={`dashboard-body${isAdmin ? ' dashboard-body--with-nav' : ''}`}>
         {isAdmin && (
-          <>
-            <h2 style={{ marginTop: '48px' }}>Menu Lainnya</h2>
-            <div className="production-cards">
-              <div className="production-card" onClick={() => navigate('/admin')}>
-                <div className="card-icon">⚙️</div>
-                <h3>Admin Configuration</h3>
-                <p>Configure Odoo API and manage data</p>
-              </div>
-              <div className="production-card" onClick={() => navigate('/report-dashboard')}>
-                <div className="card-icon">📊</div>
-                <h3>Laporan Manufacturing</h3>
-                <p>Lihat laporan hasil proses manufacturing berdasarkan MO yang selesai</p>
-              </div>
-              <div className="production-card" onClick={() => navigate('/production-chart')}>
-                <div className="card-icon">📈</div>
-                <h3>Grafik Statistik Produksi Pabrik</h3>
-                <p>Analisis performa produksi per leader dengan grafik interaktif</p>
-              </div>
-              <div className="production-card" onClick={() => navigate('/wms-explorer')}>
-                <div className="card-icon">🔍</div>
-                <h3>WMS vs Production Explorer</h3>
-                <p>Bandingkan data repacking WMS dengan production_results per MO</p>
-              </div>
-              <div className="production-card" onClick={() => navigate('/wms-accuracy-report')}>
-                <div className="card-icon">📋</div>
-                <h3>Laporan Keakuratan QR WMS</h3>
-                <p>Semua MO production dengan persentase error QR dan status compare WMS</p>
-              </div>
-              <div className="production-card" onClick={() => navigate('/wms-production-compare')}>
-                <div className="card-icon">⚖️</div>
-                <h3>Pembanding Qty Production vs WMS</h3>
-                <p>Bandingkan qty production_results (SoT) vs WMS plus cakupan range terbalik</p>
-              </div>
-              <div className="production-card" onClick={() => navigate('/external-manufacturing-sender')}>
-                <div className="card-icon">📡</div>
-                <h3>External Manufacturing Sender</h3>
-                <p>Kirim manual PUT/PATCH ke FOOM dengan parameter Submit MO liquid</p>
-              </div>
-            </div>
-          </>
+          <aside className="dashboard-nav">
+            <h2 className="dashboard-nav-title">Menu Lainnya</h2>
+            <nav className="dashboard-nav-list">
+              {ADMIN_MENU_ITEMS.map((item) => (
+                <button
+                  key={item.path}
+                  type="button"
+                  className="dashboard-nav-item"
+                  onClick={() => navigate(item.path)}
+                >
+                  <span className="dashboard-nav-icon" aria-hidden="true">{item.icon}</span>
+                  <span className="dashboard-nav-label">{item.label}</span>
+                </button>
+              ))}
+            </nav>
+          </aside>
         )}
+
+        <div className="dashboard-content">
+          <div className="dashboard-section-header">
+            <h2>Select Production Type</h2>
+            <button
+              type="button"
+              onClick={() => setShowHelpModal(true)}
+              className="help-button"
+            >
+              <span aria-hidden="true">ℹ️</span>
+              Petunjuk Pengisian Authenticity
+            </button>
+          </div>
+          <div className="production-cards">
+            <div className="production-card" onClick={() => navigate('/production/liquid')}>
+              <div className="card-icon">💧</div>
+              <h3>Production Liquid</h3>
+              <p>Manage liquid production processes</p>
+            </div>
+            <div className="production-card" onClick={() => navigate('/production/device')}>
+              <div className="card-icon">📱</div>
+              <h3>Production Device</h3>
+              <p>Manage device production processes</p>
+            </div>
+            <div className="production-card" onClick={() => navigate('/production/cartridge')}>
+              <div className="card-icon">🔋</div>
+              <h3>Production Cartridge</h3>
+              <p>Manage cartridge production processes</p>
+            </div>
+          </div>
+
+          <section className="mo-status-section">
+            <h2>Status MO Sedang Berjalan</h2>
+            {moStatusLoading && (
+              <p className="mo-status-message">Memuat status MO…</p>
+            )}
+            {!moStatusLoading && moStatusError && (
+              <p className="mo-status-message mo-status-message--error">{moStatusError}</p>
+            )}
+            {!moStatusLoading && !moStatusError && (
+              <div className="mo-status-grid">
+                {MO_STATUS_TYPES.map((type) => {
+                  const active = moStatus[type.key];
+                  return (
+                    <div
+                      key={type.key}
+                      className={`mo-status-card${active ? ' mo-status-card--active' : ''}`}
+                      onClick={() => navigate(type.path)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(type.path);
+                        }
+                      }}
+                    >
+                      <div className="mo-status-card-header">
+                        <span className="mo-status-icon" aria-hidden="true">{type.icon}</span>
+                        <h3>{type.label}</h3>
+                      </div>
+                      {active ? (
+                        <dl className="mo-status-details">
+                          <div>
+                            <dt>MO</dt>
+                            <dd>{active.mo_number || '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>SKU</dt>
+                            <dd>{active.sku_name || '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>Leader</dt>
+                            <dd>{active.leader_name || '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>Shift</dt>
+                            <dd>{active.shift_number || '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>PIC</dt>
+                            <dd>{active.pic || '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>Input</dt>
+                            <dd>{formatInputTime(active.created_at)}</dd>
+                          </div>
+                        </dl>
+                      ) : (
+                        <p className="mo-status-empty">Tidak ada MO aktif</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
       </div>
 
       {/* Help Modal */}
@@ -265,4 +360,3 @@ function Dashboard({ setIsAuthenticated }) {
 }
 
 export default Dashboard;
-
