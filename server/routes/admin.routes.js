@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
 const { db, pool } = require('../database');
-const { pushIdleManufacturingForLiquidMosFromCache, getExternalManufacturingMapRow } = require('../services/liquid-external-manufacturing.service');
+const { pushIdleManufacturingForLiquidMosFromCache, getExternalManufacturingMapRow, reconcileMesFinishedWithLocalCompleted } = require('../services/liquid-external-manufacturing.service');
 const {
   getExternalManufacturingConfig,
   getExternalManufacturingTargets,
@@ -897,6 +897,34 @@ router.post('/push-external-manufacturing-idle', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ [Admin] push-external-manufacturing-idle:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/admin/reconcile-external-manufacturing-finished — patch MES started MOs that are completed locally
+router.post('/reconcile-external-manufacturing-finished', async (req, res) => {
+  try {
+    const dryRaw = req.query.dry_run != null ? String(req.query.dry_run) : '1';
+    const dryRun = !(dryRaw === '0' || dryRaw.toLowerCase() === 'false');
+    const summary = await reconcileMesFinishedWithLocalCompleted({ dryRun });
+    res.json({
+      success: true,
+      dryRun: summary.dryRun,
+      mesStarted: summary.mesStarted,
+      wouldPatch: summary.wouldPatch,
+      patched: summary.patched,
+      alreadyMatched: summary.alreadyMatched,
+      skippedActive: summary.skippedActive,
+      skippedNoLocal: summary.skippedNoLocal,
+      skippedExcluded: summary.skippedExcluded,
+      skipped: summary.skipped,
+      targetsProcessed: summary.targetsProcessed,
+      candidates: summary.candidates,
+      errors: summary.errors.slice(0, 50),
+      errorCount: summary.errors.length
+    });
+  } catch (error) {
+    console.error('❌ [Admin] reconcile-external-manufacturing-finished:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });

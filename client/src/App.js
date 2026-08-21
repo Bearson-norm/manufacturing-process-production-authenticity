@@ -42,9 +42,21 @@ function App() {
           />
           <Route 
             path="/production/liquid" 
+            element={<Navigate to="/production/liquid-30ml" replace />}
+          />
+          <Route 
+            path="/production/liquid-15ml" 
             element={
               <ProtectedRoute>
-                <ProductionLiquid />
+                <ProductionLiquid variant="15ml" />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/production/liquid-30ml" 
+            element={
+              <ProtectedRoute>
+                <ProductionLiquid variant="30ml" />
               </ProtectedRoute>
             } 
           />

@@ -34,6 +34,7 @@ function Admin() {
   const [wmsUsername, setWmsUsername] = useState('');
   const [wmsCompanyId, setWmsCompanyId] = useState('FOOM');
   const [wmsSite, setWmsSite] = useState('PROD');
+  const [reconcilePreview, setReconcilePreview] = useState(null);
 
   useEffect(() => {
     fetchConfig();
@@ -478,6 +479,87 @@ function Admin() {
           ? 'Gateway timeout (504). Increase proxy read timeout for this upstream, or lower limit and retry.'
           : error.response?.data?.error || 'Push failed';
       setMessage({ type: 'error', text: msg });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatReconcileSummary = (data) => {
+    const errN = data.errorCount || 0;
+    return [
+      data.dryRun ? 'preview' : 'applied',
+      data.targetsProcessed != null ? `targets: ${data.targetsProcessed}` : '',
+      `MES started: ${data.mesStarted != null ? data.mesStarted : 0}`,
+      `would patch: ${data.wouldPatch != null ? data.wouldPatch : 0}`,
+      data.dryRun ? '' : `patched: ${data.patched != null ? data.patched : 0}`,
+      `already matched: ${data.alreadyMatched != null ? data.alreadyMatched : 0}`,
+      `skipped active: ${data.skippedActive != null ? data.skippedActive : 0}`,
+      `skipped no local: ${data.skippedNoLocal != null ? data.skippedNoLocal : 0}`,
+      errN ? `errors: ${errN}` : ''
+    ]
+      .filter(Boolean)
+      .join(', ');
+  };
+
+  const handleReconcileGatewayError = (error, fallback) => {
+    if (error.response?.status === 504) {
+      return 'Gateway timeout (504). Increase proxy read timeout for this upstream, or retry.';
+    }
+    return error.response?.data?.error || fallback;
+  };
+
+  const handlePreviewReconcileExternalFinished = async () => {
+    setLoading(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const response = await axios.post('/api/admin/reconcile-external-manufacturing-finished?dry_run=1', null, {
+        timeout: 120000
+      });
+      if (response.data.success) {
+        setReconcilePreview(response.data);
+        setMessage({
+          type: response.data.errorCount ? 'warning' : 'success',
+          text: `Preview reconcile finished. ${formatReconcileSummary(response.data)}`
+        });
+      } else {
+        setMessage({ type: 'error', text: response.data.error || 'Preview failed' });
+      }
+    } catch (error) {
+      console.error('Error preview reconcile external manufacturing finished:', error);
+      setMessage({ type: 'error', text: handleReconcileGatewayError(error, 'Preview failed') });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApplyReconcileExternalFinished = async () => {
+    const count = reconcilePreview && reconcilePreview.wouldPatch != null ? reconcilePreview.wouldPatch : null;
+    const confirmLabel =
+      count != null
+        ? `PATCH finished pada ${count} MO started di FOOM MES yang sudah completed di manufacturing_db?`
+        : 'PATCH finished pada MO started di FOOM MES yang sudah completed di manufacturing_db?';
+    if (!window.confirm(confirmLabel)) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const response = await axios.post('/api/admin/reconcile-external-manufacturing-finished?dry_run=0', null, {
+        timeout: 180000
+      });
+      if (response.data.success) {
+        setReconcilePreview(response.data);
+        setMessage({
+          type: response.data.errorCount ? 'warning' : 'success',
+          text: `Reconcile finished applied. ${formatReconcileSummary(response.data)}`
+        });
+      } else {
+        setMessage({ type: 'error', text: response.data.error || 'Reconcile failed' });
+      }
+    } catch (error) {
+      console.error('Error apply reconcile external manufacturing finished:', error);
+      setMessage({ type: 'error', text: handleReconcileGatewayError(error, 'Reconcile failed') });
     } finally {
       setLoading(false);
     }
@@ -988,6 +1070,73 @@ function Admin() {
           <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginTop: '8px' }}>
             Same job as the daily 06:00 scheduler: one FOOM list prefetch per run, then up to 400 eligible liquid MO rows from cache per click (<code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>POST /api/admin/push-external-manufacturing-idle</code>). Only MO with <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>team_name</code> prefix LIQ, excluding SKU MIXING/BRAY/bundling/15 ML and cartridge/device notes; <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>create_date</code> within ±6 days (not before 2026-07-01). Cross-checks <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>external_manufacturing_map</code>, then POST idle when needed.
           </small>
+          <button
+            onClick={handlePreviewReconcileExternalFinished}
+            disabled={loading}
+            type="button"
+            style={{
+              padding: '10px 20px',
+              fontSize: '14px',
+              fontWeight: '600',
+              marginTop: '16px',
+              display: 'block',
+              background: '#1d4ed8',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.6 : 1
+            }}
+          >
+            {loading ? 'Processing...' : 'Preview reconcile MES finished'}
+          </button>
+          <button
+            onClick={handleApplyReconcileExternalFinished}
+            disabled={loading}
+            type="button"
+            style={{
+              padding: '10px 20px',
+              fontSize: '14px',
+              fontWeight: '600',
+              marginTop: '8px',
+              display: 'block',
+              background: '#b45309',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.6 : 1
+            }}
+          >
+            {loading ? 'Processing...' : 'Apply reconcile MES finished'}
+          </button>
+          <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginTop: '8px' }}>
+            Menambal MO yang di FOOM MES masih <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>started</code> padahal di <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>production_liquid</code> sudah completed. Preview dulu, lalu Apply untuk PUT+PATCH finished (plus done_qty). MO yang sudah finished/completed atau masih active dibiarkan. (<code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>POST /api/admin/reconcile-external-manufacturing-finished</code>)
+          </small>
+          {reconcilePreview && Array.isArray(reconcilePreview.candidates) && reconcilePreview.candidates.length > 0 && (
+            <div style={{ marginTop: '12px', overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', color: '#cbd5e1' }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', padding: '6px', borderBottom: '1px solid #334155' }}>MO</th>
+                    <th style={{ textAlign: 'left', padding: '6px', borderBottom: '1px solid #334155' }}>record_id</th>
+                    <th style={{ textAlign: 'right', padding: '6px', borderBottom: '1px solid #334155' }}>done_qty</th>
+                    <th style={{ textAlign: 'right', padding: '6px', borderBottom: '1px solid #334155' }}>target_qty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconcilePreview.candidates.map((row) => (
+                    <tr key={`${row.target || 'default'}-${row.manufacturing_id}-${row.record_id}`}>
+                      <td style={{ padding: '6px', borderBottom: '1px solid #1e293b' }}>{row.manufacturing_id}</td>
+                      <td style={{ padding: '6px', borderBottom: '1px solid #1e293b', fontFamily: 'monospace' }}>{row.record_id}</td>
+                      <td style={{ padding: '6px', borderBottom: '1px solid #1e293b', textAlign: 'right' }}>{row.done_qty}</td>
+                      <td style={{ padding: '6px', borderBottom: '1px solid #1e293b', textAlign: 'right' }}>{row.target_qty}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* External API Integration Documentation */}

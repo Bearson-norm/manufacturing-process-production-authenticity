@@ -310,6 +310,7 @@ function buildExternalManufacturingIdlePushQuery(opts = {}) {
       AND sku_name NOT ILIKE '%MIXING%'
       AND sku_name NOT ILIKE '%BRAY%'
       AND sku_name NOT ILIKE '%bundling%'
+      AND sku_name NOT ILIKE '%slof%'
       AND sku_name NOT ILIKE '%15 ML%'
       AND sku_name NOT ILIKE '%15ML%'
       AND NOT (${cartridgeNoteSql})
@@ -336,7 +337,7 @@ function buildExternalManufacturingIdlePushQuery(opts = {}) {
       daysForward: EXTERNAL_MFG_WINDOW_DAYS_FORWARD,
     },
     filterDescription:
-      'team_name LIQ%, exclude MIXING/BRAY/bundling/15ML, exclude cartridge/device notes, create_date rolling window',
+      'team_name LIQ%, exclude MIXING/BRAY/bundling/slof/15ML (30ml only), exclude cartridge/device notes, create_date rolling window',
   };
 }
 

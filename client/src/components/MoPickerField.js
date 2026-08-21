@@ -16,7 +16,8 @@ function MoPickerField({
   onPageChange,
   pageSize = DEFAULT_MO_PAGE_SIZE,
   productionType = 'liquid',
-  searchPlaceholder
+  searchPlaceholder,
+  disabled = false,
 }) {
   const placeholder =
     searchPlaceholder ||
@@ -41,13 +42,14 @@ function MoPickerField({
   }, [safePage, page, onPageChange]);
 
   return (
-    <div className="mo-picker-field">
+    <div className={`mo-picker-field${disabled ? ' mo-picker-field--disabled' : ''}`}>
       <input
         type="search"
         value={searchTerm}
         onChange={(e) => onSearchChange(e.target.value)}
         placeholder={placeholder}
         className="mo-list-search-input"
+        disabled={disabled}
       />
       <div className="mo-picker-list">
         {paginated.length === 0 ? (
@@ -60,7 +62,8 @@ function MoPickerField({
                 key={mo.mo_number}
                 type="button"
                 className={`mo-picker-item${selectedMoNumber === mo.mo_number ? ' selected' : ''}`}
-                onClick={() => onSelect(mo)}
+                onClick={() => !disabled && onSelect(mo)}
+                disabled={disabled}
               >
                 <span className="mo-picker-number">{mo.mo_number}</span>
                 <span className="mo-picker-sku">{mo.sku_name || 'N/A'}</span>

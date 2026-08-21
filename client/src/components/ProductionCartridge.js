@@ -2013,28 +2013,26 @@ function ProductionCartridge() {
                               </div>
                             </div>
                             <div className="input-card">
-                              <div className="input-card-header">
-                                <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                  {activeInputs.length > 0 && !isEditing && (
-                                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-                                      <button
-                                        onClick={() => handleSubmitMoGroup(moNumber, session.session_id)}
-                                        className="submit-button"
-                                        style={{ padding: '6px 12px', fontSize: '12px', background: '#059669', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                                      >
-                                        Submit MO
-                                      </button>
-                                      <button
-                                        onClick={() => handleEditInput(moNumber, session.session_id)}
-                                        className="edit-button"
-                                        style={{ padding: '6px 12px', fontSize: '12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-                                      >
-                                        Edit
-                                      </button>
-                                    </div>
-                                  )}
+                              {activeInputs.length > 0 && !isEditing ? (
+                                <div className="input-card-header">
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <button
+                                      onClick={() => handleSubmitMoGroup(moNumber, session.session_id)}
+                                      className="submit-button"
+                                      style={{ padding: '6px 12px', fontSize: '12px', background: '#059669', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                    >
+                                      Submit MO
+                                    </button>
+                                    <button
+                                      onClick={() => handleEditInput(moNumber, session.session_id)}
+                                      className="edit-button"
+                                      style={{ padding: '6px 12px', fontSize: '12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                    >
+                                      Edit
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
+                              ) : null}
                                 <div className="input-card-body">
                                   {isEditing ? (
                                     <div className="edit-form">

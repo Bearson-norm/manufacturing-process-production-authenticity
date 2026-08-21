@@ -14,7 +14,8 @@ const ADMIN_MENU_ITEMS = [
 ];
 
 const MO_STATUS_TYPES = [
-  { key: 'liquid', label: 'Production Liquid', icon: '💧', path: '/production/liquid' },
+  { key: 'liquid_15', label: 'Production Liquid 15 ml', icon: '💧', path: '/production/liquid-15ml' },
+  { key: 'liquid_30', label: 'Production Liquid 30 ml', icon: '💧', path: '/production/liquid-30ml' },
   { key: 'device', label: 'Production Device', icon: '📱', path: '/production/device' },
   { key: 'cartridge', label: 'Production Cartridge', icon: '🔋', path: '/production/cartridge' },
 ];
@@ -34,7 +35,13 @@ function formatInputTime(value) {
 function Dashboard({ setIsAuthenticated }) {
   const navigate = useNavigate();
   const [showHelpModal, setShowHelpModal] = useState(false);
-  const [moStatus, setMoStatus] = useState({ liquid: null, device: null, cartridge: null });
+  const [moStatus, setMoStatus] = useState({
+    liquid_15: null,
+    liquid_30: null,
+    liquid: null,
+    device: null,
+    cartridge: null,
+  });
   const [moStatusLoading, setMoStatusLoading] = useState(true);
   const [moStatusError, setMoStatusError] = useState('');
   const userRole = localStorage.getItem('userRole') || 'production';
@@ -49,7 +56,15 @@ function Dashboard({ setIsAuthenticated }) {
       try {
         const response = await axios.get('/api/production/active-mo-status');
         if (!cancelled) {
-          setMoStatus(response.data || { liquid: null, device: null, cartridge: null });
+          setMoStatus(
+            response.data || {
+              liquid_15: null,
+              liquid_30: null,
+              liquid: null,
+              device: null,
+              cartridge: null,
+            }
+          );
         }
       } catch (err) {
         if (!cancelled) {
@@ -118,10 +133,15 @@ function Dashboard({ setIsAuthenticated }) {
             </button>
           </div>
           <div className="production-cards">
-            <div className="production-card" onClick={() => navigate('/production/liquid')}>
+            <div className="production-card" onClick={() => navigate('/production/liquid-15ml')}>
               <div className="card-icon">💧</div>
-              <h3>Production Liquid</h3>
-              <p>Manage liquid production processes</p>
+              <h3>Production Liquid 15 ml</h3>
+              <p>15 ml / slof / bundling</p>
+            </div>
+            <div className="production-card" onClick={() => navigate('/production/liquid-30ml')}>
+              <div className="card-icon">💧</div>
+              <h3>Production Liquid 30 ml</h3>
+              <p>Liquid selain 15 ml</p>
             </div>
             <div className="production-card" onClick={() => navigate('/production/device')}>
               <div className="card-icon">📱</div>

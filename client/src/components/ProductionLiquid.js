@@ -13,37 +13,109 @@ import MoListToolbar from './MoListToolbar';
 import MoPickerField from './MoPickerField';
 import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
-import { buildPaginatedSavedMoKeys, formatMoSearchLabel, isExcludedLiquidProductionSku } from '../utils/moListHelpers';
+import { buildPaginatedSavedMoKeys, formatMoSearchLabel, matchesLiquidVariant } from '../utils/moListHelpers';
 import { fetchBufferRejectBatchMaps } from '../utils/bufferRejectBatch';
 
-// Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
-const formatDateIndonesia = (dateString) => {
-  if (!dateString) return '';
-  
+const STALE_MO_THRESHOLD_MINUTES = 30;
+const STALE_MO_REMINDER_INTERVAL_MS = 10 * 60 * 1000;
+const STALE_MO_CHECK_INTERVAL_MS = 60 * 1000;
+
+function parseDbTimestamp(dateString) {
+  if (!dateString) return null;
+
   try {
     let date;
-    
-    // Jika dateString sudah dalam format ISO dengan timezone, gunakan langsung
+
     if (dateString.includes('T') && (dateString.includes('Z') || dateString.includes('+') || dateString.includes('-'))) {
       date = new Date(dateString);
     } else {
-      // Jika format SQLite (YYYY-MM-DD HH:MM:SS) tanpa timezone
-      // SQLite CURRENT_TIMESTAMP biasanya menyimpan dalam UTC
-      // Konversi ke format ISO dengan timezone UTC
       const sqliteDate = dateString.replace(' ', 'T');
-      // Tambahkan 'Z' untuk menandakan UTC, atau tambahkan +00:00
       if (!sqliteDate.includes('Z') && !sqliteDate.includes('+') && !sqliteDate.includes('-', 10)) {
-        date = new Date(sqliteDate + 'Z'); // Asumsikan UTC
+        date = new Date(`${sqliteDate}Z`);
       } else {
         date = new Date(sqliteDate);
       }
     }
-    
-    // Validasi apakah date valid
+
     if (isNaN(date.getTime())) {
-      return '';
+      return null;
     }
-    
+
+    return date;
+  } catch {
+    return null;
+  }
+}
+
+function getSessionActiveMoNumber(savedData, currentSessionId) {
+  const details = getSessionActiveMoDetails(savedData, currentSessionId);
+  return details ? details.moNumber : null;
+}
+
+function getSessionActiveMoDetails(savedData, currentSessionId) {
+  if (!currentSessionId || !savedData) return null;
+  const session = savedData.find((s) => s.session_id === currentSessionId);
+  if (!session) return null;
+
+  const activeInputs = (session.inputs || []).filter((i) => i.status === 'active' && i.mo_number);
+  if (activeInputs.length === 0) return null;
+
+  const moNumber = activeInputs[0].mo_number;
+  const activeSince = activeInputs
+    .filter((i) => i.mo_number === moNumber && i.created_at)
+    .map((i) => i.created_at)
+    .sort()[0];
+
+  if (!activeSince) {
+    return { moNumber, activeSince: null };
+  }
+
+  return { moNumber, activeSince };
+}
+
+function getActiveMoElapsedMinutes(activeSince) {
+  const start = parseDbTimestamp(activeSince);
+  if (!start) return 0;
+  return (Date.now() - start.getTime()) / 60000;
+}
+
+function sessionHasActive(savedData, currentSessionId) {
+  return Boolean(getSessionActiveMoNumber(savedData, currentSessionId));
+}
+
+function sessionHasDraft(savedData, currentSessionId) {
+  if (!currentSessionId || !savedData) return false;
+  const session = savedData.find((s) => s.session_id === currentSessionId);
+  if (!session) return false;
+  return (session.inputs || []).some((i) => i.status === 'draft');
+}
+
+function getSessionDraftMoNumbers(savedData, currentSessionId) {
+  if (!currentSessionId || !savedData) return new Set();
+  const session = savedData.find((s) => s.session_id === currentSessionId);
+  if (!session) return new Set();
+  return new Set(
+    (session.inputs || [])
+      .filter((i) => i.status === 'draft' && i.mo_number)
+      .map((i) => i.mo_number)
+  );
+}
+
+function isMoConfirmedAnywhere(savedData, moNumber) {
+  return (savedData || []).some((session) =>
+    (session.inputs || []).some(
+      (input) =>
+        input.mo_number === moNumber &&
+        (input.status === 'active' || input.status === 'completed')
+    )
+  );
+}
+// Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
+const formatDateIndonesia = (dateString) => {
+  const date = parseDbTimestamp(dateString);
+  if (!date) return '';
+
+  try {
     // Konversi ke zona waktu Asia/Jakarta (WIB, UTC+7)
     // Gunakan Intl.DateTimeFormat untuk konversi yang lebih akurat
     const formatter = new Intl.DateTimeFormat('id-ID', {
@@ -73,7 +145,12 @@ const formatDateIndonesia = (dateString) => {
   }
 };
 
-function ProductionLiquid() {
+function ProductionLiquid({ variant = '30ml' }) {
+  const liquidVariant = variant === '15ml' ? '15ml' : '30ml';
+  const sessionStorageKey =
+    liquidVariant === '15ml' ? 'production_liquid_15_session' : 'production_liquid_30_session';
+  const pageTitle =
+    liquidVariant === '15ml' ? 'Production Liquid 15 ml' : 'Production Liquid 30 ml';
   const navigate = useNavigate();
   const [showStartModal, setShowStartModal] = useState(false);
   const [showInputModal, setShowInputModal] = useState(false);
@@ -81,6 +158,8 @@ function ProductionLiquid() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showButtonHelpModal, setShowButtonHelpModal] = useState(false);
+  const [showStaleActiveMoModal, setShowStaleActiveMoModal] = useState(false);
+  const [staleActiveMoInfo, setStaleActiveMoInfo] = useState(null);
   const [manufacturingStarted, setManufacturingStarted] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [leaderName, setLeaderName] = useState('');
@@ -140,8 +219,11 @@ function ProductionLiquid() {
   const [bufferModalVendorId, setBufferModalVendorId] = useState('');
   const [rejectModalVendorId, setRejectModalVendorId] = useState('');
   const [isSavingInput, setIsSavingInput] = useState(false);
+  const [submittingMo, setSubmittingMo] = useState(false);
   const savingInputRef = useRef(false);
   const pausePollingRef = useRef(false);
+  const lastStaleMoWarningAtRef = useRef(null);
+  const warnedMoNumberRef = useRef(null);
 
   const vendorDigitMap = useMemo(() => buildVendorDigitMap(activeVendors), [activeVendors]);
 
@@ -204,8 +286,15 @@ function ProductionLiquid() {
     fetchData();
     fetchPicList();
     fetchActiveVendors();
-    // Load session from localStorage
-    const savedSession = localStorage.getItem('production_liquid_session');
+    // Load session from localStorage (migrate legacy key for 30ml)
+    let savedSession = localStorage.getItem(sessionStorageKey);
+    if (!savedSession && liquidVariant === '30ml') {
+      savedSession = localStorage.getItem('production_liquid_session');
+      if (savedSession) {
+        localStorage.setItem(sessionStorageKey, savedSession);
+        localStorage.removeItem('production_liquid_session');
+      }
+    }
     if (savedSession) {
       try {
         const session = JSON.parse(savedSession);
@@ -226,15 +315,69 @@ function ProductionLiquid() {
     }, 10000);
     return () => clearInterval(pollInterval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [liquidVariant]);
 
   useEffect(() => {
-    pausePollingRef.current = showInputModal || isSavingInput;
-  }, [showInputModal, isSavingInput]);
+    pausePollingRef.current = showInputModal || isSavingInput || submittingMo;
+  }, [showInputModal, isSavingInput, submittingMo]);
+
+  useEffect(() => {
+    if (liquidVariant !== '30ml') {
+      return undefined;
+    }
+
+    const resetStaleMoWarning = () => {
+      setShowStaleActiveMoModal(false);
+      setStaleActiveMoInfo(null);
+      lastStaleMoWarningAtRef.current = null;
+      warnedMoNumberRef.current = null;
+    };
+
+    const checkStaleActiveMo = () => {
+      if (!sessionId || !manufacturingStarted) {
+        resetStaleMoWarning();
+        return;
+      }
+
+      const activeInfo = getSessionActiveMoDetails(savedData, sessionId);
+      if (!activeInfo || !activeInfo.activeSince) {
+        resetStaleMoWarning();
+        return;
+      }
+
+      const elapsedMin = getActiveMoElapsedMinutes(activeInfo.activeSince);
+      if (elapsedMin <= STALE_MO_THRESHOLD_MINUTES) {
+        resetStaleMoWarning();
+        return;
+      }
+
+      if (warnedMoNumberRef.current !== activeInfo.moNumber) {
+        lastStaleMoWarningAtRef.current = null;
+        warnedMoNumberRef.current = activeInfo.moNumber;
+      }
+
+      const now = Date.now();
+      const lastShown = lastStaleMoWarningAtRef.current;
+      if (!lastShown || now - lastShown >= STALE_MO_REMINDER_INTERVAL_MS) {
+        setStaleActiveMoInfo({
+          moNumber: activeInfo.moNumber,
+          elapsedMinutes: Math.floor(elapsedMin),
+        });
+        setShowStaleActiveMoModal(true);
+        lastStaleMoWarningAtRef.current = now;
+      }
+    };
+
+    checkStaleActiveMo();
+    const intervalId = setInterval(checkStaleActiveMo, STALE_MO_CHECK_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [liquidVariant, sessionId, manufacturingStarted, savedData]);
 
   const fetchData = async () => {
     try {
-      const response = await axios.get('/api/production/liquid');
+      const response = await axios.get('/api/production/liquid', {
+        params: { variant: liquidVariant }
+      });
       setSavedData(response.data);
       setDataError('');
       
@@ -326,45 +469,58 @@ function ProductionLiquid() {
         shiftNumber: shiftNumber,
         manufacturingStarted: true
       };
-      localStorage.setItem('production_liquid_session', JSON.stringify(sessionData));
+      localStorage.setItem(sessionStorageKey, JSON.stringify(sessionData));
     }
   };
 
+  const filterMoListForVariant = (moData, { forAuthenticityInput = false } = {}) => {
+    const activeMo = getSessionActiveMoNumber(savedData, sessionId);
+    const draftMos = getSessionDraftMoNumbers(savedData, sessionId);
+
+    return moData.filter((mo) => {
+      if (!matchesLiquidVariant(mo.sku_name, liquidVariant)) {
+        return false;
+      }
+      // MO yang sudah ada di draft tidak ditampilkan di picker input
+      if (forAuthenticityInput && draftMos.has(mo.mo_number)) {
+        return false;
+      }
+      if (forAuthenticityInput && isMoConfirmedAnywhere(savedData, mo.mo_number)) {
+        return false;
+      }
+      if (forAuthenticityInput && activeMo && mo.mo_number === activeMo) {
+        return false;
+      }
+      return true;
+    });
+  };
+
   const handleInputAuthenticity = async () => {
+    // Form selalu kosong saat buka modal; draft tetap hanya di daftar data
     setShowInputModal(true);
     setMoSearchTerm('');
     setInputMoPage(1);
-    // Fetch MO list from cache (filtered by production type) when modal opens
+    setSelectedMo(null);
+    setFormData({
+      pic: '',
+      moNumber: '',
+      skuName: '',
+      authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }],
+    });
+    setAuthenticityValidationStatus({});
+    setAuthenticityInvalidStatus({});
+
     try {
       const response = await axios.get('/api/odoo/mo-list', {
         params: { productionType: 'liquid' }
       });
       if (response.data.success) {
         const moData = response.data.data || [];
-        
-        // Get all MO numbers that have already been input
-        const usedMoNumbers = new Set();
-        savedData.forEach(session => {
-          session.inputs.forEach(input => {
-            usedMoNumbers.add(input.mo_number);
-          });
-        });
-        
-        // Filter out excluded SKUs (MIXING, BRAY, BUNDLING) and MO numbers already used
-        const filteredMoData = moData.filter(mo => {
-          if (isExcludedLiquidProductionSku(mo.sku_name)) {
-            return false;
-          }
-          if (usedMoNumbers.has(mo.mo_number)) {
-            return false;
-          }
-          return true;
-        });
-        
+        const filteredMoData = filterMoListForVariant(moData, { forAuthenticityInput: true });
         setMoList(filteredMoData);
-        console.log(`✅ Loaded ${filteredMoData.length} MO records for Liquid production (filtered from ${moData.length}, ${usedMoNumbers.size} already used)`);
+
         if (filteredMoData.length === 0) {
-          alert('Tidak ada data MO untuk produksi Liquid dalam 7 hari terakhir. Silakan periksa apakah scheduler telah memperbarui cache.');
+          alert(`Tidak ada data MO untuk produksi Liquid ${liquidVariant === '15ml' ? '15 ml' : '30 ml'} dalam 7 hari terakhir. Silakan periksa apakah scheduler telah memperbarui cache.`);
         }
       } else {
         console.error('Failed to fetch MO list:', response.data.error);
@@ -390,7 +546,7 @@ function ProductionLiquid() {
       });
       if (response.data.success) {
         const moData = response.data.data || [];
-        const filteredMoData = moData.filter(mo => !isExcludedLiquidProductionSku(mo.sku_name));
+        const filteredMoData = filterMoListForVariant(moData);
         setMoList(filteredMoData);
       }
     } catch (error) {
@@ -412,7 +568,7 @@ function ProductionLiquid() {
       });
       if (response.data.success) {
         const moData = response.data.data || [];
-        const filteredMoData = moData.filter(mo => !isExcludedLiquidProductionSku(mo.sku_name));
+        const filteredMoData = filterMoListForVariant(moData);
         setMoList(filteredMoData);
       }
     } catch (error) {
@@ -1213,6 +1369,7 @@ function ProductionLiquid() {
         });
         
         // Remove session from localStorage
+        localStorage.removeItem(sessionStorageKey);
         localStorage.removeItem('production_liquid_session');
         
         fetchData();
@@ -1227,16 +1384,34 @@ function ProductionLiquid() {
     if (!mo) {
       setSelectedMo(null);
       setMoSearchTerm('');
-      setFormData({ ...formData, moNumber: '', skuName: '' });
+      setFormData({
+        ...formData,
+        moNumber: '',
+        skuName: '',
+        authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }],
+      });
+      setAuthenticityValidationStatus({});
+      setAuthenticityInvalidStatus({});
       return;
     }
+
+    const moChanged = formData.moNumber && formData.moNumber !== mo.mo_number;
     setSelectedMo(mo);
-    setMoSearchTerm(formatMoSearchLabel(mo, 'liquid'));
+    // Pakai mo_number saja di search — label lengkap membuat filter "Tidak ada MO ditemukan"
+    setMoSearchTerm(mo.mo_number || '');
     setFormData({
       ...formData,
       moNumber: mo.mo_number,
-      skuName: mo.sku_name || ''
+      skuName: mo.sku_name || '',
+      // Ganti MO = form authenticity kosong (bukan bawa konten draft MO sebelumnya)
+      authenticityRows: moChanged || !formData.moNumber
+        ? [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }]
+        : formData.authenticityRows,
     });
+    if (moChanged || !formData.moNumber) {
+      setAuthenticityValidationStatus({});
+      setAuthenticityInvalidStatus({});
+    }
   };
 
   const handleBufferMoChange = (mo) => {
@@ -1271,7 +1446,7 @@ function ProductionLiquid() {
     });
   };
 
-  const submitConfirmInput = async () => {
+  const submitLiquidInput = async (saveMode) => {
     savingInputRef.current = true;
     setIsSavingInput(true);
     try {
@@ -1279,6 +1454,7 @@ function ProductionLiquid() {
         ...r,
         vendorName: r.vendorName || null
       }));
+
       await axios.post('/api/production/liquid', {
         session_id: sessionId,
         leader_name: leaderName,
@@ -1286,25 +1462,47 @@ function ProductionLiquid() {
         pic: formData.pic,
         mo_number: formData.moNumber,
         sku_name: formData.skuName,
-        authenticity_data: rowsPayload
+        authenticity_data: rowsPayload,
+        save_mode: saveMode,
+        variant: liquidVariant,
       });
 
-      setFormData({
-        pic: '',
-        moNumber: '',
-        skuName: '',
-        authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }]
-      });
-      setAuthenticityValidationStatus({});
-      setSelectedMo(null);
-      setMoSearchTerm('');
-      setShowInputModal(false);
-      fetchData();
+      if (saveMode === 'draft') {
+        const draftedMoNumber = formData.moNumber;
+        setFormData({
+          pic: '',
+          moNumber: '',
+          skuName: '',
+          authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }],
+        });
+        setAuthenticityValidationStatus({});
+        setAuthenticityInvalidStatus({});
+        setSelectedMo(null);
+        setMoSearchTerm('');
+        setShowInputModal(false);
+        await fetchData();
+        setMoList((prev) => prev.filter((m) => m.mo_number !== draftedMoNumber));
+        alert('Draft tersimpan. Confirm Draft dari kartu draft di daftar data.');
+      } else {
+        setFormData({
+          pic: '',
+          moNumber: '',
+          skuName: '',
+          authenticityRows: [{ firstAuthenticity: '', lastAuthenticity: '', rollNumber: '', vendorName: null }]
+        });
+        setAuthenticityValidationStatus({});
+        setSelectedMo(null);
+        setMoSearchTerm('');
+        setShowInputModal(false);
+        fetchData();
+      }
     } catch (error) {
       console.error('Error saving data:', error);
-      if (error.response?.status === 409 && error.response.data?.error) {
+      if (error.response?.data?.error) {
         alert(error.response.data.error);
-        fetchData();
+        if (error.response?.status === 409) {
+          fetchData();
+        }
       } else {
         alert('Error menyimpan data');
       }
@@ -1314,17 +1512,13 @@ function ProductionLiquid() {
     }
   };
 
-  const handleConfirmInput = async () => {
-    if (savingInputRef.current) {
-      return;
-    }
-
+  const validateInputFormBeforeSave = () => {
     if (!formData.pic || !formData.moNumber || !formData.skuName) {
       alert('Silakan isi semua field yang wajib diisi');
-      return;
+      return false;
     }
 
-    const rowsToValidate = formData.authenticityRows.filter((row, idx) => {
+    const rowsToValidate = formData.authenticityRows.filter((row) => {
       const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
       const hasLast = row.lastAuthenticity && row.lastAuthenticity.trim() !== '';
       return hasFirst || hasLast;
@@ -1335,29 +1529,26 @@ function ProductionLiquid() {
         const rowsWithMissingVendor = rowsToValidate.filter((row) => !row.vendorName);
         if (rowsWithMissingVendor.length > 0) {
           alert('Pilih vendor untuk setiap row authenticity yang diisi.');
-          return;
+          return false;
         }
       }
 
-      // Check if roll number is filled for rows with authenticity data
-      const rowsWithMissingRollNumber = rowsToValidate.filter((row, idx) => {
+      const rowsWithMissingRollNumber = rowsToValidate.filter((row) => {
         return !row.rollNumber || row.rollNumber.trim() === '';
       });
 
       if (rowsWithMissingRollNumber.length > 0) {
         alert('Nomor roll tidak boleh kosong. Silakan isi nomor roll untuk semua row yang memiliki data authenticity.');
-        return;
+        return false;
       }
 
-      // Check validation status but don't block confirm - just show warning
-      const allValidated = rowsToValidate.every((row, idx) => {
+      const allValidated = rowsToValidate.every((row) => {
         const originalIndex = formData.authenticityRows.findIndex(r => r === row);
         return authenticityValidationStatus[originalIndex] === true;
       });
 
       if (!allValidated) {
-        // Show warning but allow confirm
-        const hasInvalid = rowsToValidate.some((row, idx) => {
+        const hasInvalid = rowsToValidate.some((row) => {
           const originalIndex = formData.authenticityRows.findIndex(r => r === row);
           return authenticityInvalidStatus[originalIndex];
         });
@@ -1365,13 +1556,133 @@ function ProductionLiquid() {
         if (hasInvalid) {
           const proceed = window.confirm('Ada authenticity data yang belum valid. Data yang tidak valid tidak akan bisa disubmit. Apakah Anda yakin ingin melanjutkan?');
           if (!proceed) {
-            return;
+            return false;
           }
         }
       }
     }
 
-    await submitConfirmInput();
+    return true;
+  };
+
+  const handleSaveDraft = async () => {
+    if (savingInputRef.current) {
+      return;
+    }
+    if (!validateInputFormBeforeSave()) {
+      return;
+    }
+    const activeMo = getSessionActiveMoNumber(savedData, sessionId);
+    if (activeMo && formData.moNumber === activeMo) {
+      alert(`MO ${activeMo} sudah active. Gunakan Edit untuk mengubah data MO ini, atau pilih MO lain untuk Save Draft.`);
+      return;
+    }
+    await submitLiquidInput('draft');
+  };
+
+  const handleConfirmInput = async () => {
+    if (savingInputRef.current) {
+      return;
+    }
+    if (sessionHasActive(savedData, sessionId)) {
+      const activeMo = getSessionActiveMoNumber(savedData, sessionId);
+      alert(`Masih ada MO ${activeMo} active/started. Confirm Input tidak bisa. Submit/selesaikan MO itu dulu, atau Save Draft untuk MO lain.`);
+      return;
+    }
+    if (sessionHasDraft(savedData, sessionId)) {
+      alert('Masih ada draft di session ini. Gunakan tombol Confirm Draft pada kartu draft di daftar data, atau Save Draft untuk mengubah draft.');
+      return;
+    }
+    if (!validateInputFormBeforeSave()) {
+      return;
+    }
+    await submitLiquidInput('confirm');
+  };
+
+  /** Confirm Draft dari kartu draft di daftar saved data (bukan dari modal input). */
+  const handleConfirmDraftFromList = async (moNumber, targetSessionId) => {
+    if (savingInputRef.current) {
+      return;
+    }
+    if (targetSessionId !== sessionId) {
+      alert('Confirm Draft hanya untuk session manufacturing yang sedang berjalan.');
+      return;
+    }
+    if (sessionHasActive(savedData, sessionId)) {
+      const activeMo = getSessionActiveMoNumber(savedData, sessionId);
+      alert(`Masih ada MO ${activeMo} active/started. Confirm Draft tidak bisa sampai MO itu di-submit atau session diakhiri.`);
+      return;
+    }
+
+    const session = (savedData || []).find((s) => s.session_id === targetSessionId);
+    if (!session) {
+      alert('Session tidak ditemukan.');
+      return;
+    }
+    const draftInputs = (session.inputs || []).filter(
+      (i) => i.mo_number === moNumber && i.status === 'draft'
+    );
+    if (draftInputs.length === 0) {
+      alert('Draft tidak ditemukan untuk MO ini.');
+      return;
+    }
+
+    const authenticityRows = [];
+    draftInputs.forEach((input) => {
+      if (Array.isArray(input.authenticity_data)) {
+        input.authenticity_data.forEach((a) => {
+          authenticityRows.push({
+            firstAuthenticity: a.firstAuthenticity || '',
+            lastAuthenticity: a.lastAuthenticity || '',
+            rollNumber: a.rollNumber || '',
+            vendorName: a.vendorName || null,
+          });
+        });
+      }
+    });
+
+    if (authenticityRows.length === 0) {
+      alert('Draft tidak memiliki authenticity data.');
+      return;
+    }
+
+    const first = draftInputs[0];
+    const proceed = window.confirm(
+      `Confirm Draft MO ${moNumber}? Status akan menjadi active dan API eksternal started (untuk liquid 30 ml).`
+    );
+    if (!proceed) {
+      return;
+    }
+
+    savingInputRef.current = true;
+    setIsSavingInput(true);
+    try {
+      await axios.post('/api/production/liquid', {
+        session_id: targetSessionId,
+        leader_name: session.leader_name || leaderName,
+        shift_number: session.shift_number || shiftNumber,
+        pic: first.pic || '',
+        mo_number: moNumber,
+        sku_name: first.sku_name || '',
+        authenticity_data: authenticityRows,
+        save_mode: 'confirm_draft',
+        variant: liquidVariant,
+      });
+      fetchData();
+    } catch (error) {
+      console.error('Error confirming draft:', error);
+      if (error.response?.data?.error) {
+        alert(error.response.data.error);
+        if (error.response?.status === 409) {
+          fetchData();
+        }
+      } else {
+        alert('Error mengonfirmasi draft');
+      }
+    } finally {
+      savingInputRef.current = false;
+      setIsSavingInput(false);
+    }
   };
 
   // eslint-disable-next-line no-unused-vars
@@ -1493,23 +1804,31 @@ function ProductionLiquid() {
       return;
     }
 
+    if (submittingMo) {
+      return;
+    }
+
+    setSubmittingMo(true);
     try {
-      // Use the new batch submit endpoint instead of individual updates
-      // MO number is passed in body to handle special characters like '/'
-      const response = await axios.put(`/api/production/liquid/submit-mo-group`, {
-        mo_number: moNumber,
-        session_id: sessionId
-      });
-      
-      // Check if response has auto_reverted flag
+      const response = await axios.put(
+        `/api/production/liquid/submit-mo-group`,
+        {
+          mo_number: moNumber,
+          session_id: sessionId
+        },
+        { timeout: 120000 }
+      );
+
       if (response.data && response.data.auto_reverted === true) {
         const activeCount = response.data.active_count || 0;
         alert(`Submit MO ${moNumber} gagal. Masih ada ${activeCount} input aktif dengan MO yang sama di session lain. Semua input yang sudah di-submit telah di-revert kembali ke aktif. Silakan submit ulang setelah semua input siap.`);
+      } else if (response.data && response.data.external_api_verified === false) {
+        alert('status gagal verifikasi, harap reconcile status');
       } else {
         const updatedCount = response.data?.updated_count || inputsWithSameMo.length;
         alert(`Berhasil submit ${updatedCount} input untuk MO ${moNumber}`);
       }
-      
+
       fetchData();
     } catch (error) {
       console.error('Error submitting MO:', error);
@@ -1518,6 +1837,8 @@ function ProductionLiquid() {
       } else {
       alert('Error memperbarui status');
       }
+    } finally {
+      setSubmittingMo(false);
     }
   };
 
@@ -1771,65 +2092,60 @@ function ProductionLiquid() {
         <button onClick={() => navigate('/dashboard')} className="back-button">
           ← Back to Dashboard
         </button>
-        <h1>Production Liquid</h1>
+        <h1>{pageTitle}</h1>
       </div>
+
+      {manufacturingStarted && (
+        <div className="production-actions">
+          <div className="button-group">
+            <div className="button-group-item">
+              <button onClick={handleInputAuthenticity} className="input-button">
+                Input Authenticity Label Process
+              </button>
+              <small>Input stiker holo berurutan (scan awal & akhir)</small>
+            </div>
+            <div className="button-group-item">
+              <button onClick={handleInputBuffer} className="buffer-button">
+                Input Buffer Authenticity
+              </button>
+              <small>Input nomor authenticity diluar range</small>
+            </div>
+            <div className="button-group-item">
+              <button onClick={handleInputReject} className="reject-button">
+                Input Reject Authenticity
+              </button>
+              <small>Input nomor authenticity yang reject</small>
+            </div>
+            <div className="button-group-item">
+              <button onClick={handleEndManufacturing} className="end-button">
+                End Manufacturing Process
+              </button>
+              <small>Akhiri proses manufacturing</small>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="production-content">
         {dataLoading && (
-          <p style={{ textAlign: 'center', color: '#64748b', marginBottom: '12px' }}>Memuat data...</p>
+          <p className="production-status-message">Memuat data...</p>
         )}
         {dataError && (
-          <div className="error-message" style={{ marginBottom: '12px', textAlign: 'center' }}>{dataError}</div>
+          <div className="error-message production-status-message">{dataError}</div>
         )}
         {!manufacturingStarted ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+          <div className="production-start-panel">
             <button onClick={handleStartManufacturing} className="start-button">
               Start Manufacturing Process
             </button>
-            <small style={{ color: '#94a3b8', fontSize: '13px', textAlign: 'center', lineHeight: '1.4' }}>
+            <small className="production-hint">
               Klik tombol ini untuk memulai proses manufacturing dan input data produksi
             </small>
           </div>
         ) : (
-          <div>
-            <div className="button-group">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-                  <button onClick={handleInputAuthenticity} className="input-button">
-                    Input Authenticity Label Process
-                  </button>
-                  <small style={{ color: '#666', fontSize: '11px', textAlign: 'center', lineHeight: '1.2' }}>
-                    Input stiker holo berurutan (scan awal & akhir)
-                  </small>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-                  <button onClick={handleInputBuffer} className="buffer-button">
-                    Input Buffer Authenticity
-                  </button>
-                  <small style={{ color: '#666', fontSize: '11px', textAlign: 'center', lineHeight: '1.2' }}>
-                    Input nomor authenticity diluar range
-                  </small>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-                  <button onClick={handleInputReject} className="reject-button">
-                    Input Reject Authenticity
-                  </button>
-                  <small style={{ color: '#666', fontSize: '11px', textAlign: 'center', lineHeight: '1.2' }}>
-                    Input nomor authenticity yang reject
-                  </small>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-                  <button onClick={handleEndManufacturing} className="end-button">
-                    End Manufacturing Process
-                  </button>
-                  <small style={{ color: '#666', fontSize: '11px', textAlign: 'center', lineHeight: '1.2' }}>
-                    Akhiri proses manufacturing
-                  </small>
-                </div>
-              </div>
-            <div className="info-display">
-              <p><strong>Leader:</strong> {leaderName}</p>
-              <p><strong>Shift Number:</strong> {shiftNumber}</p>
-            </div>
+          <div className="info-display">
+            <p><strong>Leader:</strong> {leaderName}</p>
+            <p><strong>Shift Number:</strong> {shiftNumber}</p>
           </div>
         )}
 
@@ -1911,7 +2227,7 @@ function ProductionLiquid() {
                       <p><strong>Shift:</strong> {session.shift_number}</p>
                       <p><strong>Total Inputs:</strong> {session.inputs.length}</p>
                       {sessionVendorSummary && (
-                        <p style={{ color: '#64748b' }}>
+                        <p className="field-meta">
                           <strong>Vendor authenticity:</strong> {sessionVendorSummary}
                         </p>
                       )}
@@ -1960,9 +2276,14 @@ function ProductionLiquid() {
                               ? [...vendorNameSet][0]
                               : `Campuran (${[...vendorNameSet].join(', ')})`;
 
-                        // Check if this MO group is completed
+                        // Check if this MO group is completed / draft
                         const isMoGroupCompleted = inputs.every(input => input.status === 'completed');
-                        const moGroupStatus = isMoGroupCompleted ? 'completed' : 'active';
+                        const isMoGroupDraft = inputs.every(input => input.status === 'draft');
+                        const moGroupStatus = isMoGroupCompleted
+                          ? 'completed'
+                          : isMoGroupDraft
+                            ? 'draft'
+                            : 'active';
 
                         // Check if this MO group is being edited
                         const isEditing = editingMoNumber === moNumber && editingSessionId === session.session_id;
@@ -1978,17 +2299,23 @@ function ProductionLiquid() {
 
                         return (
                           <div key={moNumber} className="mo-group-card">
-                            <div className="mo-group-header" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <strong>MO Number:</strong> {moNumber}
+                            <div className="mo-group-header">
+                              <div className="mo-group-header-main">
+                                <strong>MO Number:</strong>{' '}
+                                <span className="mo-number-value">{moNumber}</span>
                                 <span className="mo-sku-badge">{inputs[0].sku_name}</span>
                                 {vendorSummaryLabel && (
-                                  <span className="mo-vendor-badge" style={{ fontSize: '12px', color: '#64748b' }}>
+                                  <span className="mo-vendor-badge">
                                     Vendor: {vendorSummaryLabel}
                                   </span>
                                 )}
+                                {uniquePics.size > 0 && (
+                                  <span className="mo-pic-badge">
+                                    PIC: {Array.from(uniquePics).join(', ')}
+                                  </span>
+                                )}
                               </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+                              <div className="mo-group-header-actions">
                                 {isMoGroupCompleted && isAdmin && !isEditing ? (
                                   <button
                                     onClick={() => handleRevertMoGroup(moNumber)}
@@ -2008,7 +2335,11 @@ function ProductionLiquid() {
                                   </button>
                                 ) : null}
                                 <span className={`status-badge ${moGroupStatus}`}>
-                                {moGroupStatus === 'completed' ? 'Completed' : 'Active'}
+                                {moGroupStatus === 'completed'
+                                  ? 'Completed'
+                                  : moGroupStatus === 'draft'
+                                    ? 'Draft'
+                                    : 'Active'}
                               </span>
                               </div>
                             </div>
@@ -2027,35 +2358,72 @@ function ProductionLiquid() {
                               </div>
                             </div>
                             <div className="input-card">
-                              <div className="input-card-header">
-                                <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                  {(() => {
-                                    if (activeInputs.length === 0 || isEditing) {
-                                      return null;
-                                    }
-                                    
-                                    // Check if all inputs for this MO in this session are active (no completed ones)
-                                    const allInputsForMo = inputs.filter(input => input.mo_number === moNumber);
-                                    const activeInputsForMo = allInputsForMo.filter(input => input.status === 'active');
-                                    const canSubmit = activeInputsForMo.length === allInputsForMo.length && activeInputsForMo.length > 0;
-                                    
-                                    return (
-                                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                              {(() => {
+                                // Draft MO group: Confirm Draft di daftar (bukan di modal input)
+                                if (isMoGroupDraft && !isEditing) {
+                                  const hasOtherActive = sessionHasActive(savedData, session.session_id);
+                                  const isCurrentSession = session.session_id === sessionId;
+                                  const canConfirmDraft = isCurrentSession && !hasOtherActive && !isSavingInput;
+                                  return (
+                                    <div className="input-card-header">
+                                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleConfirmDraftFromList(moNumber, session.session_id)}
+                                          className="confirm-button"
+                                          disabled={!canConfirmDraft}
+                                          style={{
+                                            padding: '6px 12px',
+                                            fontSize: '12px',
+                                            background: canConfirmDraft ? '#059669' : '#9ca3af',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            cursor: canConfirmDraft ? 'pointer' : 'not-allowed',
+                                            opacity: canConfirmDraft ? 1 : 0.6,
+                                          }}
+                                          title={
+                                            !isCurrentSession
+                                              ? 'Hanya session yang sedang berjalan yang bisa Confirm Draft'
+                                              : hasOtherActive
+                                                ? 'Masih ada MO active/started. Submit atau end session dulu sebelum Confirm Draft.'
+                                                : 'Confirm Draft → active + API started (30 ml)'
+                                          }
+                                        >
+                                          {isSavingInput ? 'Menyimpan...' : 'Confirm Draft'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                }
+
+                                if (activeInputs.length === 0 || isEditing) {
+                                  return null;
+                                }
+
+                                // Check if all inputs for this MO in this session are active (no completed ones)
+                                const allInputsForMo = inputs.filter(input => input.mo_number === moNumber && input.status !== 'draft');
+                                const activeInputsForMo = allInputsForMo.filter(input => input.status === 'active');
+                                const canSubmit = activeInputsForMo.length === allInputsForMo.length && activeInputsForMo.length > 0;
+
+                                return (
+                                  <div className="input-card-header">
+                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                                       <button
                                         onClick={() => handleSubmitMoGroup(moNumber, session.session_id)}
                                         className="submit-button"
-                                          disabled={!canSubmit}
-                                          style={{ 
-                                            padding: '6px 12px', 
-                                            fontSize: '12px', 
-                                            background: canSubmit ? '#059669' : '#9ca3af', 
-                                            color: 'white', 
-                                            border: 'none', 
-                                            borderRadius: '4px', 
-                                            cursor: canSubmit ? 'pointer' : 'not-allowed',
-                                            opacity: canSubmit ? 1 : 0.6
-                                          }}
-                                          title={!canSubmit ? 'Tidak dapat submit: masih ada input dengan status completed untuk MO ini' : ''}
+                                        disabled={!canSubmit || submittingMo}
+                                        style={{
+                                          padding: '6px 12px',
+                                          fontSize: '12px',
+                                          background: canSubmit && !submittingMo ? '#059669' : '#9ca3af',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          cursor: canSubmit && !submittingMo ? 'pointer' : 'not-allowed',
+                                          opacity: canSubmit && !submittingMo ? 1 : 0.6
+                                        }}
+                                        title={!canSubmit ? 'Tidak dapat submit: masih ada input dengan status completed untuk MO ini' : ''}
                                       >
                                         Submit MO
                                       </button>
@@ -2067,10 +2435,9 @@ function ProductionLiquid() {
                                         Edit
                                       </button>
                                     </div>
-                                    );
-                                  })()}
-                                </div>
-                              </div>
+                                  </div>
+                                );
+                              })()}
                                 <div className="input-card-body">
                                   {isEditing ? (
                                     <div className="edit-form">
@@ -2191,35 +2558,44 @@ function ProductionLiquid() {
                                       </div>
                                     </div>
                                   ) : (
-                                    <>
-                                      <div className="input-card-info-row">
-                                        <p><strong>PIC:</strong> {Array.from(uniquePics).join(', ')}</p>
-                                      </div>
-                                      <div className="authenticity-list">
-                                        <strong>Authenticity Data:</strong>
-                                        {allAuthenticityData.map((row, rowIdx) => {
-                                          const rowHasil = calculateSingleAuthenticityRow(row);
-                                          return (
-                                          <div key={rowIdx} className="authenticity-row">
-                                            <span>First: {row.firstAuthenticity}</span>
-                                            <span>Last: {row.lastAuthenticity}</span>
-                                            <span>Roll: {row.rollNumber}</span>
-                                            {row.vendorName ? <span>Vendor: {row.vendorName}</span> : null}
-                                            <span
-                                              className="authenticity-row-hasil"
-                                              title={
-                                                rowHasil > 0
-                                                  ? `(${row.lastAuthenticity} - ${row.firstAuthenticity} + 1) = ${rowHasil}`
-                                                  : 'Last - First + 1'
-                                              }
-                                            >
-                                              Hasil: {rowHasil}
+                                    <div className="authenticity-list">
+                                      <strong>Authenticity Data</strong>
+                                      {allAuthenticityData.map((row, rowIdx) => {
+                                        const rowHasil = calculateSingleAuthenticityRow(row);
+                                        return (
+                                        <div key={rowIdx} className="authenticity-row">
+                                          <span className="auth-field">
+                                            <span className="auth-field-label">First</span>
+                                            <span className="auth-field-value">{row.firstAuthenticity}</span>
+                                          </span>
+                                          <span className="auth-field">
+                                            <span className="auth-field-label">Last</span>
+                                            <span className="auth-field-value">{row.lastAuthenticity}</span>
+                                          </span>
+                                          <span className="auth-field">
+                                            <span className="auth-field-label">Roll</span>
+                                            <span className="auth-field-value">{row.rollNumber}</span>
+                                          </span>
+                                          {row.vendorName ? (
+                                            <span className="auth-field">
+                                              <span className="auth-field-label">Vendor</span>
+                                              <span className="auth-field-value">{row.vendorName}</span>
                                             </span>
-                                          </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </>
+                                          ) : null}
+                                          <span
+                                            className="authenticity-row-hasil"
+                                            title={
+                                              rowHasil > 0
+                                                ? `(${row.lastAuthenticity} - ${row.firstAuthenticity} + 1) = ${rowHasil}`
+                                                : 'Last - First + 1'
+                                            }
+                                          >
+                                            Hasil: {rowHasil}
+                                          </span>
+                                        </div>
+                                        );
+                                      })}
+                                    </div>
                                   )}
                                 </div>
                               </div>
@@ -2334,6 +2710,15 @@ function ProductionLiquid() {
         </div>
       </div>
 
+      {submittingMo && (
+        <div className="submit-loading-overlay" aria-busy="true">
+          <div className="submit-loading-card">
+            <div className="submit-loading-spinner" />
+            <p>Memverifikasi status FOOM MES...</p>
+          </div>
+        </div>
+      )}
+
       {/* Start Manufacturing Modal */}
       {showStartModal && (
         <div className="modal-overlay" onClick={() => setShowStartModal(false)}>
@@ -2426,9 +2811,14 @@ function ProductionLiquid() {
                 page={inputMoPage}
                 onPageChange={setInputMoPage}
                 productionType="liquid"
+                disabled={false}
               />
               <small style={{ color: '#666', fontSize: '13px', marginTop: '4px', display: 'block' }}>
-                Pilih MO dari daftar. Gunakan kotak pencarian untuk menyaring banyak MO.
+                {sessionHasActive(savedData, sessionId)
+                  ? `Ada MO ${getSessionActiveMoNumber(savedData, sessionId)} yang masih active/started. Anda bisa Save Draft untuk MO lain; Confirm Draft ada di kartu draft setelah MO active selesai.`
+                  : sessionHasDraft(savedData, sessionId)
+                    ? 'Ada draft di session ini. Save Draft untuk ganti/update. Confirm Draft dilakukan dari kartu draft di daftar data.'
+                    : 'Pilih MO dari daftar. Gunakan Save Draft untuk menyimpan tanpa sync API, atau Confirm Input untuk confirm langsung.'}
               </small>
               <MoInfoDisplay mo={selectedMo} formatDateIndonesia={formatDateIndonesia} productionType="liquid" />
             </div>
@@ -2538,17 +2928,42 @@ function ProductionLiquid() {
                 + Add Row
               </button>
             </div>
-            <div className="modal-buttons">
-              <button onClick={() => {
-                setShowInputModal(false);
-                setMoSearchTerm('');
-                setSelectedMo(null);
-              }} className="cancel-button">
-                Cancel
-              </button>
-              <button onClick={handleConfirmInput} className="confirm-button" disabled={isSavingInput}>
-                {isSavingInput ? 'Menyimpan...' : 'Confirm Input'}
-              </button>
+            <div className="modal-buttons modal-buttons--stacked">
+              <div className="modal-buttons-actions">
+                <button onClick={() => {
+                  setShowInputModal(false);
+                  setMoSearchTerm('');
+                  setSelectedMo(null);
+                }} className="cancel-button">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveDraft}
+                  className="draft-button"
+                  disabled={isSavingInput}
+                >
+                  {isSavingInput ? 'Menyimpan...' : 'Save Draft'}
+                </button>
+                {!sessionHasActive(savedData, sessionId) && !sessionHasDraft(savedData, sessionId) && (
+                  <button
+                    onClick={handleConfirmInput}
+                    className="confirm-button"
+                    disabled={isSavingInput}
+                  >
+                    {isSavingInput ? 'Menyimpan...' : 'Confirm Input'}
+                  </button>
+                )}
+              </div>
+              {sessionHasDraft(savedData, sessionId) && !sessionHasActive(savedData, sessionId) && (
+                <p className="modal-buttons-hint modal-buttons-hint--info">
+                  Confirm Draft ada di kartu draft pada daftar data
+                </p>
+              )}
+              {sessionHasActive(savedData, sessionId) && (
+                <p className="modal-buttons-hint modal-buttons-hint--warning">
+                  Confirm dinonaktifkan (MO masih active) — Save Draft untuk MO lain OK
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -3241,6 +3656,34 @@ function ProductionLiquid() {
                   e.currentTarget.style.transform = 'translateY(0)';
                   e.currentTarget.style.boxShadow = '0 4px 6px rgba(59, 130, 246, 0.3)';
                 }}
+              >
+                Mengerti
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stale Active MO Warning Modal (30 ml only) */}
+      {showStaleActiveMoModal && staleActiveMoInfo && liquidVariant === '30ml' && (
+        <div className="modal-overlay">
+          <div
+            className="modal-content modal-content--warning"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2>Perhatian — MO Active Lebih dari 30 Menit</h2>
+            <p className="stale-mo-warning-body">
+              Pastikan MO aktif sekarang adalah MO yang masuk kedalam bottomless dekat Scan Cukai,
+              jika belum segera submit MO ini dan confirm draft dengan MO yang akan masuk sekarang.
+            </p>
+            <p className="stale-mo-warning-meta">
+              MO: {staleActiveMoInfo.moNumber} · Aktif sejak ~{staleActiveMoInfo.elapsedMinutes} menit
+            </p>
+            <div className="modal-buttons">
+              <button
+                type="button"
+                className="confirm-button"
+                onClick={() => setShowStaleActiveMoModal(false)}
               >
                 Mengerti
               </button>

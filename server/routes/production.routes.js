@@ -11,12 +11,18 @@ const {
   ensureLiquidExternalIdAndPatchStarted,
   finalizeLiquidManufacturingExternal
 } = require('../services/liquid-external-manufacturing.service');
-const { convertDBTimestampToJakarta } = require('../utils/timezone.utils');
 const {
   enqueueSyncSourceRow,
   enqueueSyncSession,
   enqueueSyncMo,
 } = require('../services/production-results-sync.service');
+const { calculateDoneQty, formatManufacturingData } = require('../utils/liquid-manufacturing-payload');
+const {
+  matchesLiquidVariant,
+  parseLiquidVariant,
+  isExcludedFromExternalLiquidManufacturing,
+  isLiquid15MlSku,
+} = require('../utils/liquid-sku.helpers');
 
 function loadActiveVendorMap(callback) {
   loadActiveVendorMapDb(db, callback);
@@ -33,13 +39,15 @@ function validateRowsVendorDigits(rows, vendorMap, res) {
   return true;
 }
 
-// Guard: drop rows identical to already-saved active rows (double submit protection).
+// Guard: drop rows identical to already-saved active/draft rows (double submit protection).
 // Calls back with (err, rowsToInsert, skippedCount).
-function filterDuplicateActiveRows(table, moNumber, rows, callback) {
+function filterDuplicateActiveRows(table, moNumber, rows, callback, statusList = ['active']) {
+  const statuses = Array.isArray(statusList) && statusList.length > 0 ? statusList : ['active'];
+  const placeholders = statuses.map((_, i) => `$${i + 2}`).join(', ');
   const checks = rows.map(row => new Promise((resolve, reject) => {
     db.get(
-      `SELECT id FROM ${table} WHERE status = 'active' AND mo_number = $1 AND authenticity_data = $2`,
-      [moNumber, JSON.stringify([row])],
+      `SELECT id FROM ${table} WHERE status IN (${placeholders}) AND mo_number = $1 AND authenticity_data = $${statuses.length + 2}`,
+      [moNumber, ...statuses, JSON.stringify([row])],
       (err, existing) => {
         if (err) {
           reject(err);
@@ -58,65 +66,73 @@ function filterDuplicateActiveRows(table, moNumber, rows, callback) {
     .catch(err => callback(err));
 }
 
-// Helper function to calculate done_qty from authenticity_data array (handle multiple rolls)
-function calculateDoneQty(authenticityDataArray) {
-  let totalDoneQty = 0;
-  
-  if (!Array.isArray(authenticityDataArray)) {
-    return 0;
-  }
-  
-  authenticityDataArray.forEach(record => {
-    if (!record.authenticity_data) {
-      return;
-    }
-    
-    let authenticityData = record.authenticity_data;
-    if (typeof authenticityData === 'string') {
-      try {
-        authenticityData = JSON.parse(authenticityData);
-      } catch (e) {
-        return;
-      }
-    }
-    
-    if (!Array.isArray(authenticityData)) {
-      authenticityData = [authenticityData];
-    }
-    
-    authenticityData.forEach(roll => {
-      const firstAuth = roll.firstAuthenticity || roll.first_authenticity || '';
-      const lastAuth = roll.lastAuthenticity || roll.last_authenticity || '';
-      
-      if (firstAuth && lastAuth) {
-        const firstNum = parseInt(firstAuth);
-        const lastNum = parseInt(lastAuth);
-        
-        if (!isNaN(firstNum) && !isNaN(lastNum) && lastNum >= firstNum) {
-          totalDoneQty += (lastNum - firstNum + 1);
-        }
-      }
-    });
-  });
-  
-  return totalDoneQty;
+/** Active MO in session (started locally) — blocks new drafts. */
+function getSessionActiveMo(sessionId, callback) {
+  db.get(
+    `SELECT mo_number FROM production_liquid
+     WHERE session_id = $1 AND status = 'active'
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [sessionId],
+    callback
+  );
 }
 
-/** Payload for PUT /api/v1/manufacturing/:id when MO is finished (Submit MO). */
-function formatManufacturingData(moNumber, skuName, targetQty, doneQty, leaderName, finishedAt) {
-  const name = String(skuName || '').trim() || 'Unknown';
-  return {
-    manufacturing_id: moNumber,
-    sku: name,
-    sku_name: name,
-    target_qty: Number(targetQty) || 0,
-    done_qty: doneQty == null || doneQty === '' ? 0 : Number(doneQty),
-    status: 'finished',
-    manual_finished_qty: 0,
-    leader_name: String(leaderName || '').trim(),
-    started_at: null,
-    finished_at: finishedAt ? convertDBTimestampToJakarta(finishedAt) : null
-  };
+function sessionHasDraftRows(sessionId, callback) {
+  db.get(
+    `SELECT id FROM production_liquid
+     WHERE session_id = $1 AND status = 'draft'
+     LIMIT 1`,
+    [sessionId],
+    (err, row) => {
+      if (err) return callback(err);
+      callback(null, Boolean(row));
+    }
+  );
+}
+
+function sessionHasDraftForMo(sessionId, moNumber, callback) {
+  db.get(
+    `SELECT id FROM production_liquid
+     WHERE session_id = $1 AND mo_number = $2 AND status = 'draft'
+     LIMIT 1`,
+    [sessionId, moNumber],
+    (err, row) => {
+      if (err) return callback(err);
+      callback(null, Boolean(row));
+    }
+  );
+}
+
+/** Hapus draft hanya untuk MO tertentu (draft MO lain di session tetap ada). */
+function deleteSessionDraftsForMo(sessionId, moNumber, callback) {
+  db.run(
+    `DELETE FROM production_liquid WHERE session_id = $1 AND mo_number = $2 AND status = 'draft'`,
+    [sessionId, moNumber],
+    function(err) {
+      callback(err, this ? this.changes : 0);
+    }
+  );
+}
+
+function insertLiquidRows(session_id, leader_name, shift_number, pic, mo_number, sku_name, rowsToInsert, status) {
+  return Promise.all(rowsToInsert.map((authRow) => {
+    return new Promise((resolve, reject) => {
+      db.run(
+        `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([authRow]), status],
+        function(insertErr) {
+          if (insertErr) {
+            reject(insertErr);
+          } else {
+            enqueueSyncSourceRow('liquid', this.lastID);
+            resolve({ id: this.lastID, row: authRow });
+          }
+        }
+      );
+    });
+  }));
 }
 
 // Helper function to group production data by session
@@ -147,14 +163,22 @@ function groupBySession(rows) {
   return Object.values(grouped).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 
-// GET /api/production/liquid
+// GET /api/production/liquid?variant=15ml|30ml
 router.get('/liquid', (req, res) => {
+  const variant = parseLiquidVariant(req.query.variant);
+  if (req.query.variant != null && req.query.variant !== '' && variant == null) {
+    return res.status(400).json({ error: 'Invalid variant. Use 15ml or 30ml.' });
+  }
+
   db.all('SELECT * FROM production_liquid ORDER BY created_at DESC', (err, rows) => {
     if (err) {
       res.status(500).json({ error: err.message });
       return;
     }
-    const parsedRows = rows.map(parseAuthenticityData);
+    let parsedRows = rows.map(parseAuthenticityData);
+    if (variant) {
+      parsedRows = parsedRows.filter((row) => matchesLiquidVariant(row.sku_name, variant));
+    }
     res.json(groupBySession(parsedRows));
   });
 });
@@ -187,7 +211,6 @@ router.get('/cartridge', (req, res) => {
 // Latest active MO per production type by created_at (input time), not update time
 router.get('/active-mo-status', (req, res) => {
   const types = [
-    { key: 'liquid', table: 'production_liquid' },
     { key: 'device', table: 'production_device' },
     { key: 'cartridge', table: 'production_cartridge' }
   ];
@@ -206,13 +229,36 @@ router.get('/active-mo-status', (req, res) => {
     );
   });
 
-  Promise.all(types.map((t) => fetchLatestActive(t.table)))
-    .then((rows) => {
-      const result = {};
-      types.forEach((t, i) => {
-        result[t.key] = rows[i];
+  const fetchLatestLiquidActive = (variant) => new Promise((resolve, reject) => {
+    db.all(
+      `SELECT mo_number, sku_name, session_id, leader_name, shift_number, pic, created_at
+       FROM production_liquid
+       WHERE status = 'active'
+       ORDER BY created_at DESC`,
+      (err, rows) => {
+        if (err) reject(err);
+        else {
+          const match = (rows || []).find((r) => matchesLiquidVariant(r.sku_name, variant));
+          resolve(match || null);
+        }
+      }
+    );
+  });
+
+  Promise.all([
+    fetchLatestLiquidActive('15ml'),
+    fetchLatestLiquidActive('30ml'),
+    ...types.map((t) => fetchLatestActive(t.table)),
+  ])
+    .then(([liquid15, liquid30, device, cartridge]) => {
+      res.json({
+        liquid_15: liquid15,
+        liquid_30: liquid30,
+        // legacy key: prefer 30ml then 15ml for older clients
+        liquid: liquid30 || liquid15,
+        device,
+        cartridge,
       });
-      res.json(result);
     })
     .catch((err) => {
       res.status(500).json({ error: err.message });
@@ -325,8 +371,40 @@ router.get('/report', (req, res) => {
 });
 
 // POST /api/production/liquid
+// save_mode: draft | confirm | confirm_draft (default: confirm for backward compatibility)
 router.post('/liquid', (req, res) => {
-  const { session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data } = req.body;
+  const {
+    session_id,
+    leader_name,
+    shift_number,
+    pic,
+    mo_number,
+    sku_name,
+    authenticity_data,
+    save_mode: rawSaveMode,
+    variant: rawVariant,
+  } = req.body;
+
+  const saveMode = String(rawSaveMode || 'confirm').toLowerCase().trim();
+  if (!['draft', 'confirm', 'confirm_draft'].includes(saveMode)) {
+    return res.status(400).json({ error: 'save_mode must be draft, confirm, or confirm_draft' });
+  }
+
+  const variant = parseLiquidVariant(rawVariant);
+  if (rawVariant != null && rawVariant !== '' && variant == null) {
+    return res.status(400).json({ error: 'Invalid variant. Use 15ml or 30ml.' });
+  }
+  const effectiveVariant = variant || (isLiquid15MlSku(sku_name) ? '15ml' : '30ml');
+
+  if (!session_id || !mo_number) {
+    return res.status(400).json({ error: 'session_id and mo_number are required' });
+  }
+
+  if (!matchesLiquidVariant(sku_name, effectiveVariant)) {
+    return res.status(400).json({
+      error: `SKU tidak sesuai halaman liquid ${effectiveVariant}`,
+    });
+  }
 
   const authenticityRows = normalizeAuthenticityArray(authenticity_data);
 
@@ -338,60 +416,144 @@ router.post('/liquid', (req, res) => {
       return;
     }
 
-    filterDuplicateActiveRows('production_liquid', mo_number, authenticityRows, (dupErr, rowsToInsert, skippedCount) => {
-      if (dupErr) {
-        return res.status(500).json({ error: dupErr.message });
-      }
-      if (rowsToInsert.length === 0) {
-        return res.status(409).json({
-          error: 'Data authenticity yang sama sudah tersimpan (kemungkinan double submit).'
-        });
+    getSessionActiveMo(session_id, (activeErr, activeRow) => {
+      if (activeErr) {
+        return res.status(500).json({ error: activeErr.message });
       }
 
-      db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [mo_number], (err, row) => {
-        const targetQty = (!err && row) ? (row.quantity || 0) : 0;
+      const activeMo = activeRow ? activeRow.mo_number : null;
 
-        const insertPromises = rowsToInsert.map((authRow) => {
-          return new Promise((resolve, reject) => {
-            db.run(
-              `INSERT INTO production_liquid (session_id, leader_name, shift_number, pic, mo_number, sku_name, authenticity_data, status) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, 'active') RETURNING id`,
-              [session_id, leader_name, shift_number, pic, mo_number, sku_name, JSON.stringify([authRow])],
-              function(insertErr) {
-                if (insertErr) {
-                  reject(insertErr);
-                } else {
-                  enqueueSyncSourceRow('liquid', this.lastID);
-                  resolve({ id: this.lastID, row: authRow });
+      sessionHasDraftRows(session_id, (draftErr, hasDraft) => {
+        if (draftErr) {
+          return res.status(500).json({ error: draftErr.message });
+        }
+
+        // While MO is active/started: Save Draft OK (MO lain), Confirm / Confirm Draft ditolak
+        if (activeMo && saveMode !== 'draft') {
+          return res.status(409).json({
+            error: `Session masih punya MO ${activeMo} berstatus active/started. Confirm Draft / Confirm Input tidak bisa sampai MO itu di-submit atau session diakhiri. Anda masih bisa Save Draft untuk MO lain.`,
+          });
+        }
+
+        if (activeMo && saveMode === 'draft' && mo_number === activeMo) {
+          return res.status(409).json({
+            error: `MO ${activeMo} sudah active. Gunakan Edit untuk mengubah data MO ini, atau pilih MO lain untuk Save Draft.`,
+          });
+        }
+
+        if (saveMode === 'confirm' && hasDraft) {
+          return res.status(400).json({
+            error: 'Masih ada draft di session ini. Gunakan Confirm Draft pada kartu draft di daftar, atau Save Draft untuk menambah draft MO lain.',
+          });
+        }
+
+        if (saveMode === 'confirm_draft') {
+          return sessionHasDraftForMo(session_id, mo_number, (moDraftErr, hasMoDraft) => {
+            if (moDraftErr) {
+              return res.status(500).json({ error: moDraftErr.message });
+            }
+            if (!hasMoDraft) {
+              return res.status(400).json({
+                error: `Belum ada draft untuk MO ${mo_number}. Save Draft dulu untuk MO ini, atau Confirm Input jika belum pernah draft.`,
+              });
+            }
+            proceedInsert();
+          });
+        }
+
+        proceedInsert();
+
+        function proceedInsert() {
+        const dupStatuses = ['active'];
+
+        filterDuplicateActiveRows(
+          'production_liquid',
+          mo_number,
+          authenticityRows,
+          (dupErr, rowsToInsert, skippedCount) => {
+            if (dupErr) {
+              return res.status(500).json({ error: dupErr.message });
+            }
+            if (rowsToInsert.length === 0) {
+              return res.status(409).json({
+                error: 'Data authenticity yang sama sudah tersimpan (kemungkinan double submit).',
+              });
+            }
+
+            const finishInsert = (status, triggerStarted) => {
+              db.get('SELECT quantity FROM odoo_mo_cache WHERE mo_number = ?', [mo_number], (err, row) => {
+                const targetQty = (!err && row) ? (row.quantity || 0) : 0;
+
+                insertLiquidRows(
+                  session_id,
+                  leader_name,
+                  shift_number,
+                  pic,
+                  mo_number,
+                  sku_name,
+                  rowsToInsert,
+                  status
+                )
+                  .then((results) => {
+                    if (triggerStarted && !isExcludedFromExternalLiquidManufacturing(sku_name)) {
+                      ensureLiquidExternalIdAndPatchStarted(mo_number, sku_name, targetQty, leader_name, () => {});
+                    }
+
+                    res.json({
+                      message: status === 'draft' ? 'Draft saved successfully' : 'Data saved successfully',
+                      save_mode: saveMode,
+                      status,
+                      saved_count: results.length,
+                      skipped_duplicates: skippedCount,
+                      data: results.map(r => ({
+                        id: r.id,
+                        session_id,
+                        leader_name,
+                        shift_number,
+                        pic,
+                        mo_number,
+                        sku_name,
+                        authenticity_data: [r.row],
+                        status,
+                      })),
+                    });
+                  })
+                  .catch((insertErr) => {
+                    res.status(500).json({ error: insertErr.message });
+                  });
+              });
+            };
+
+            if (saveMode === 'draft') {
+              // Hanya replace draft untuk MO ini — draft MO lain tetap ada
+              deleteSessionDraftsForMo(session_id, mo_number, (delErr) => {
+                if (delErr) {
+                  return res.status(500).json({ error: delErr.message });
                 }
-              }
-            );
-          });
-        });
+                finishInsert('draft', false);
+              });
+              return;
+            }
 
-        Promise.all(insertPromises)
-          .then((results) => {
-            ensureLiquidExternalIdAndPatchStarted(mo_number, sku_name, targetQty, leader_name, () => {});
+            if (saveMode === 'confirm_draft') {
+              // Promote draft MO ini saja; draft MO lain tidak dihapus
+              deleteSessionDraftsForMo(session_id, mo_number, (delErr) => {
+                if (delErr) {
+                  return res.status(500).json({ error: delErr.message });
+                }
+                const triggerStarted = !isExcludedFromExternalLiquidManufacturing(sku_name);
+                finishInsert('active', triggerStarted);
+              });
+              return;
+            }
 
-            res.json({
-              message: 'Data saved successfully',
-              saved_count: results.length,
-              skipped_duplicates: skippedCount,
-              data: results.map(r => ({
-                id: r.id,
-                session_id,
-                leader_name,
-                shift_number,
-                pic,
-                mo_number,
-                sku_name,
-                authenticity_data: [r.row]
-              }))
-            });
-          })
-          .catch((err) => {
-            res.status(500).json({ error: err.message });
-          });
+            // confirm (tanpa draft) → active + started
+            const triggerStarted = !isExcludedFromExternalLiquidManufacturing(sku_name);
+            finishInsert('active', triggerStarted);
+          },
+          dupStatuses
+        );
+        }
       });
     });
   });
@@ -536,7 +698,8 @@ router.put('/liquid/end-session', (req, res) => {
   const { session_id } = req.body;
   
   db.run(
-    `UPDATE production_liquid SET status = 'completed' WHERE session_id = $1`,
+    `UPDATE production_liquid SET status = 'completed', completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
+     WHERE session_id = $1 AND status IN ('active', 'draft')`,
     [session_id],
     function(err) {
       if (err) {
@@ -702,9 +865,14 @@ router.put('/liquid/update-status/:id', (req, res) => {
                           finishedSource
                         );
 
-                        finalizeLiquidManufacturingExternal(row.mo_number, formattedData, () => {});
-
-                        res.json({ message: 'Status updated successfully', id: id, status: status });
+                        finalizeLiquidManufacturingExternal(row.mo_number, formattedData, (_finErr, finResult) => {
+                          res.json({
+                            message: 'Status updated successfully',
+                            id: id,
+                            status: status,
+                            external_api_verified: !!(finResult && finResult.verified)
+                          });
+                        });
                       });
                     });
                 } else {
@@ -873,13 +1041,14 @@ router.put('/liquid/submit-mo-group', (req, res) => {
                       finishedSource
                     );
 
-                    finalizeLiquidManufacturingExternal(mo_number, formattedData, () => {});
-
-                    res.json({
-                      message: 'MO submitted successfully',
-                      mo_number: mo_number,
-                      updated_count: updatedCount,
-                      external_api_sent: true
+                    finalizeLiquidManufacturingExternal(mo_number, formattedData, (_finErr, finResult) => {
+                      res.json({
+                        message: 'MO submitted successfully',
+                        mo_number: mo_number,
+                        updated_count: updatedCount,
+                        external_api_sent: true,
+                        external_api_verified: !!(finResult && finResult.verified)
+                      });
                     });
                   });
                 });

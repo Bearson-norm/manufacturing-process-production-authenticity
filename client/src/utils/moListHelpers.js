@@ -1,10 +1,48 @@
 export const DEFAULT_MO_PAGE_SIZE = 10;
 
-const LIQUID_SKU_PRODUCTION_EXCLUDE = ['MIXING', 'BRAY', 'BUNDLING'];
+const LIQUID_SKU_HARD_EXCLUDE = ['MIXING', 'BRAY'];
 
+function normalizeLiquidSku(skuName) {
+  return String(skuName || '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Liquid 15 ml: "15 ml"/"15ml", "slof", or "bundling". */
+export function isLiquid15MlSku(skuName) {
+  const s = normalizeLiquidSku(skuName);
+  if (!s) return false;
+  if (s.includes('15 ML') || s.includes('15ML')) return true;
+  if (s.includes('SLOF')) return true;
+  if (s.includes('BUNDLING')) return true;
+  return false;
+}
+
+export function isLiquidHardExcludedSku(skuName) {
+  const s = normalizeLiquidSku(skuName);
+  return LIQUID_SKU_HARD_EXCLUDE.some((key) => s.includes(key));
+}
+
+/** Liquid 30 ml: not 15 ml criteria and not MIXING/BRAY. */
+export function isLiquid30MlSku(skuName) {
+  if (isLiquidHardExcludedSku(skuName)) return false;
+  return !isLiquid15MlSku(skuName);
+}
+
+/**
+ * @param {string} skuName
+ * @param {'15ml'|'30ml'} variant
+ */
+export function matchesLiquidVariant(skuName, variant) {
+  if (variant === '15ml') return isLiquid15MlSku(skuName) && !isLiquidHardExcludedSku(skuName);
+  if (variant === '30ml') return isLiquid30MlSku(skuName);
+  return false;
+}
+
+/** @deprecated Prefer matchesLiquidVariant — kept for callers that mean "not on 30ml page". */
 export function isExcludedLiquidProductionSku(skuName) {
-  const s = String(skuName || '').toUpperCase();
-  return LIQUID_SKU_PRODUCTION_EXCLUDE.some((key) => s.includes(key));
+  return isLiquidHardExcludedSku(skuName) || isLiquid15MlSku(skuName);
 }
 
 export function getMoTeamName(mo) {
