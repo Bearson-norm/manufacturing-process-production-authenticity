@@ -128,9 +128,13 @@ function loadActiveVendorMapDb(db, callback) {
 }
 
 /**
- * Quantity from authenticity ranges.
- * Sums (last - first + 1) for every row that has first/last.
- * rollNumber is only a label — duplicate roll numbers do not collapse ranges.
+ * Quantity from authenticity ranges (inclusive): each pair adds `last - first + 1`.
+ * Skips rows without parsable first/last; JSON/parse failure returns 0 (never throws).
+ * Expects camelCase `firstAuthenticity` / `lastAuthenticity`. rollNumber is a label only —
+ * duplicate roll labels do not merge ranges.
+ *
+ * @param {string|object|Array} authenticityData
+ * @returns {number}
  */
 function calculateQuantityFromAuthenticity(authenticityData) {
   try {

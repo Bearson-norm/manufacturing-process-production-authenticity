@@ -43,6 +43,7 @@ const {
   mapOdooMoToCacheParams,
   backfillMoCacheTeamNames,
   buildDeviceSyncDomain,
+  buildLiquidSyncDomain,
 } = require('./utils/odoo-mo.helpers');
 
 const {
@@ -98,15 +99,7 @@ async function updateMoDataFromOdoo() {
             ['note', '=', false],
             ['note', '=', '']
           ];
-        } else if (noteFilter === 'liquid') {
-          // Use OR condition to catch "TEAM LIQUID" and "liquid" variations
-          domainFilter = ['|', '|', '|',
-            ['note', 'ilike', 'TEAM LIQUID'],  // Primary filter: TEAM LIQUID
-            ['note', 'ilike', 'liquid'],         // Fallback: any note with "liquid"
-            ['note', '=', false],
-            ['note', '=', '']
-          ];
-        } else if (noteFilter !== 'device') {
+        } else if (noteFilter !== 'liquid' && noteFilter !== 'device') {
           continue;
         }
 
@@ -145,16 +138,7 @@ async function updateMoDataFromOdoo() {
             ["create_date", ">=", startDateStr]
           ];
         } else if (noteFilter === 'liquid') {
-          // Need '&' operator to combine OR condition with date filter
-          combinedDomain = [
-            '&',  // AND operator
-            '|', '|', '|',  // OR: TEAM LIQUID / liquid / empty note
-            ['note', 'ilike', 'TEAM LIQUID'],
-            ['note', 'ilike', 'liquid'],
-            ['note', '=', false],
-            ['note', '=', ''],
-            ["create_date", ">=", startDateStr]
-          ];
+          combinedDomain = buildLiquidSyncDomain(startDateStr);
         } else if (noteFilter === 'device') {
           combinedDomain = buildDeviceSyncDomain(startDateStr);
         }

@@ -1,233 +1,97 @@
 # Environment Configuration Guide
 
-Sistem ini menggunakan environment variables untuk konfigurasi yang berbeda antara development (lokal) dan production (VPS).
+Konfigurasi lewat `server/.env`. Template kanonik: [server/env.example](../../server/env.example). Database adalah **PostgreSQL** (`DB_*`), bukan file SQLite.
 
-## 📁 File Structure
+## File structure
 
 ```
 server/
-  ├── .env              # Environment variables (tidak di-commit ke git)
-  ├── env.example       # Template untuk .env
-  ├── config.js         # Centralized config loader
-  └── index.js          # Load .env di awal
+  ├── .env           # tidak di-commit
+  ├── env.example    # template
+  ├── config.js      # loader
+  └── index.js
 ```
 
-## 🚀 Setup untuk Development (Lokal)
+PM2 memuat `.env` dari direktori yang sama dengan `ecosystem.config.js` (`server/`).
 
-### 1. Install dependencies
+## Development
+
 ```bash
 cd server
-npm install
-```
-
-### 2. Buat file .env
-```bash
-# Copy template
 cp env.example .env
-
-# Edit sesuai kebutuhan lokal
-# Default sudah cocok untuk development
+# Set DB_*, JWT_SECRET, ADMIN_PASSWORD, PRODUCTION_PASSWORD
 ```
 
-### 3. Edit .env (opsional)
-```env
-NODE_ENV=development
-PORT=1234
-DATABASE_PATH=./database.sqlite
-CORS_ORIGIN=*
-LOG_LEVEL=info
-```
+Dari root repo:
 
-### 4. Jalankan aplikasi
 ```bash
-# Development mode
 npm run dev
-
-# Production mode
-npm start
 ```
 
-## 🖥️ Setup untuk Production (VPS)
+`PORT` default **1234** (proses API). React di **3000** mem-proxy `/api` ke backend. Jangan set `CORS_ORIGIN=*` di staging/production.
 
-### 1. Setup otomatis via deployment
-CI/CD akan otomatis membuat `.env` dari `env.example` jika belum ada.
+## Production / staging
 
-### 2. Setup manual
-```bash
-# SSH ke VPS
-ssh foom@103.31.39.189
+Salin `server/env.example` ke `server/.env` di host deploy, lalu set:
 
-# Masuk ke directory deployment
-cd /home/foom/deployments/manufacturing-app/server
+- `NODE_ENV=production` atau `staging`
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- `JWT_SECRET`, `ADMIN_PASSWORD`, `PRODUCTION_PASSWORD`
+- `CORS_ORIGIN` (origin UI, comma-separated; hindari `*`)
 
-# Copy template
-cp env.example .env
+Staging app port di ecosystem: **3467**. Production `PORT` dari `.env` (default 1234).
 
-# Edit untuk production
-nano .env
-```
-
-### 3. Konfigurasi Production (.env)
-```env
-NODE_ENV=production
-PORT=1234
-DATABASE_PATH=/home/foom/deployments/manufacturing-app/server/database.sqlite
-CORS_ORIGIN=https://mpr.moof-set.web.id
-LOG_LEVEL=info
-APP_NAME=Manufacturing Process Production Authenticity
-APP_VERSION=1.0.0
-```
-
-### 4. Restart aplikasi
-```bash
-pm2 restart manufacturing-app
-```
-
-## 📝 Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NODE_ENV` | `development` | Environment mode: `development` atau `production` |
-| `PORT` | `1234` | Port untuk server |
-| `DATABASE_PATH` | `./database.sqlite` | Path ke database file |
-| `CORS_ORIGIN` | `*` | CORS allowed origins (comma-separated) |
-| `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `APP_NAME` | `Manufacturing...` | Application name |
-| `APP_VERSION` | `1.0.0` | Application version |
-
-## 🔄 Update Environment
-
-### Di Lokal
-1. Edit `server/.env`
-2. Restart aplikasi:
-   ```bash
-   # Stop aplikasi (Ctrl+C jika running)
-   # Start lagi
-   npm run dev
-   ```
-
-### Di VPS
-1. Edit `.env`:
-   ```bash
-   ssh foom@103.31.39.189
-   cd /home/foom/deployments/manufacturing-app/server
-   nano .env
-   ```
-
-2. Restart PM2:
-   ```bash
-   pm2 restart manufacturing-app
-   ```
-
-3. Check status:
-   ```bash
-   pm2 status
-   pm2 logs manufacturing-app
-   ```
-
-## 🔐 Security Notes
-
-1. **JANGAN commit `.env` ke git!**
-   - File `.env` sudah ada di `.gitignore`
-   - Hanya commit `env.example` sebagai template
-
-2. **JANGAN share `.env` file!**
-   - Berisi konfigurasi sensitif
-   - Setiap environment punya `.env` sendiri
-
-3. **Backup `.env` di VPS:**
-   ```bash
-   # Backup sebelum update
-   cp .env .env.backup.$(date +%Y%m%d)
-   ```
-
-## 🛠️ Troubleshooting
-
-### Environment variables tidak terbaca
-1. Pastikan file `.env` ada di `server/` directory
-2. Pastikan `dotenv` sudah terinstall: `npm install`
-3. Restart aplikasi
-
-### PM2 tidak load .env
-1. PM2 load `.env` dari `ecosystem.config.js`
-2. Pastikan `.env` ada di directory yang sama dengan `ecosystem.config.js`
-3. Restart PM2: `pm2 restart manufacturing-app --update-env`
-
-### Check current environment
-```bash
-# Di server/index.js, tambahkan:
-console.log('Environment:', process.env.NODE_ENV);
-console.log('Port:', process.env.PORT);
-console.log('Database:', process.env.DATABASE_PATH);
-```
-
-## 📚 Scripts
-
-### Setup environment di VPS
-```bash
-cd /var/www/manufacturing-process-production-authenticity
-chmod +x .github/scripts/setup-env.sh
-sudo ./.github/scripts/setup-env.sh
-```
-
-### Check environment
-```bash
-# Di VPS
-cd /home/foom/deployments/manufacturing-app/server
-cat .env
-
-# Check PM2 environment
-pm2 show manufacturing-app | grep env
-```
-
-## 🔄 Update Program dengan Environment
-
-### Workflow Update:
-
-1. **Update kode di lokal:**
-   ```bash
-   git add .
-   git commit -m "Update: add new features"
-   git push origin main
-   ```
-
-2. **CI/CD otomatis deploy:**
-   - GitHub Actions akan:
-     - Build aplikasi
-     - Deploy ke VPS
-     - Setup `.env` jika belum ada
-     - Restart PM2
-
-3. **Manual update environment (jika perlu):**
-   ```bash
-   # Di VPS
-   cd /home/foom/deployments/manufacturing-app/server
-   nano .env  # Edit jika perlu
-   pm2 restart manufacturing-app
-   ```
-
-### Sync Environment Lokal ke VPS:
-
-Jika ingin sync environment dari lokal ke VPS:
+Setelah edit `.env`:
 
 ```bash
-# Di lokal, export environment
-cd server
-cat .env
-
-# Di VPS, edit .env dan paste values
-ssh foom@103.31.39.189
-cd /home/foom/deployments/manufacturing-app/server
-nano .env  # Paste values dari lokal
-pm2 restart manufacturing-app
+pm2 restart manufacturing-app --update-env
+pm2 restart manufacturing-app-worker --update-env
 ```
 
-## ✅ Checklist
+(staging: `manufacturing-app-staging` + `manufacturing-app-staging-worker`)
 
-- [ ] `.env` file dibuat di `server/` (lokal)
-- [ ] `.env` file dibuat di VPS deployment directory
-- [ ] Environment variables sesuai dengan environment (dev/prod)
-- [ ] `dotenv` package terinstall
-- [ ] Aplikasi restart setelah update `.env`
-- [ ] PM2 load environment dengan benar
+## Variabel
 
+| Variable | Default (example) | Meaning |
+|----------|-------------------|---------|
+| `NODE_ENV` | `development` | `development` / `staging` / `production` |
+| `PORT` | `1234` | Port proses HTTP (web). Worker tidak bind port. |
+| `DB_HOST` | `localhost` | Host PostgreSQL |
+| `DB_PORT` | `5432` | Port PostgreSQL (VPS bisa berbeda; baca `.env` host) |
+| `DB_NAME` | `manufacturing_db` | Nama database |
+| `DB_USER` | `admin` | User PostgreSQL |
+| `DB_PASSWORD` | (wajib diisi) | Password DB |
+| `DB_POOL_MAX` | `20` | Pool size |
+| `JWT_SECRET` | (wajib prod/staging) | Signing key JWT |
+| `JWT_EXPIRES_IN` | `8h` | Expiry token |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | — | Login role `admin` |
+| `PRODUCTION_USERNAME` / `PRODUCTION_PASSWORD` | — | Login role `production` |
+| `CORS_ORIGIN` | `http://localhost:3000` | Allowlist origin |
+| `ENABLE_SCHEDULER` | di-set PM2 | `true` hanya di worker |
+| `ENABLE_HTTP` | di-set PM2 | `false` di worker |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+
+Jika `DB_NAME` tidak di-set, `config.js` memakai fallback internal — **selalu set `DB_NAME` di `.env`**.
+
+### Integrasi (opsional)
+
+Preferensi: Admin UI → tabel `admin_config`. Env hanya fallback:
+
+- Odoo: `ODOO_SESSION_ID`, `ODOO_API_URL`
+- External MES: `EXTERNAL_API_BASE_URL`, `EXTERNAL_API_BEARER_TOKEN`, `EXTERNAL_API_TARGETS` (JSON list target). Legacy: `EXTERNAL_API_URL`, `EXTERNAL_API_URL_ACTIVE`, `EXTERNAL_API_URL_COMPLETED`
+- WMS: `WMS_API_BASE_URL`, `WMS_ACCESS_TOKEN`, `WMS_USERNAME`, `WMS_COMPANY_ID`, `WMS_SITE`
+- Idle push window: `EXTERNAL_MFG_MIN_CREATE_DATE`, `EXTERNAL_MFG_WINDOW_DAYS_BACK`, `EXTERNAL_MFG_WINDOW_DAYS_FORWARD`
+
+## Security
+
+- Jangan commit `.env`.
+- Jangan menempel isi `.env` ke chat, screenshot, atau markdown.
+- Backup `.env` di host (di luar git) sebelum mengubah nilai.
+
+## Troubleshooting
+
+**Variabel tidak terbaca:** file harus `server/.env` (bukan root repo). Restart proses.
+
+**PM2 tidak update env:** `pm2 restart <app> --update-env`.
+
+**Prod/staging gagal boot:** `JWT_SECRET`, `ADMIN_PASSWORD`, dan `PRODUCTION_PASSWORD` wajib.

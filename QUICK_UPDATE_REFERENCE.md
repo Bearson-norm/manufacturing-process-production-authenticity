@@ -161,7 +161,7 @@ pm2 start all
 
 ## 📚 Full Documentation
 
-- **Update Guide**: `VPS_UPDATE_GUIDE.md`
+- **Update Guide**: [docs/deployment/DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md)
 - **Update Summary**: `UPDATE_SUMMARY.md`
 - **Production Checklist**: `PRODUCTION_CHECKLIST.md`
 - **Troubleshooting**: `TROUBLESHOOTING.md`

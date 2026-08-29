@@ -1,6 +1,6 @@
 # Security status (current codebase)
 
-This document reflects the **implemented** security controls. Historical “not implemented” checklists below are obsolete.
+This document reflects the **implemented** security controls. Auth matrix and public contracts: [docs/api/API_DOCUMENTATION.md](docs/api/API_DOCUMENTATION.md).
 
 ## Implemented
 
@@ -21,7 +21,7 @@ This document reflects the **implemented** security controls. Historical “not 
 
 1. Prefer HttpOnly cookie session over `localStorage` JWT (XSS surface).
 2. Encrypt `admin_config` secrets at rest (KMS/vault).
-3. Rotate any credentials that ever appeared in docs/scripts (`YOUR_DB_PASSWORD` placeholders) — see [docs/deployment/CREDENTIAL_ROTATION.md](docs/deployment/CREDENTIAL_ROTATION.md).
+3. Rotate any credentials that ever appeared in docs/scripts or deleted sample files — see [docs/deployment/CREDENTIAL_ROTATION.md](docs/deployment/CREDENTIAL_ROTATION.md).
 4. Add broader API integration tests and keep `npm audit` clean on the client toolchain.
 5. Enable stricter CSP (nonces) when the SPA no longer needs `'unsafe-inline'`.
 

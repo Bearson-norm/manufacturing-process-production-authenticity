@@ -166,15 +166,15 @@ Jika ada masalah, rollback mudah:
 3. Restore database backup (jika diperlukan)
 4. Restart aplikasi
 
-Lihat `VPS_UPDATE_GUIDE.md` section "Rollback Plan" untuk detail.
+Lihat [docs/deployment/DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md) untuk rollback (restore backup + restart web dan worker).
 
 ## 📚 Dokumentasi
 
 Dokumentasi lengkap tersedia di:
-- `VPS_UPDATE_GUIDE.md` - Panduan update lengkap
-- `PRODUCTION_CHECKLIST.md` - Checklist production readiness
-- `API_DOCUMENTATION.md` - Dokumentasi API (sudah diupdate)
-- `TROUBLESHOOTING.md` - Troubleshooting guide
+- [docs/deployment/DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md) — deploy / update
+- [docs/setup/PRODUCTION_CHECKLIST.md](docs/setup/PRODUCTION_CHECKLIST.md)
+- [docs/api/API_DOCUMENTATION.md](docs/api/API_DOCUMENTATION.md)
+- [docs/troubleshooting/TROUBLESHOOTING.md](docs/troubleshooting/TROUBLESHOOTING.md)
 
 ## ⏱️ Estimated Update Time
 

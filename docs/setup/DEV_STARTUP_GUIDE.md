@@ -1,181 +1,63 @@
 # Development Startup Guide
 
-## Menjalankan dengan `npm run dev`
+## `npm run dev`
 
-Saat menjalankan `npm run dev`, sistem akan:
-1. Menjalankan server backend (nodemon) di port 1234
-2. Menjalankan client frontend (React) di port 3000
-3. Keduanya berjalan secara bersamaan menggunakan `concurrently`
+Dari root repo, perintah ini menjalankan:
 
-## Apa yang Harus Anda Lihat
+1. Backend (nodemon) — proses API, `PORT` default **1234**
+2. Client React — **3000**, proxy `/api` ke backend
 
-### 1. Database Configuration (Muncul di Server Log)
+Keduanya lewat `concurrently`. Buka UI di `http://localhost:3000`. Curl API ke `http://localhost:1234`.
 
-Saat server start, Anda akan melihat:
+Prasyarat: PostgreSQL berjalan, `server/.env` sudah diisi (`cp server/env.example server/.env`).
 
-```
-============================================================
-📊 DATABASE CONFIGURATION
-============================================================
-   Host: localhost
-   Port: 5432
-   Database: Staging_Manufacturing_Order
-   User: admin
-   Password: ***
-============================================================
+## Yang diharapkan
 
-🔄 Initializing PostgreSQL tables...
-📦 Target database: Staging_Manufacturing_Order
-✅ Connected to correct database: "Staging_Manufacturing_Order"
-✅ PostgreSQL tables initialized successfully
-📋 Total tables in database: 15
-📊 Tables found:
-   1. admin_config
-   2. buffer_cartridge
-   3. buffer_device
-   4. buffer_liquid
-   5. odoo_mo_cache
-   6. pic_list
-   7. production_cartridge
-   8. production_combined
-   9. production_device
-   10. production_liquid
-   11. production_results
-   12. receiver_logs
-   13. reject_cartridge
-   14. reject_device
-   15. reject_liquid
+- Server log: koneksi PostgreSQL berhasil, migrasi/schema bootstrap, lalu listen di `PORT`.
+- Client: CRA compiled, Local `http://localhost:3000`.
 
-📈 Database Data Summary:
-   pic_list: 113 records
+Jangan mengandalkan jumlah tabel, nama database, atau cuplikan password dari log lama. Schema di-bootstrap dari `server/schema-bootstrap.js` dan `server/migrations/`.
 
-✅ Database initialized and ready
-🚀 Server starting...
+## Konfigurasi database
 
-🚀 Server is running on port 1234
-📡 Environment: development
-🔗 Access at: http://localhost:1234
+File env: **`server/.env`** (bukan root).
+
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=manufacturing_db
+DB_USER=admin
+DB_PASSWORD=replace_with_strong_password
 ```
 
-### 2. Client Log (React)
+Setelah mengubah `.env`, restart `npm run dev`.
 
-Anda akan melihat output dari React development server:
-
-```
-Compiled successfully!
-
-You can now view manufacturing-client in the browser.
-
-  Local:            http://localhost:3000
-  On Your Network:  http://192.168.x.x:3000
-```
-
-## Memverifikasi Database yang Digunakan
-
-### Cara 1: Lihat Log saat Startup
-
-Perhatikan bagian **"📊 DATABASE CONFIGURATION"** di console output server. Database yang digunakan akan ditampilkan di sana.
-
-### Cara 2: Jalankan Script Check Database
-
-Buka terminal baru dan jalankan:
-
-```bash
-cd server
-node check-database.js
-```
-
-Ini akan menampilkan:
-- Database yang sedang digunakan
-- Semua tabel yang ada
-- Jumlah data di setiap tabel
-
-### Cara 3: Cek File Konfigurasi
-
-1. **Cek `.env` file** (jika ada di root project):
-   ```env
-   DB_NAME=your_database_name
-   ```
-
-2. **Cek `server/config.js`**:
-   ```javascript
-   database: {
-     database: process.env.DB_NAME || 'manufacturing_db', // Default
-     // ...
-   }
-   ```
-
-## Mengubah Database
-
-### Jika ingin menggunakan database yang berbeda:
-
-1. **Buat file `.env`** di root project:
-   ```env
-   DB_NAME=manufacturing_db
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_USER=admin
-   DB_PASSWORD=YOUR_DB_PASSWORD
-   ```
-
-2. **Restart server** (stop dengan Ctrl+C, lalu `npm run dev` lagi)
-
-3. **Verifikasi** dengan melihat log startup atau jalankan `node server/check-database.js`
+Verifikasi cepat: `GET http://localhost:1234/health` harus `status: healthy` dan `database: connected`.
 
 ## Troubleshooting
 
-### Database tidak muncul di log
+### Database does not exist
 
-Jika tidak melihat database configuration di log:
-- Pastikan `server/database.js` sudah di-require dengan benar
-- Cek apakah ada error di console
-- Pastikan PostgreSQL service berjalan
+Buat database yang sama dengan `DB_NAME`:
 
-### Database yang salah
-
-Jika melihat database yang tidak diinginkan:
-1. Cek file `.env` (jika ada)
-2. Cek `server/config.js` untuk default value
-3. Pastikan environment variable `DB_NAME` di-set dengan benar
-4. Restart server setelah mengubah konfigurasi
-
-### Error "database does not exist"
-
-```
-Error: database "xxx" does not exist
-```
-
-**Solusi:**
 ```sql
--- Login ke PostgreSQL
-psql -U admin -h localhost
-
--- Buat database
-CREATE DATABASE your_database_name;
+CREATE DATABASE manufacturing_db;
 ```
 
-### Concurrently output tidak jelas
+### Output concurrently campur
 
-Jika output dari `concurrently` tidak jelas karena server dan client bercampur:
+Jalankan terpisah dari root:
 
-1. **Jalankan server saja:**
-   ```bash
-   npm run server
-   ```
+```bash
+npm run server
+npm run client
+```
 
-2. **Atau jalankan client saja:**
-   ```bash
-   npm run client
-   ```
+### Port in use
 
-3. **Atau gunakan prefix di concurrently** (edit `package.json`):
-   ```json
-   "dev": "concurrently -n \"SERVER,CLIENT\" -c \"blue,green\" \"npm run server\" \"npm run client\""
-   ```
+Lihat [PORT_CONFIGURATION.md](PORT_CONFIGURATION.md).
 
-## Tips
+## Catatan
 
-- **Selalu cek log startup** untuk memastikan database yang benar digunakan
-- **Gunakan `check-database.js`** untuk verifikasi cepat
-- **Simpan konfigurasi di `.env`** untuk kemudahan pengelolaan
-- **Jangan commit `.env`** ke git (tambahkan ke `.gitignore`)
+- Jangan commit `server/.env`.
+- Jangan curl ke `:3000` jika Anda ingin menembak proses API langsung; proxy hanya untuk request browser ke `/api`.

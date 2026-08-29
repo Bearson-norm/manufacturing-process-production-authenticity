@@ -109,6 +109,40 @@ export function matchesDeviceNote(note) {
   return true;
 }
 
+export function matchesLiquidNote(note) {
+  const text = stripMoNoteText(note).toUpperCase();
+  if (!text) {
+    return false;
+  }
+
+  if (text.includes(' DEVICE CT') || text.includes(' DEVICE ')) {
+    return false;
+  }
+
+  const cartridgeWords = ['CARTRIDGE', 'CARTIRDGE', 'CARTRDIGE', 'CARTRIGE', 'CARTDIGE'];
+  if (cartridgeWords.some((word) => text.includes(word))) {
+    return false;
+  }
+
+  const hasTeamTim = text.includes('TEAM') || text.includes('TIM');
+  if (!hasTeamTim || !text.includes(' LIQUID ') || !text.includes(' SHIFT ')) {
+    return false;
+  }
+
+  return true;
+}
+
+export function matchesLiquidTeamName(teamName) {
+  const team = String(teamName || '').trim().toUpperCase();
+  if (!team) {
+    return false;
+  }
+  if (team.startsWith('LIQ')) {
+    return true;
+  }
+  return /^G[0-9]+([\s-].*)?$/.test(team);
+}
+
 export function getMoDisplayTag(mo, productionType = 'liquid') {
   if (productionType === 'cartridge') {
     return getMoNote(mo);
@@ -123,14 +157,19 @@ export function getMoDisplayTag(mo, productionType = 'liquid') {
     }
     return '';
   }
-  return getMoTeamName(mo);
+  const team = getMoTeamName(mo);
+  const note = matchesLiquidNote(mo?.note) ? getMoNote(mo) : '';
+  if (team && note && team.toUpperCase() !== stripMoNoteText(note).toUpperCase()) {
+    return `${team} · ${note}`;
+  }
+  return team || note || '';
 }
 
 export function getMoDisplayTagLabel(productionType = 'liquid') {
   if (productionType === 'cartridge') {
     return 'Note';
   }
-  if (productionType === 'device') {
+  if (productionType === 'device' || productionType === 'liquid') {
     return 'Team / Note';
   }
   return 'Team';

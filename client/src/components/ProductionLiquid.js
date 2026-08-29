@@ -13,7 +13,7 @@ import MoListToolbar from './MoListToolbar';
 import MoPickerField from './MoPickerField';
 import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
-import { buildPaginatedSavedMoKeys, formatMoSearchLabel, matchesLiquidVariant } from '../utils/moListHelpers';
+import { buildPaginatedSavedMoKeys, formatMoSearchLabel, matchesLiquidTeamName, matchesLiquidNote, matchesLiquidVariant } from '../utils/moListHelpers';
 import { fetchBufferRejectBatchMaps } from '../utils/bufferRejectBatch';
 
 const STALE_MO_THRESHOLD_MINUTES = 30;
@@ -473,11 +473,21 @@ function ProductionLiquid({ variant = '30ml' }) {
     }
   };
 
+  const isLiquidMoEligible = (mo) => {
+    if (matchesLiquidTeamName(mo?.team_name)) {
+      return true;
+    }
+    return matchesLiquidNote(mo?.note);
+  };
+
   const filterMoListForVariant = (moData, { forAuthenticityInput = false } = {}) => {
     const activeMo = getSessionActiveMoNumber(savedData, sessionId);
     const draftMos = getSessionDraftMoNumbers(savedData, sessionId);
 
     return moData.filter((mo) => {
+      if (!isLiquidMoEligible(mo)) {
+        return false;
+      }
       if (!matchesLiquidVariant(mo.sku_name, liquidVariant)) {
         return false;
       }

@@ -116,6 +116,30 @@ const DEVICE_SYNC_NOTE_ILIKE_VALUES = [
 
 const DEVICE_NOTE_SQL_PATTERNS = DEVICE_NOTE_ILIKE_VALUES.map((value) => `%${value}%`);
 
+const LIQUID_NOTE_ILIKE_VALUES = [
+  'TIM LIQUID - SHIFT 1',
+  'TIM LIQUID - SHIFT 2',
+  'TIM LIQUID - SHIFT 3',
+  'TEAM LIQUID - SHIFT 1',
+  'TEAM LIQUID - SHIFT 2',
+  'TEAM LIQUID - SHIFT 3',
+  'TIM LIQUID SHIFT 1',
+  'TIM LIQUID SHIFT 2',
+  'TIM LIQUID SHIFT 3',
+  'TEAM LIQUID SHIFT 1',
+  'TEAM LIQUID SHIFT 2',
+  'TEAM LIQUID SHIFT 3',
+];
+
+const LIQUID_SYNC_NOTE_ILIKE_VALUES = [
+  ...LIQUID_NOTE_ILIKE_VALUES,
+  'TEAM LIQUID',
+  'TIM LIQUID',
+  'liquid',
+];
+
+const LIQUID_NOTE_SQL_PATTERNS = LIQUID_NOTE_ILIKE_VALUES.map((value) => `%${value}%`);
+
 function buildOdooOrDomain(noteValues, startDateStr) {
   const branches = [
     ...noteValues.map((value) => ['note', 'ilike', value]),
@@ -128,6 +152,14 @@ function buildOdooOrDomain(noteValues, startDateStr) {
 
 function buildDeviceSyncDomain(startDateStr) {
   return buildOdooOrDomain(DEVICE_SYNC_NOTE_ILIKE_VALUES, startDateStr);
+}
+
+/**
+ * Odoo `search_read` domain for liquid MO sync (scheduler and POST `/api/admin/sync-mo`).
+ * Includes TEAM/TIM LIQUID SHIFT notes, generic `liquid`, and empty note (team may be G1).
+ */
+function buildLiquidSyncDomain(startDateStr) {
+  return buildOdooOrDomain(LIQUID_SYNC_NOTE_ILIKE_VALUES, startDateStr);
 }
 
 function buildDeviceNoteFilterSql(params) {
@@ -161,6 +193,85 @@ function matchesDeviceNote(note) {
   return true;
 }
 
+function buildLiquidNoteFilterSql(params) {
+  const conditions = LIQUID_NOTE_SQL_PATTERNS.map((pattern) => {
+    params.push(pattern);
+    return `note ILIKE $${params.length}`;
+  });
+  return `(${conditions.join(' OR ')})`;
+}
+
+/**
+ * Liquid MO from Odoo note `TEAM/TIM LIQUID - SHIFT n` (dash optional).
+ * Used by cache list SQL counterpart `matchesLiquidNote` on the client picker.
+ * Excludes cartridge and DEVICE so those stay on their own pages.
+ *
+ * @param {unknown} note
+ * @returns {boolean}
+ */
+function matchesLiquidNote(note) {
+  const text = stripNoteText(note).toUpperCase();
+  if (!text) {
+    return false;
+  }
+
+  if (text.includes(' DEVICE CT') || text.includes(' DEVICE ')) {
+    return false;
+  }
+
+  const cartridgeWords = ['CARTRIDGE', 'CARTIRDGE', 'CARTRDIGE', 'CARTRIGE', 'CARTDIGE'];
+  if (cartridgeWords.some((word) => text.includes(word))) {
+    return false;
+  }
+
+  const hasTeamTim = text.includes('TEAM') || text.includes('TIM');
+  if (!hasTeamTim || !text.includes(' LIQUID ') || !text.includes(' SHIFT ')) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Liquid team from Odoo `group_worker`: historic `LIQ…` plus new `G1`/`G2`/… codes.
+ * `G1` is a whole token (`G1`, `G1 - …`); `G1LIQUID` does not match.
+ *
+ * @param {string} teamName
+ * @returns {boolean}
+ */
+function matchesLiquidTeamName(teamName) {
+  const team = String(teamName || '').trim().toUpperCase();
+  if (!team) {
+    return false;
+  }
+  if (team.startsWith('LIQ')) {
+    return true;
+  }
+  return /^G[0-9]+([\s-].*)?$/.test(team);
+}
+
+/**
+ * SQL fragment for liquid cache/idle eligibility.
+ * Mutates `params` with liquid note ILIKE binds.
+ * Callers: `/api/odoo/mo-list` and idle MES push — not the Odoo sync domain.
+ *
+ * @param {unknown[]} params
+ * @returns {string}
+ */
+function buildLiquidEligibilitySql(params) {
+  const liquidNoteSql = buildLiquidNoteFilterSql(params);
+  return `(
+    UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'LIQ%'
+    OR UPPER(BTRIM(COALESCE(team_name, ''))) ~ '^G[0-9]+([\\s-].*)?$'
+    OR ${liquidNoteSql}
+  )`;
+}
+
+/**
+ * Odoo note ILIKE patterns for cartridge MO list/cache filters.
+ * Typos in Odoo (`cartirdge`, `cartrige`, `cartrdige`, …) are part of the contract —
+ * do not collapse this list to a single `cartridge` token.
+ */
 const CARTRIDGE_NOTE_PATTERNS = [
   '%TEAM CARTRIDGE%',
   '%TEAM CARTIRDGE%',
@@ -187,6 +298,13 @@ const CARTRIDGE_NOTE_PATTERNS = [
   '%TEAM DEVICE CT - SHIFT 3%',
 ];
 
+/**
+ * SQL fragment `(note ILIKE $n OR …)` for cartridge notes, including typo variants
+ * and DEVICE CT shift notes. Mutates `params` with each pattern (PostgreSQL `$n` binds).
+ *
+ * @param {unknown[]} params
+ * @returns {string}
+ */
 function buildCartridgeNoteFilterSql(params) {
   const conditions = CARTRIDGE_NOTE_PATTERNS.map((pattern) => {
     params.push(pattern);
@@ -195,6 +313,10 @@ function buildCartridgeNoteFilterSql(params) {
   return `(${conditions.join(' OR ')})`;
 }
 
+/**
+ * In-memory counterpart of `buildCartridgeNoteFilterSql` (typo-tolerant cartridge / DEVICE CT).
+ * Used when a row is already loaded and must match the same contract as the SQL filter.
+ */
 function matchesCartridgeNote(note) {
   const text = stripNoteText(note).toUpperCase();
   if (!text) {
@@ -221,6 +343,16 @@ function matchesCartridgeNote(note) {
   return hasTeamCartridge || hasCtShift || hasCartridgeWord;
 }
 
+/**
+ * Cached MO dropdown query for `/api/odoo/mo-list`.
+ * `productionType` is the UI page (liquid/device/cartridge), not the MO string format.
+ * Liquid: team_name `LIQ%` or `G1`/`G2`/…, or note TEAM/TIM LIQUID SHIFT.
+ * Device: `DEV%` or device notes, exclude cartridge SKU and DEVICE CT notes.
+ * Cartridge: typo-tolerant note OR (see `CARTRIDGE_NOTE_PATTERNS`). Window: last 30 days, limit 1000.
+ *
+ * @param {string} productionType
+ * @returns {{ query: string, params: unknown[], filterDescription: string }}
+ */
 function buildCachedMoListQuery(productionType) {
   const params = [];
   let query = `
@@ -231,11 +363,11 @@ function buildCachedMoListQuery(productionType) {
   const type = (productionType || '').toLowerCase();
 
   if (type === 'liquid') {
-    query += ` AND UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'LIQ%'`;
+    query += ` AND ${buildLiquidEligibilitySql(params)}`;
     return {
       query: `${query} ORDER BY create_date DESC, mo_number ASC LIMIT 1000`,
       params,
-      filterDescription: 'team_name prefix LIQ',
+      filterDescription: 'team_name LIQ% or G1/G2/… or note TEAM/TIM LIQUID SHIFT',
     };
   }
 
@@ -288,6 +420,7 @@ const EXTERNAL_MFG_WINDOW_DAYS_FORWARD = Math.max(
 function buildExternalManufacturingIdlePushQuery(opts = {}) {
   const limitUsed = Math.min(2000, Math.max(1, parseInt(String(opts.limit), 10) || 200));
   const params = [];
+  const liquidEligibilitySql = buildLiquidEligibilitySql(params);
   const cartridgeNoteSql = buildCartridgeNoteFilterSql(params);
   const deviceNoteSql = buildDeviceNoteFilterSql(params);
 
@@ -306,7 +439,7 @@ function buildExternalManufacturingIdlePushQuery(opts = {}) {
   const query = `
     SELECT mo_number, sku_name, quantity, uom, note, create_date
     FROM odoo_mo_cache
-    WHERE UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'LIQ%'
+    WHERE ${liquidEligibilitySql}
       AND sku_name NOT ILIKE '%MIXING%'
       AND sku_name NOT ILIKE '%BRAY%'
       AND sku_name NOT ILIKE '%bundling%'
@@ -337,7 +470,7 @@ function buildExternalManufacturingIdlePushQuery(opts = {}) {
       daysForward: EXTERNAL_MFG_WINDOW_DAYS_FORWARD,
     },
     filterDescription:
-      'team_name LIQ%, exclude MIXING/BRAY/bundling/slof/15ML (30ml only), exclude cartridge/device notes, create_date rolling window',
+      'team_name LIQ% or G1/G2/… or note TEAM/TIM LIQUID SHIFT, exclude MIXING/BRAY/bundling/slof/15ML (30ml only), exclude cartridge/device notes, create_date rolling window',
   };
 }
 
@@ -387,9 +520,14 @@ module.exports = {
   buildCachedMoListQuery,
   buildExternalManufacturingIdlePushQuery,
   buildDeviceSyncDomain,
+  buildLiquidSyncDomain,
   buildDeviceNoteFilterSql,
+  buildLiquidNoteFilterSql,
   matchesDeviceNote,
+  matchesLiquidNote,
+  matchesLiquidTeamName,
   matchesCartridgeNote,
   CARTRIDGE_NOTE_PATTERNS,
   DEVICE_NOTE_ILIKE_VALUES,
+  LIQUID_NOTE_ILIKE_VALUES,
 };

@@ -9,6 +9,13 @@ function isProdLikeEnv() {
   return process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
 }
 
+/**
+ * JWT signing/verify secret from env.
+ * Production/staging: missing `JWT_SECRET` returns null (callers must 503 / refuse boot).
+ * Development: falls back to a well-known insecure string so `npm run dev` works without .env.
+ *
+ * @returns {string|null}
+ */
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
   if (secret && String(secret).trim()) {
@@ -21,6 +28,13 @@ function getJwtSecret() {
   return 'dev-only-insecure-jwt-secret-change-me';
 }
 
+/**
+ * Login users from env (`ADMIN_*` / `PRODUCTION_*`).
+ * Production/staging require both passwords; development may use weak defaults.
+ * Do not copy those defaults into docs or production `.env`.
+ *
+ * @returns {{ users: Array<{username: string, password: string|null, role: string}> }|{ error: string }}
+ */
 function getAuthUsers() {
   const adminUser = process.env.ADMIN_USERNAME || 'admin';
   const productionUser = process.env.PRODUCTION_USERNAME || 'production';
@@ -173,8 +187,10 @@ function requireRole(...roles) {
 }
 
 /**
- * External API key auth.
- * Fail-closed in production/staging when no key is configured.
+ * Auth for `/api/external/*` and `/api/receiver/*` (`X-API-Key` or Bearer with the stored API key).
+ * Key comes from `admin_config.api_key`, not JWT.
+ * Trap: production/staging with no key → 503 fail-closed. Development with no key → `next()` (open).
+ * Missing header → 401; mismatch → 403 (`Invalid API key`).
  */
 function apiKeyAuth(req, res, next) {
   getApiKey((err, storedApiKey) => {

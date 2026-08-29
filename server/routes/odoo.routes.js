@@ -5,7 +5,7 @@ const { buildCachedMoListQuery } = require('../utils/odoo-mo.helpers');
 
 // GET /api/odoo/mo-list
 // Get MO list from cache (odoo_mo_cache) filtered by production type
-// liquid/device: team_name prefix (LIQ/DEV); cartridge: note TEAM/TIM cartridge + CT
+// liquid: team_name LIQ% or G1/G2/…, or note TEAM/TIM LIQUID SHIFT; device: DEV% or device notes; cartridge: TEAM/TIM cartridge + CT
 router.get('/mo-list', async (req, res) => {
   try {
     const productionType = req.query.productionType || req.query.production_type;

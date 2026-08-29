@@ -1,165 +1,43 @@
-# Konfigurasi Port - Manufacturing Process System
+# Konfigurasi Port
 
-## Port Configuration
+Port diambil dari config saat ini (`PORT` di `server/.env` / `server/config.js`, React CRA, `server/ecosystem.config.js`).
 
-Sistem ini menggunakan **2 port berbeda** untuk development:
+## Development
 
-### 1. Backend Server (API)
-- **Port:** `1234` (default)
-- **URL:** `http://localhost:1234`
-- **Fungsi:** Menyediakan REST API endpoints
-- **File:** `server/index.js`, `server/config.js`
+| Proses | Port | URL | Peran |
+|--------|------|-----|--------|
+| API (web) | `PORT`, default **1234** | `http://localhost:1234` | REST + `/health` |
+| React | **3000** | `http://localhost:3000` | UI; proxy `/api` → `http://localhost:1234` |
 
-### 2. Frontend Client (React)
-- **Port:** `3000` (default dari React)
-- **URL:** `http://localhost:3000`
-- **Fungsi:** User interface (web application)
-- **File:** `client/package.json`
+Buka browser ke **:3000**. Curl/Postman ke proses API (**1234**), kecuali Anda sengaja memakai proxy CRA.
 
-## Cara Mengakses
+Proxy: `client/package.json` → `"proxy": "http://localhost:1234"`.
 
-### Development Mode (`npm run dev`)
+Production (satu proses web): Express menyajikan `client-build` di `PORT` yang sama. Worker **tidak** membuka HTTP (`ENABLE_HTTP=false`).
 
-Saat menjalankan `npm run dev`, kedua server akan berjalan:
+## Staging / production (PM2)
 
-1. **Backend API:** `http://localhost:1234`
-   - Health check: `http://localhost:1234/health`
-   - API endpoints: `http://localhost:1234/api/*`
-   - Admin Panel API: `http://localhost:1234/api/admin/*`
+| Proses | Port | Catatan |
+|--------|------|---------|
+| Production web `manufacturing-app` | `PORT` dari `.env` (biasanya 1234) | `ENABLE_HTTP=true`, scheduler off |
+| Production worker | tidak bind | `ENABLE_HTTP=false`, scheduler on |
+| Staging web `manufacturing-app-staging` | **3467** (ecosystem) | `NODE_ENV=staging` |
+| Staging worker | tidak bind | scheduler on |
 
-2. **Frontend (React):** `http://localhost:3000`
-   - **INI YANG HARUS DIBUKA DI BROWSER**
-   - Login page: `http://localhost:3000/login`
-   - Dashboard: `http://localhost:3000/dashboard`
-   - Admin Panel: `http://localhost:3000/admin`
+Nginx/Traefik (jika dipakai) mem-proxy 80/443 ke port web di atas. Jangan memakai port staging lama **5678**.
 
-### Proxy Configuration
+PostgreSQL: `DB_PORT` (default **5432** di `env.example`). Host VPS bisa memakai port lain — baca `.env` di server, jangan mengasumsikan 5433.
 
-Frontend (port 3000) sudah dikonfigurasi untuk proxy API requests ke backend (port 1234):
+## Mengubah port
 
-```json
-// client/package.json
-{
-  "proxy": "http://localhost:1234"
-}
-```
+Backend: set `PORT` di `server/.env`, sesuaikan proxy CRA jika bukan 1234.
 
-Ini berarti:
-- Frontend di `localhost:3000` akan otomatis forward API calls ke `localhost:1234`
-- Anda tidak perlu mengetik full URL untuk API calls dari frontend
-
-## Mengubah Port
-
-### Mengubah Backend Port (1234 → 3000)
-
-**Opsi 1: Environment Variable**
-```bash
-# Windows PowerShell
-$env:PORT=3000; npm run dev
-
-# Atau buat file .env di root
-PORT=3000
-```
-
-**Opsi 2: Edit config.js**
-```javascript
-// server/config.js
-port: parseInt(process.env.PORT || '3000', 10),
-```
-
-**Opsi 3: Edit index.js**
-```javascript
-// server/index.js
-const PORT = process.env.PORT || 3000;
-```
-
-**PENTING:** Jika mengubah backend ke port 3000, pastikan:
-1. Update proxy di `client/package.json` jika perlu
-2. Frontend React harus di port lain (misalnya 3001)
-
-### Mengubah Frontend Port (3000 → 3001)
-
-**Opsi 1: Environment Variable**
-```bash
-# Windows PowerShell
-$env:PORT=3001; cd client; npm start
-```
-
-**Opsi 2: Edit package.json**
-```json
-// client/package.json
-"scripts": {
-  "start": "PORT=3001 react-scripts start"
-}
-```
-
-## Current Setup (Recommended)
-
-### Development
-- **Backend:** `localhost:1234` (API server)
-- **Frontend:** `localhost:3000` (React app)
-- **Akses Browser:** `http://localhost:3000` ← **INI YANG BENAR**
-
-### Production
-- **Backend:** `localhost:1234` (API server)
-- **Frontend:** Served dari backend (static files)
-- **Akses Browser:** `http://localhost:1234` (semua dari satu port)
+Frontend dev: `PORT` untuk `react-scripts` (jangan bentrok dengan API).
 
 ## Troubleshooting
 
-### "Tidak menemukan apa-apa di localhost:1234"
+**UI kosong / API 404 di :1234 saat `npm run dev`:** itu proses API, bukan SPA. Buka `:3000`.
 
-**Penyebab:** Anda mengakses backend port, bukan frontend
+**Cannot GET / di :1234 (dev):** normal jika `client-build` belum ada. Gunakan React di 3000.
 
-**Solusi:**
-1. Buka `http://localhost:3000` di browser (bukan 1234)
-2. Atau jika ingin akses API langsung: `http://localhost:1234/api/admin/config`
-
-### "Cannot GET /" di localhost:1234
-
-**Ini Normal!** Backend port 1234 adalah untuk API, bukan web page.
-
-**Solusi:**
-- Akses frontend di `http://localhost:3000`
-- Atau akses API endpoint: `http://localhost:1234/health`
-
-### Port Already in Use
-
-**Error:** `Port 1234 is already in use` atau `Port 3000 is already in use`
-
-**Solusi:**
-1. Cek process yang menggunakan port:
-   ```powershell
-   # Windows
-   netstat -ano | findstr :1234
-   netstat -ano | findstr :3000
-   ```
-
-2. Kill process atau ubah port
-
-### Frontend tidak connect ke Backend
-
-**Penyebab:** Proxy tidak bekerja atau backend tidak running
-
-**Solusi:**
-1. Pastikan backend running di port 1234
-2. Cek `client/package.json` memiliki `"proxy": "http://localhost:1234"`
-3. Restart frontend setelah mengubah proxy
-
-## Quick Reference
-
-| Service | Port | URL | Purpose |
-|---------|------|-----|---------|
-| Backend API | 1234 | http://localhost:1234 | REST API |
-| Frontend React | 3000 | http://localhost:3000 | Web UI |
-| Health Check | 1234 | http://localhost:1234/health | Status |
-| Admin API | 1234 | http://localhost:1234/api/admin/* | Admin endpoints |
-
-## Summary
-
-✅ **Yang Benar:**
-- Akses aplikasi web: `http://localhost:3000`
-- Akses API langsung: `http://localhost:1234/api/*`
-
-❌ **Yang Salah:**
-- Mencoba akses web di `http://localhost:1234` (ini hanya API)
+**Port already in use:** hentikan proses lama atau ganti `PORT`.

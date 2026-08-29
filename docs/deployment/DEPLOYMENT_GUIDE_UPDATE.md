@@ -506,7 +506,7 @@ ls -lh database.sqlite
 
 Jika ada masalah, hubungi:
 - Developer: [Your Contact]
-- Dokumentasi: `VPS_UPDATE_GUIDE.md`
+- Dokumentasi: [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ---
 

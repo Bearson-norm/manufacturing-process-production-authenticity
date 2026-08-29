@@ -18,6 +18,7 @@ const {
   mapOdooMoToCacheParams,
   backfillMoCacheTeamNames,
   buildDeviceSyncDomain,
+  buildLiquidSyncDomain,
 } = require('../utils/odoo-mo.helpers');
 const { runFullProductionSync } = require('../services/production-results-sync.service');
 
@@ -999,15 +1000,7 @@ router.post('/sync-mo', async (req, res) => {
           } else if (noteFilter === 'device') {
             combinedDomain = buildDeviceSyncDomain(startDateStr);
           } else if (noteFilter === 'liquid') {
-            combinedDomain = [
-              '&',
-              '|', '|', '|',
-              ['note', 'ilike', 'TEAM LIQUID'],
-              ['note', 'ilike', 'liquid'],
-              ['note', '=', false],
-              ['note', '=', ''],
-              ["create_date", ">=", startDateStr]
-            ];
+            combinedDomain = buildLiquidSyncDomain(startDateStr);
           } else {
             continue;
           }

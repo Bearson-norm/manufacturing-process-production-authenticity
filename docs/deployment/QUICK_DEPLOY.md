@@ -110,7 +110,7 @@ pm2 restart manufacturing-backend
 |------|---------|
 | `DEPLOYMENT_GUIDE_UPDATE.md` | Panduan lengkap deployment |
 | `deploy-to-vps.sh` | Script otomatis deployment |
-| `VPS_UPDATE_GUIDE.md` | Panduan update sistem |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Panduan deploy (web + worker, PostgreSQL) |
 | `QUICK_DEPLOY.md` | Quick reference (file ini) |
 
 ---

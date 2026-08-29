@@ -1,9 +1,19 @@
+/**
+ * First digit run in a string (`"AB123CD"` → 123). Empty/unparsable → null.
+ *
+ * @param {*} value
+ * @returns {number|null}
+ */
 function extractNumeric(value) {
   if (value == null || value === '') return null;
   const match = String(value).trim().match(/\d+/);
   return match ? parseInt(match[0], 10) : null;
 }
 
+/**
+ * Inclusive range check. first/last order does not matter (`min`/`max`).
+ * Unparsable any side → false.
+ */
 function isNumberInAuthenticityRange(inputNumber, firstAuth, lastAuth) {
   const input = extractNumeric(inputNumber);
   const first = extractNumeric(firstAuth);
@@ -29,10 +39,18 @@ function normalizeAuthenticityData(authenticityData) {
   return [];
 }
 
+/**
+ * Flatten authenticity_data on a production_results row into verify-able ranges.
+ * Reads camelCase `firstAuthenticity` / `lastAuthenticity` / `rollNumber` (as stored),
+ * not snake_case external-API keys.
+ * Keeps every first/last pair; do not dedupe by rollNumber — the same roll label
+ * may cover multiple physical ranges.
+ *
+ * @param {object} row
+ * @returns {Array<object>}
+ */
 function collectRangesFromProductionRow(row) {
   const entries = normalizeAuthenticityData(row.authenticity_data);
-  // Keep every first/last pair. Do not dedupe by rollNumber — the same roll
-  // label may appear on multiple physical ranges and each must be verified.
   return entries
     .filter((e) => e && (e.firstAuthenticity || e.lastAuthenticity))
     .map((e) => ({
