@@ -43,6 +43,45 @@ function getAdminConfig(callback) {
   });
 }
 
+const MO_CACHE_SYNC_CONFIG_KEY = 'odoo_mo_cache_sync_enabled';
+
+/**
+ * Parse the admin_config flag for automatic Odoo → odoo_mo_cache pulls.
+ * Only explicit false / 0 / off disable; missing or any other value is ON
+ * so production keeps syncing until an admin turns the toggle off.
+ *
+ * @param {string|null|undefined} value - Raw `config_value`.
+ * @returns {boolean}
+ */
+function parseMoCacheSyncEnabled(value) {
+  if (value == null || String(value).trim() === '') return true;
+  const normalized = String(value).trim().toLowerCase();
+  return !(normalized === 'false' || normalized === '0' || normalized === 'off');
+}
+
+/**
+ * Whether the worker cron / initial sync may pull MO rows from Odoo into cache.
+ * Called at the start of `updateMoDataFromOdoo()`; does not affect POST /api/admin/sync-mo.
+ *
+ * @param {function} callback - `(err, enabled)`. On query error, `enabled` is true (fail-open).
+ * @returns {void}
+ */
+function isMoCacheSyncEnabled(callback) {
+  if (!db) {
+    return callback(null, true);
+  }
+  db.get(
+    'SELECT config_value FROM admin_config WHERE config_key = $1',
+    [MO_CACHE_SYNC_CONFIG_KEY],
+    (err, row) => {
+      if (err) {
+        return callback(err, true);
+      }
+      callback(null, parseMoCacheSyncEnabled(row && row.config_value));
+    }
+  );
+}
+
 function maskSecret(value) {
   if (!value || typeof value !== 'string') return null;
   if (value.length <= 8) return '********';
@@ -67,7 +106,8 @@ router.get('/config', (req, res) => {
             externalApiBaseUrl: process.env.EXTERNAL_API_BASE_URL || '',
             externalApiBearerToken: null,
             externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN,
-            externalApiTargets: []
+            externalApiTargets: [],
+            moCacheSyncEnabled: true
           }
         });
       }
@@ -83,7 +123,8 @@ router.get('/config', (req, res) => {
             externalApiBaseUrl: process.env.EXTERNAL_API_BASE_URL || '',
             externalApiBearerToken: null,
             externalApiBearerTokenConfigured: !!process.env.EXTERNAL_API_BEARER_TOKEN,
-            externalApiTargets: []
+            externalApiTargets: [],
+            moCacheSyncEnabled: true
           }
         });
       }
@@ -158,29 +199,32 @@ router.get('/config', (req, res) => {
                                 ? wmsSiteRow.config_value
                                 : (process.env.WMS_SITE || 'PROD');
 
-                              res.json({
-                                success: true,
-                                config: {
-                                  sessionId: null,
-                                  sessionIdMasked: maskSecret(sessionId),
-                                  sessionIdConfigured: !!sessionId,
-                                  odooBaseUrl: odooBaseUrl,
-                                  externalApiBaseUrl: externalApiBaseUrl,
-                                  externalApiBearerToken: maskedBearer,
-                                  externalApiBearerTokenConfigured: !!bearerRaw,
-                                  externalApiTargets,
-                                  externalApiUrl: externalApiUrl,
-                                  externalApiUrlActive: externalApiUrlActive,
-                                  externalApiUrlCompleted: externalApiUrlCompleted,
-                                  apiKey: maskedApiKey,
-                                  apiKeyConfigured: !!apiKey,
-                                  wmsApiBaseUrl,
-                                  wmsAccessToken: maskedWmsToken,
-                                  wmsAccessTokenConfigured: !!wmsTokenRaw,
-                                  wmsUsername,
-                                  wmsCompanyId,
-                                  wmsSite
-                                }
+                              isMoCacheSyncEnabled((_flagErr, moCacheSyncEnabled) => {
+                                res.json({
+                                  success: true,
+                                  config: {
+                                    sessionId: null,
+                                    sessionIdMasked: maskSecret(sessionId),
+                                    sessionIdConfigured: !!sessionId,
+                                    odooBaseUrl: odooBaseUrl,
+                                    externalApiBaseUrl: externalApiBaseUrl,
+                                    externalApiBearerToken: maskedBearer,
+                                    externalApiBearerTokenConfigured: !!bearerRaw,
+                                    externalApiTargets,
+                                    externalApiUrl: externalApiUrl,
+                                    externalApiUrlActive: externalApiUrlActive,
+                                    externalApiUrlCompleted: externalApiUrlCompleted,
+                                    apiKey: maskedApiKey,
+                                    apiKeyConfigured: !!apiKey,
+                                    wmsApiBaseUrl,
+                                    wmsAccessToken: maskedWmsToken,
+                                    wmsAccessTokenConfigured: !!wmsTokenRaw,
+                                    wmsUsername,
+                                    wmsCompanyId,
+                                    wmsSite,
+                                    moCacheSyncEnabled: moCacheSyncEnabled !== false
+                                  }
+                                });
                               });
                             });
                           });
@@ -643,6 +687,33 @@ router.post('/generate-api-key', (req, res) => {
   }
 });
 
+// PUT /api/admin/mo-cache-sync — persist automatic Odoo → odoo_mo_cache pull toggle
+router.put('/mo-cache-sync', (req, res) => {
+  const enabled = req.body && req.body.enabled;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'enabled must be a boolean' });
+  }
+
+  if (!db) {
+    return res.status(500).json({ success: false, error: 'Database is not available' });
+  }
+
+  const value = enabled ? 'true' : 'false';
+  db.run(
+    `INSERT INTO admin_config (config_key, config_value, updated_at)
+     VALUES ($1, $2, CURRENT_TIMESTAMP)
+     ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+    [MO_CACHE_SYNC_CONFIG_KEY, value],
+    function (err) {
+      if (err) {
+        console.error('Error saving mo cache sync flag:', err);
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      res.json({ success: true, enabled });
+    }
+  );
+});
+
 // GET /api/admin/mo-stats
 router.get('/mo-stats', (req, res) => {
   db.all('SELECT COUNT(*) as total FROM odoo_mo_cache', [], (err, totalRow) => {
@@ -659,14 +730,21 @@ router.get('/mo-stats', (req, res) => {
         if (err3) {
           return res.status(500).json({ success: false, error: err3.message });
         }
-        
-        res.json({
-          success: true,
-          stats: {
-            total: parseInt(totalRow[0].total) || 0,
-            recent_24h: parseInt(recentRow[0].recent) || 0,
-            older_than_7_days: parseInt(oldRow[0].old) || 0
+
+        db.all('SELECT MAX(fetched_at) as last_sync FROM odoo_mo_cache', [], (err4, lastRow) => {
+          if (err4) {
+            return res.status(500).json({ success: false, error: err4.message });
           }
+
+          res.json({
+            success: true,
+            stats: {
+              total: parseInt(totalRow[0].total) || 0,
+              recent_24h: parseInt(recentRow[0].recent) || 0,
+              older_than_7_days: parseInt(oldRow[0].old) || 0,
+              last_sync: lastRow[0] && lastRow[0].last_sync ? lastRow[0].last_sync : null
+            }
+          });
         });
       });
     });
@@ -1338,4 +1416,4 @@ router.post('/external-manufacturing/send', (req, res) => {
 });
 
 // Export helper function for use in other routes
-module.exports = { router, getAdminConfig };
+module.exports = { router, getAdminConfig, isMoCacheSyncEnabled };

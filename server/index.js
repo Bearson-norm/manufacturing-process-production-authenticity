@@ -34,7 +34,7 @@ initializeTables().then(async () => {
 
 // Import scheduler functions (keep schedulers in index.js for now)
 // TODO: Move to services/scheduler.service.js in future refactoring
-const { getAdminConfig } = require('./routes/admin.routes');
+const { getAdminConfig, isMoCacheSyncEnabled } = require('./routes/admin.routes');
 const { db, pool } = require('./database');
 const { pushIdleManufacturingForLiquidMosFromCache } = require('./services/liquid-external-manufacturing.service');
 const {
@@ -56,6 +56,22 @@ const {
 // Scheduler Functions
 // Function to update MO data from Odoo for all production types
 async function updateMoDataFromOdoo() {
+  const syncEnabled = await new Promise((resolve) => {
+    isMoCacheSyncEnabled((err, enabled) => {
+      if (err) {
+        console.error('❌ [Scheduler] Error reading mo cache sync flag:', err.message);
+        resolve(true);
+        return;
+      }
+      resolve(enabled);
+    });
+  });
+
+  if (!syncEnabled) {
+    console.log('⏭️  [Scheduler] MO cache sync from Odoo is disabled (admin toggle). Skipping.');
+    return;
+  }
+
   console.log('🔄 [Scheduler] Starting MO data update from Odoo...');
   
   getAdminConfig(async (err, config) => {

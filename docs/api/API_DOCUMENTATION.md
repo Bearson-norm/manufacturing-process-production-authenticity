@@ -89,7 +89,7 @@ curl -X POST "http://localhost:<PORT>/api/login" \
 
 ## External (API key)
 
-Semua path di bawah `/api/external`. Header: `-H "X-API-Key: your_api_key_here"` atau Bearer dengan key yang sama.
+Semua path di bawah `/api/external`. Kirim key lewat header `X-API-Key` atau `Authorization: Bearer` (nilai: placeholder `your_api_key_here`, bukan key produksi).
 
 ### GET /api/external/authenticity
 
@@ -126,9 +126,10 @@ Sama seperti GET; filter dari JSON body (`type`, `status`, `start_date`, `end_da
 `mo_data[].mo_number` diulang di nested object (handler masih mengirimkannya).
 
 ```bash
-curl "http://localhost:<PORT>/api/external/manufacturing-data?mo_number=PROD/MO/xxxx&completed_at=all" \
-  -H "X-API-Key: your_api_key_here"
+curl "http://localhost:<PORT>/api/external/manufacturing-data?mo_number=PROD/MO/xxxx&completed_at=all"
 ```
+
+Sertakan header API key seperti di pengantar seksi External. Jangan menempel key nyata.
 
 ### GET /api/external/manufacturing-data/status
 
@@ -295,22 +296,65 @@ Pola `liquid` / `device` / `cartridge`: GET `?moNumber=` wajib; POST create; POS
 
 | METHOD | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/admin/config` | Config Odoo/external/WMS/API key (masked) |
-| PUT | `/api/admin/config` | Update Odoo/external |
+| GET | `/api/admin/config` | Config Odoo/external/WMS/API key (masked) + `moCacheSyncEnabled` |
+| PUT | `/api/admin/config` | Update Odoo/external (tidak mengubah flag MO cache) |
+| PUT | `/api/admin/mo-cache-sync` | Toggle pull otomatis Odoo → `odoo_mo_cache` |
 | PUT | `/api/admin/wms-config` | Kredensial WMS |
 | POST | `/api/admin/generate-api-key` | Generate + simpan key |
-| GET | `/api/admin/mo-stats` | Statistik cache MO |
+| GET | `/api/admin/mo-stats` | Statistik cache MO + `last_sync` |
 | GET | `/api/admin/test-connection` | Tes sesi Odoo |
 | POST | `/api/admin/cleanup-mo` | Purge `odoo_mo_cache` lama |
 | POST | `/api/admin/sync-production-data` | Full sync production_results |
 | POST | `/api/admin/push-external-manufacturing-idle` | Push idle liquid ke MES |
 | POST | `/api/admin/reconcile-external-manufacturing-finished` | Rekonsiliasi finished |
-| POST | `/api/admin/sync-mo` | Sync cache Odoo manual |
+| POST | `/api/admin/sync-mo` | Sync cache Odoo manual (tidak diblokir toggle) |
 | GET | `/api/admin/external-manufacturing/resolve-id` | UUID eksternal dari MO |
 | POST | `/api/admin/external-manufacturing/send` | Kirim payload MES |
 | GET | `/api/reports/manufacturing` | Dashboard report |
 
 Idle/reconcile/send: target outbound bisa **lebih dari satu** (`EXTERNAL_API_TARGETS` / config), bukan satu URL MES.
+
+#### GET /api/admin/config
+
+**Purpose:** Baca konfigurasi Admin (Odoo, MES, WMS, API key) untuk form UI; secret ter-mask.
+**Auth:** JWT (`admin`)
+**When:** Halaman Admin load.
+
+**Success:** 200 `{ success, config }` — `config.moCacheSyncEnabled` boolean; key `admin_config` `odoo_mo_cache_sync_enabled` belum ada → **true** (pull otomatis tetap jalan seperti sebelum toggle ada).
+**Errors:** 401/403 auth; 500 unexpected.
+
+#### PUT /api/admin/mo-cache-sync
+
+**Purpose:** Simpan flag apakah worker boleh menarik MO dari Odoo ke `odoo_mo_cache` tiap menit.
+**Auth:** JWT (`admin`)
+**When:** Toggle di seksi MO Data Management (langsung persist, bukan Save Configuration).
+
+| Param | In | Type | Required | Default | Meaning |
+|-------|----|------|----------|---------|---------|
+| enabled | body | boolean | yes | — | `true` = cron + initial sync menarik Odoo; `false` = skip pull |
+
+**Success:** 200 `{ success: true, enabled }`
+**Errors:** 400 jika `enabled` bukan boolean; 401/403 auth; 500 DB tidak tersedia / upsert gagal.
+**Notes:** Hanya nilai tersimpan `false` / `0` / `off` yang mematikan. Cron MES idle dan `production_results` tidak terpengaruh. `POST /api/admin/sync-mo` tetap jalan sebagai override manual. Worker harus `ENABLE_SCHEDULER=true` agar cron 1 menit berjalan; proses web saja tidak menarik otomatis.
+
+#### GET /api/admin/mo-stats
+
+**Purpose:** Hitungan cache MO untuk kartu Admin.
+**Auth:** JWT (`admin`)
+**When:** Admin load, setelah cleanup, setelah Sync Now.
+
+**Success:** 200 `{ success, stats: { total, recent_24h, older_than_7_days, last_sync } }` — `last_sync` adalah `MAX(fetched_at)` atau `null` jika cache kosong.
+**Errors:** 401/403 auth; 500 query gagal.
+
+#### POST /api/admin/sync-mo
+
+**Purpose:** Tarik MO liquid/device/cartridge dari Odoo (30 hari) dan upsert `odoo_mo_cache`, lalu backfill `team_name`.
+**Auth:** JWT (`admin`)
+**When:** Tombol "Sync MO dari Odoo sekarang"; juga override saat toggle otomatis OFF.
+
+**Success:** 200 `{ success, message, totalUpdated, backfilledTeamNames, results, timestamp }`
+**Errors:** 400 konfigurasi Odoo (session/base URL) kosong; 401/403 auth; 500 kegagalan sync.
+**Notes:** Tidak membaca `odoo_mo_cache_sync_enabled`. Butuh session Odoo valid.
 
 ### WMS — JWT + admin
 
