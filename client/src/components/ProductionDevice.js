@@ -13,7 +13,7 @@ import MoListToolbar from './MoListToolbar';
 import MoPickerField from './MoPickerField';
 import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
-import { buildPaginatedSavedMoKeys, formatMoSearchLabel, getMoTeamName, matchesDeviceNote } from '../utils/moListHelpers';
+import { buildPaginatedSavedMoKeys, formatMoSearchLabel, getMoTeamName, matchesDeviceNote, isSkuFallbackDeviceMo } from '../utils/moListHelpers';
 import { fetchBufferRejectBatchMaps } from '../utils/bufferRejectBatch';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
@@ -338,7 +338,10 @@ function ProductionDevice() {
     if (team.startsWith('DEV')) {
       return true;
     }
-    return matchesDeviceNote(mo.note);
+    if (matchesDeviceNote(mo.note)) {
+      return true;
+    }
+    return isSkuFallbackDeviceMo(mo);
   };
 
   const handleInputAuthenticity = async () => {

@@ -343,12 +343,88 @@ function matchesCartridgeNote(note) {
   return hasTeamCartridge || hasCtShift || hasCartridgeWord;
 }
 
+const CARTRIDGE_SKU_ILIKE_PATTERNS = [
+  '%CARTRIDGE%',
+  '%CARTIRDGE%',
+  '%CARTRDIGE%',
+  '%CARTRIGE%',
+  '%CARTDIGE%',
+  '%CARTDIDGE%',
+];
+
+function buildSkuHasCartridgeSql() {
+  return `(${CARTRIDGE_SKU_ILIKE_PATTERNS.map((pattern) => `sku_name ILIKE '${pattern}'`).join(' OR ')})`;
+}
+
+function buildSkuHasPodSql() {
+  return `(sku_name ~* '\\yPOD\\y')`;
+}
+
+function buildSkuHasCtTokenSql() {
+  return `(sku_name ~* '\\yCT\\y')`;
+}
+
+/** Note empty after stripping HTML tags — counterpart of JS `isNoteEmptyForSkuFallback`. */
+function buildEmptyNoteSql() {
+  return `BTRIM(regexp_replace(COALESCE(note, ''), '<[^>]+>', ' ', 'g')) = ''`;
+}
+
+function buildTeamBlocksSkuFallbackSql() {
+  return `(
+    UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'LIQ%'
+    OR UPPER(BTRIM(COALESCE(team_name, ''))) ~ '^G[0-9]+([\\s-].*)?$'
+    OR UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'DEV%'
+  )`;
+}
+
+/**
+ * Gate for SKU page fallback: empty note and team_name not LIQ… / G1/G2/… / DEV….
+ * Note/team filters still win when they match.
+ */
+function buildSkuFallbackGateSql() {
+  return `(${buildEmptyNoteSql()} AND NOT ${buildTeamBlocksSkuFallbackSql()})`;
+}
+
+function buildSkuFallbackCartridgeSql() {
+  return `(
+    ${buildSkuFallbackGateSql()}
+    AND sku_name NOT ILIKE '%MIXING%'
+    AND (${buildSkuHasCartridgeSql()} OR ${buildSkuHasCtTokenSql()})
+  )`;
+}
+
+function buildSkuFallbackDeviceSql() {
+  return `(
+    ${buildSkuFallbackGateSql()}
+    AND sku_name NOT ILIKE '%MIXING%'
+    AND ${buildSkuHasPodSql()}
+    AND NOT ${buildSkuHasCartridgeSql()}
+    AND NOT ${buildSkuHasCtTokenSql()}
+  )`;
+}
+
+/** Liquid 15 ml or 30 ml via SKU when note+team do not match (MIXING/BRAY/POD/cartridge/CT excluded). */
+function buildSkuFallbackLiquidSql() {
+  return `(
+    ${buildSkuFallbackGateSql()}
+    AND sku_name NOT ILIKE '%MIXING%'
+    AND sku_name NOT ILIKE '%BRAY%'
+    AND NOT ${buildSkuHasPodSql()}
+    AND NOT ${buildSkuHasCartridgeSql()}
+    AND NOT ${buildSkuHasCtTokenSql()}
+  )`;
+}
+
 /**
  * Cached MO dropdown query for `/api/odoo/mo-list`.
  * `productionType` is the UI page (liquid/device/cartridge), not the MO string format.
- * Liquid: team_name `LIQ%` or `G1`/`G2`/…, or note TEAM/TIM LIQUID SHIFT.
- * Device: `DEV%` or device notes, exclude cartridge SKU and DEVICE CT notes.
- * Cartridge: typo-tolerant note OR (see `CARTRIDGE_NOTE_PATTERNS`). Window: last 30 days, limit 1000.
+ * Liquid: team_name `LIQ%` or `G1`/`G2`/…, or note TEAM/TIM LIQUID SHIFT,
+ * or empty-note SKU fallback (not MIXING/BRAY/POD/cartridge/CT) → 15 ml or 30 ml on the client.
+ * Device: `DEV%` or device notes, exclude cartridge SKU and DEVICE CT notes,
+ * or empty-note SKU with POD token only.
+ * Cartridge: typo-tolerant note OR (see `CARTRIDGE_NOTE_PATTERNS`),
+ * or empty-note SKU with CARTRIDGE/typos or token CT.
+ * Window: last 30 days, limit 1000.
  *
  * @param {string} productionType
  * @returns {{ query: string, params: unknown[], filterDescription: string }}
@@ -363,35 +439,47 @@ function buildCachedMoListQuery(productionType) {
   const type = (productionType || '').toLowerCase();
 
   if (type === 'liquid') {
-    query += ` AND ${buildLiquidEligibilitySql(params)}`;
+    query += ` AND (
+      ${buildLiquidEligibilitySql(params)}
+      OR ${buildSkuFallbackLiquidSql()}
+    )`;
     return {
       query: `${query} ORDER BY create_date DESC, mo_number ASC LIMIT 1000`,
       params,
-      filterDescription: 'team_name LIQ% or G1/G2/… or note TEAM/TIM LIQUID SHIFT',
+      filterDescription:
+        'team_name LIQ% or G1/G2/… or note TEAM/TIM LIQUID SHIFT, or empty-note SKU fallback (not MIXING/BRAY/POD/cartridge/CT)',
     };
   }
 
   if (type === 'device') {
     const deviceNoteSql = buildDeviceNoteFilterSql(params);
     query += ` AND (
-      UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'DEV%'
-      OR ${deviceNoteSql}
+      (
+        UPPER(BTRIM(COALESCE(team_name, ''))) LIKE 'DEV%'
+        OR ${deviceNoteSql}
+      )
+      AND COALESCE(sku_name, '') NOT ILIKE '%cartridge%'
+      AND NOT (note ILIKE '%DEVICE CT%')
+      OR ${buildSkuFallbackDeviceSql()}
     )`;
-    query += ` AND COALESCE(sku_name, '') NOT ILIKE '%cartridge%'`;
-    query += ` AND NOT (note ILIKE '%DEVICE CT%')`;
     return {
       query: `${query} ORDER BY create_date DESC, mo_number ASC LIMIT 1000`,
       params,
-      filterDescription: 'team_name DEV% or note TEAM/TIM DEVICE SHIFT (with/without dash)',
+      filterDescription:
+        'team_name DEV% or note TEAM/TIM DEVICE SHIFT (with/without dash), or empty-note SKU with POD only',
     };
   }
 
   if (type === 'cartridge') {
-    query += ` AND ${buildCartridgeNoteFilterSql(params)}`;
+    query += ` AND (
+      ${buildCartridgeNoteFilterSql(params)}
+      OR ${buildSkuFallbackCartridgeSql()}
+    )`;
     return {
       query: `${query} ORDER BY create_date DESC, mo_number ASC LIMIT 1000`,
       params,
-      filterDescription: 'note: TEAM/TIM cartridge typos + DEVICE CT shift',
+      filterDescription:
+        'note: TEAM/TIM cartridge typos + DEVICE CT shift, or empty-note SKU with CARTRIDGE/CT',
     };
   }
 

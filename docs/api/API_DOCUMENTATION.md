@@ -41,8 +41,9 @@ Key disimpan di `admin_config` (`api_key`).
 
 - **`production_type`** = halaman yang merekam data (`liquid` / `device` / `cartridge`), bukan format string `PROD/MO/xxxx`. MO yang sama bisa ada di lebih dari satu tipe. External manufacturing mencari ketiga tabel.
 - **Completed-only:** `GET /api/external/manufacturing-data`, `.../by-date`, dan `.../manufacturing-report/simple` hanya baris `status = 'completed'`. Baris active/draft tidak ikut.
-- Filter Odoo cartridge di cache: note di-OR untuk typo (`cartridge`, `cartirdge`, `cartrige`, …). Jangan “menyederhanakan” filter itu.
-- Filter Odoo liquid di cache: `team_name` prefix `LIQ` **atau** kode `G1`/`G2`/… **atau** note `TEAM/TIM LIQUID - SHIFT n` (dash opsional). Sync Odoo juga mencari pola note itu.
+- Filter Odoo cartridge di cache: note di-OR untuk typo (`cartridge`, `cartirdge`, `cartrige`, …). Jangan “menyederhanakan” filter itu. Jika note kosong **dan** `team_name` bukan `LIQ…` / `G1`/`G2`/… / `DEV…`, SKU dengan `CARTRIDGE` (typo sama) atau token `CT` juga masuk cartridge.
+- Filter Odoo liquid di cache: `team_name` prefix `LIQ` **atau** kode `G1`/`G2`/… **atau** note `TEAM/TIM LIQUID - SHIFT n` (dash opsional). Sync Odoo juga mencari pola note itu. Fallback SKU (note kosong + team tidak match): bukan MIXING/BRAY/POD/cartridge/CT → 15 ml jika bundling/`15 ML`/slof, selain itu 30 ml.
+- Filter Odoo device di cache: `team_name` prefix `DEV` **atau** note TEAM/TIM DEVICE SHIFT. Fallback SKU: note kosong + team tidak match + token `POD` tanpa cartridge/CT. Note/team yang match tetap menang atas SKU.
 - Dual nama field di banyak rute JWT: `moNumber` / `mo_number`, `startDate` / `start_date`. External manufacturing-data memakai `mo_number` (query).
 - Authenticity di DB/internal sering camelCase (`firstAuthenticity`); respons external manufacturing-data memakai snake_case (`first_authenticity`).
 - Buffer/reject GET: query `?moNumber=`, **bukan** path `.../liquid/PROD/MO/123`.
@@ -287,7 +288,7 @@ Pola `liquid` / `device` / `cartridge`: GET `?moNumber=` wajib; POST create; POS
 
 | METHOD | Path | Notes |
 |--------|------|-------|
-| GET | `/api/odoo/mo-list` | Query **`productionType` wajib**. Liquid: LIQ% / G1… / TEAM LIQUID SHIFT. Device: DEV% atau note. Cartridge: note typo-tolerant. |
+| GET | `/api/odoo/mo-list` | Query **`productionType` wajib**. Liquid: LIQ% / G1… / TEAM LIQUID SHIFT, atau SKU fallback note kosong. Device: DEV% / note, atau SKU `POD` saja. Cartridge: note typo-tolerant, atau SKU CARTRIDGE/CT. |
 | GET | `/api/search/mo` | Query **`q` wajib** pada `odoo_mo_cache` |
 | GET | `/api/statistics/production-by-leader` | `period`, `productionType` |
 | GET | `/api/statistics/leaders` | Nama leader unik |

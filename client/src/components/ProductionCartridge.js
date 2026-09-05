@@ -13,7 +13,7 @@ import MoListToolbar from './MoListToolbar';
 import MoPickerField from './MoPickerField';
 import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
-import { buildPaginatedSavedMoKeys, formatMoSearchLabel, matchesCartridgeNote } from '../utils/moListHelpers';
+import { buildPaginatedSavedMoKeys, formatMoSearchLabel, matchesCartridgeNote, isSkuFallbackCartridgeMo } from '../utils/moListHelpers';
 import { fetchBufferRejectBatchMaps } from '../utils/bufferRejectBatch';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
@@ -329,6 +329,16 @@ function ProductionCartridge() {
     }
   };
 
+  const isCartridgeMoEligible = (mo) => {
+    if (mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING')) {
+      return false;
+    }
+    if (matchesCartridgeNote(mo.note)) {
+      return true;
+    }
+    return isSkuFallbackCartridgeMo(mo);
+  };
+
   const handleInputAuthenticity = async () => {
     setShowInputModal(true);
     setMoSearchTerm('');
@@ -349,12 +359,8 @@ function ProductionCartridge() {
           });
         });
         
-        // Filter out SKU names that start with "MIXING" and MO numbers that have already been used
         const filteredMoData = moData.filter(mo => {
-          if (!matchesCartridgeNote(mo.note)) {
-            return false;
-          }
-          if (mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING')) {
+          if (!isCartridgeMoEligible(mo)) {
             return false;
           }
           if (usedMoNumbers.has(mo.mo_number)) {
@@ -392,13 +398,7 @@ function ProductionCartridge() {
       });
       if (response.data.success) {
         const moData = response.data.data || [];
-        // Filter out SKU names that start with "MIXING"
-        const filteredMoData = moData.filter(mo => {
-          if (!matchesCartridgeNote(mo.note)) {
-            return false;
-          }
-          return !(mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING'));
-        });
+        const filteredMoData = moData.filter((mo) => isCartridgeMoEligible(mo));
         setMoList(filteredMoData);
       }
     } catch (error) {
@@ -420,13 +420,7 @@ function ProductionCartridge() {
       });
       if (response.data.success) {
         const moData = response.data.data || [];
-        // Filter out SKU names that start with "MIXING"
-        const filteredMoData = moData.filter(mo => {
-          if (!matchesCartridgeNote(mo.note)) {
-            return false;
-          }
-          return !(mo.sku_name && String(mo.sku_name).toUpperCase().startsWith('MIXING'));
-        });
+        const filteredMoData = moData.filter((mo) => isCartridgeMoEligible(mo));
         setMoList(filteredMoData);
       }
     } catch (error) {

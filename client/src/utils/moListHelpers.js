@@ -45,6 +45,95 @@ export function isExcludedLiquidProductionSku(skuName) {
   return isLiquidHardExcludedSku(skuName) || isLiquid15MlSku(skuName);
 }
 
+const CARTRIDGE_SKU_WORDS = [
+  'CARTRIDGE',
+  'CARTIRDGE',
+  'CARTRDIGE',
+  'CARTRIGE',
+  'CARTDIGE',
+  'CARTDIDGE',
+];
+
+function skuHasCartridgeWord(normalizedSku) {
+  return CARTRIDGE_SKU_WORDS.some((word) => normalizedSku.includes(word));
+}
+
+function skuHasPodToken(normalizedSku) {
+  return /(^|[^A-Z0-9])POD([^A-Z0-9]|$)/.test(normalizedSku);
+}
+
+function skuHasCtToken(normalizedSku) {
+  return /(^|[^A-Z0-9])CT([^A-Z0-9]|$)/.test(normalizedSku);
+}
+
+/**
+ * Classify a SKU onto a production page when note is empty and team_name does not match.
+ * Order: MIXING (none) → POD+CARTRIDGE (cartridge) → POD only (device) →
+ * CARTRIDGE or token CT (cartridge) → bundling/15ml/slof (liquid15) → BRAY (none) → liquid30.
+ *
+ * @param {unknown} skuName
+ * @returns {'cartridge'|'device'|'liquid15'|'liquid30'|null}
+ */
+export function resolveSkuProductionPage(skuName) {
+  const s = normalizeLiquidSku(skuName);
+  if (!s) return null;
+  if (s.includes('MIXING')) return null;
+
+  const hasCartridge = skuHasCartridgeWord(s);
+  const hasPod = skuHasPodToken(s);
+  const hasCt = skuHasCtToken(s);
+
+  if (hasPod && hasCartridge) return 'cartridge';
+  if (hasPod && !hasCartridge && !hasCt) return 'device';
+  if (hasCartridge || hasCt) return 'cartridge';
+  if (isLiquid15MlSku(s)) return 'liquid15';
+  if (s.includes('BRAY')) return null;
+  return 'liquid30';
+}
+
+function isNoteEmptyForSkuFallback(note) {
+  return !String(note || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function teamNameBlocksSkuFallback(teamName) {
+  const team = String(teamName || '').trim().toUpperCase();
+  if (!team) return false;
+  if (team.startsWith('LIQ') || team.startsWith('DEV')) return true;
+  return /^G[0-9]+([\s-].*)?$/.test(team);
+}
+
+/**
+ * SKU page routing applies only when Odoo note is empty (after HTML strip)
+ * and team_name is not LIQ… / G1/G2/… / DEV….
+ *
+ * @param {unknown} note
+ * @param {unknown} teamName
+ * @returns {boolean}
+ */
+export function shouldUseSkuPageFallback(note, teamName) {
+  if (!isNoteEmptyForSkuFallback(note)) return false;
+  return !teamNameBlocksSkuFallback(teamName);
+}
+
+export function isSkuFallbackLiquidMo(mo) {
+  if (!shouldUseSkuPageFallback(mo?.note, mo?.team_name)) return false;
+  const page = resolveSkuProductionPage(mo?.sku_name);
+  return page === 'liquid15' || page === 'liquid30';
+}
+
+export function isSkuFallbackDeviceMo(mo) {
+  if (!shouldUseSkuPageFallback(mo?.note, mo?.team_name)) return false;
+  return resolveSkuProductionPage(mo?.sku_name) === 'device';
+}
+
+export function isSkuFallbackCartridgeMo(mo) {
+  if (!shouldUseSkuPageFallback(mo?.note, mo?.team_name)) return false;
+  return resolveSkuProductionPage(mo?.sku_name) === 'cartridge';
+}
+
 export function getMoTeamName(mo) {
   return String(mo?.team_name ?? '').trim();
 }
