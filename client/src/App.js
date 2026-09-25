@@ -12,6 +12,7 @@ import WmsExplorer from './components/WmsExplorer';
 import WmsAccuracyReport from './components/WmsAccuracyReport';
 import WmsProductionCompare from './components/WmsProductionCompare';
 import ExternalManufacturingSender from './components/ExternalManufacturingSender';
+import AdminOdooMoSync from './components/AdminOdooMoSync';
 import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 
@@ -83,6 +84,14 @@ function App() {
                 <Admin />
               </ProtectedRoute>
             } 
+          />
+          <Route
+            path="/admin/odoo-mo-sync"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminOdooMoSync />
+              </ProtectedRoute>
+            }
           />
           <Route 
             path="/report-dashboard" 

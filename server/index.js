@@ -44,6 +44,9 @@ const {
   backfillMoCacheTeamNames,
   buildDeviceSyncDomain,
   buildLiquidSyncDomain,
+  recordMoCacheLastSync,
+  getMoCacheSyncIntervalMinutes,
+  DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES,
 } = require('./utils/odoo-mo.helpers');
 
 const {
@@ -55,7 +58,8 @@ const {
 
 // Scheduler Functions
 // Function to update MO data from Odoo for all production types
-async function updateMoDataFromOdoo() {
+function updateMoDataFromOdoo() {
+  return new Promise(async (resolveOuter) => {
   const syncEnabled = await new Promise((resolve) => {
     isMoCacheSyncEnabled((err, enabled) => {
       if (err) {
@@ -69,6 +73,7 @@ async function updateMoDataFromOdoo() {
 
   if (!syncEnabled) {
     console.log('⏭️  [Scheduler] MO cache sync from Odoo is disabled (admin toggle). Skipping.');
+    resolveOuter();
     return;
   }
 
@@ -77,11 +82,13 @@ async function updateMoDataFromOdoo() {
   getAdminConfig(async (err, config) => {
     if (err) {
       console.error('❌ [Scheduler] Error getting admin config:', err);
+      resolveOuter();
       return;
     }
 
     const productionTypes = ['liquid', 'device', 'cartridge'];
     let totalUpdated = 0;
+    let anySuccess = false;
 
     for (const productionType of productionTypes) {
       try {
@@ -252,6 +259,7 @@ async function updateMoDataFromOdoo() {
           }
 
           totalUpdated += response.result.length;
+          anySuccess = true;
           console.log(`✅ [Scheduler] Updated ${response.result.length} MO records for ${productionType}`);
         }
       } catch (error) {
@@ -260,11 +268,20 @@ async function updateMoDataFromOdoo() {
     }
 
     console.log(`✅ [Scheduler] MO data update completed. Total updated: ${totalUpdated}`);
+    if (anySuccess) {
+      try {
+        await recordMoCacheLastSync(db);
+      } catch (syncStampErr) {
+        console.warn('⚠️  [Scheduler] Failed to record last sync time:', syncStampErr.message);
+      }
+    }
     try {
       await backfillMoCacheTeamNames(pool);
     } catch (backfillErr) {
       console.warn('⚠️  [Scheduler] team_name backfill failed:', backfillErr.message);
     }
+    resolveOuter();
+  });
   });
 }
 
@@ -276,8 +293,55 @@ const schedulerEnabled =
     : process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'staging';
 const httpEnabled = String(process.env.ENABLE_HTTP || 'true').toLowerCase() !== 'false';
 const scheduledTasks = [];
+let moOdooSyncTimer = null;
+let moOdooSyncInFlight = false;
+
+function clearMoOdooSyncTimer() {
+  if (moOdooSyncTimer) {
+    clearTimeout(moOdooSyncTimer);
+    moOdooSyncTimer = null;
+  }
+}
+
+function scheduleNextMoOdooSync() {
+  clearMoOdooSyncTimer();
+  if (!schedulerEnabled) {
+    return;
+  }
+
+  getMoCacheSyncIntervalMinutes(db, (err, minutes) => {
+    const intervalMinutes = err ? DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES : minutes;
+    const delayMs = intervalMinutes * 60 * 1000;
+    moOdooSyncTimer = setTimeout(() => {
+      runScheduledMoOdooSync();
+    }, delayMs);
+    if (typeof moOdooSyncTimer.unref === 'function') {
+      moOdooSyncTimer.unref();
+    }
+  });
+}
+
+function runScheduledMoOdooSync() {
+  if (moOdooSyncInFlight) {
+    console.log('⏭️  [Scheduler] MO Odoo sync still running; skipping overlapping tick');
+    scheduleNextMoOdooSync();
+    return;
+  }
+
+  moOdooSyncInFlight = true;
+  console.log('⏰ [Scheduler] Triggered: Update MO data from Odoo');
+  updateMoDataFromOdoo()
+    .catch((syncErr) => {
+      console.error('❌ [Scheduler] MO Odoo sync error:', syncErr.message);
+    })
+    .finally(() => {
+      moOdooSyncInFlight = false;
+      scheduleNextMoOdooSync();
+    });
+}
 
 function stopScheduledTasks() {
+  clearMoOdooSyncTimer();
   for (const task of scheduledTasks) {
     try {
       if (task && typeof task.stop === 'function') task.stop();
@@ -289,12 +353,7 @@ function stopScheduledTasks() {
 }
 
 if (schedulerEnabled) {
-  scheduledTasks.push(
-    cron.schedule('* * * * *', () => {
-      console.log('⏰ [Scheduler] Triggered: Update MO data from Odoo');
-      updateMoDataFromOdoo();
-    })
-  );
+  scheduleNextMoOdooSync();
 
   scheduledTasks.push(
     cron.schedule('0 6 * * *', () => {
@@ -319,7 +378,9 @@ if (schedulerEnabled) {
   );
 
   console.log('📅 [Scheduler] Cron jobs configured (ENABLE_SCHEDULER=true):');
-  console.log('   - Update MO data from Odoo: Every 1 minute (cron: * * * * *)');
+  console.log(
+    `   - Update MO data from Odoo: every ${DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES} min default (admin_config; re-read after each run)`
+  );
   console.log('   - External manufacturing idle POST (liquid): Daily at 06:00 (cron: 0 6 * * *)');
   console.log('   - Full production_results sync: Every 1 hour (cron: 0 * * * *)');
 } else {

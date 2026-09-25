@@ -14,11 +14,18 @@ const {
 } = require('../services/external-api.service');
 const {
   ODOO_MO_SYNC_FIELDS,
+  ODOO_MO_LAST_SYNC_CONFIG_KEY,
   ODOO_MO_CACHE_UPSERT_SQL,
   mapOdooMoToCacheParams,
   backfillMoCacheTeamNames,
   buildDeviceSyncDomain,
   buildLiquidSyncDomain,
+  recordMoCacheLastSync,
+  MO_CACHE_SYNC_INTERVAL_CONFIG_KEY,
+  parseMoCacheSyncIntervalMinutes,
+  getMoCacheSyncIntervalMinutes,
+  MIN_MO_CACHE_SYNC_INTERVAL_MINUTES,
+  MAX_MO_CACHE_SYNC_INTERVAL_MINUTES,
 } = require('../utils/odoo-mo.helpers');
 const { runFullProductionSync } = require('../services/production-results-sync.service');
 
@@ -200,30 +207,35 @@ router.get('/config', (req, res) => {
                                 : (process.env.WMS_SITE || 'PROD');
 
                               isMoCacheSyncEnabled((_flagErr, moCacheSyncEnabled) => {
-                                res.json({
-                                  success: true,
-                                  config: {
-                                    sessionId: null,
-                                    sessionIdMasked: maskSecret(sessionId),
-                                    sessionIdConfigured: !!sessionId,
-                                    odooBaseUrl: odooBaseUrl,
-                                    externalApiBaseUrl: externalApiBaseUrl,
-                                    externalApiBearerToken: maskedBearer,
-                                    externalApiBearerTokenConfigured: !!bearerRaw,
-                                    externalApiTargets,
-                                    externalApiUrl: externalApiUrl,
-                                    externalApiUrlActive: externalApiUrlActive,
-                                    externalApiUrlCompleted: externalApiUrlCompleted,
-                                    apiKey: maskedApiKey,
-                                    apiKeyConfigured: !!apiKey,
-                                    wmsApiBaseUrl,
-                                    wmsAccessToken: maskedWmsToken,
-                                    wmsAccessTokenConfigured: !!wmsTokenRaw,
-                                    wmsUsername,
-                                    wmsCompanyId,
-                                    wmsSite,
-                                    moCacheSyncEnabled: moCacheSyncEnabled !== false
-                                  }
+                                getMoCacheSyncIntervalMinutes(db, (_intErr, moCacheSyncIntervalMinutes) => {
+                                  res.json({
+                                    success: true,
+                                    config: {
+                                      sessionId: null,
+                                      sessionIdMasked: maskSecret(sessionId),
+                                      sessionIdConfigured: !!sessionId,
+                                      odooBaseUrl: odooBaseUrl,
+                                      externalApiBaseUrl: externalApiBaseUrl,
+                                      externalApiBearerToken: maskedBearer,
+                                      externalApiBearerTokenConfigured: !!bearerRaw,
+                                      externalApiTargets,
+                                      externalApiUrl: externalApiUrl,
+                                      externalApiUrlActive: externalApiUrlActive,
+                                      externalApiUrlCompleted: externalApiUrlCompleted,
+                                      apiKey: maskedApiKey,
+                                      apiKeyConfigured: !!apiKey,
+                                      wmsApiBaseUrl,
+                                      wmsAccessToken: maskedWmsToken,
+                                      wmsAccessTokenConfigured: !!wmsTokenRaw,
+                                      wmsUsername,
+                                      wmsCompanyId,
+                                      wmsSite,
+                                      moCacheSyncEnabled: moCacheSyncEnabled !== false,
+                                      moCacheSyncIntervalMinutes,
+                                      moCacheSyncIntervalMin: MIN_MO_CACHE_SYNC_INTERVAL_MINUTES,
+                                      moCacheSyncIntervalMax: MAX_MO_CACHE_SYNC_INTERVAL_MINUTES,
+                                    }
+                                  });
                                 });
                               });
                             });
@@ -687,31 +699,73 @@ router.post('/generate-api-key', (req, res) => {
   }
 });
 
-// PUT /api/admin/mo-cache-sync — persist automatic Odoo → odoo_mo_cache pull toggle
+// PUT /api/admin/mo-cache-sync — toggle and/or interval for Odoo → odoo_mo_cache pull
 router.put('/mo-cache-sync', (req, res) => {
-  const enabled = req.body && req.body.enabled;
-  if (typeof enabled !== 'boolean') {
-    return res.status(400).json({ success: false, error: 'enabled must be a boolean' });
+  const body = req.body || {};
+  const hasEnabled = typeof body.enabled === 'boolean';
+  const hasInterval = body.intervalMinutes !== undefined && body.intervalMinutes !== null;
+
+  if (!hasEnabled && !hasInterval) {
+    return res.status(400).json({
+      success: false,
+      error: 'Provide enabled (boolean) and/or intervalMinutes (number)',
+    });
   }
 
   if (!db) {
     return res.status(500).json({ success: false, error: 'Database is not available' });
   }
 
-  const value = enabled ? 'true' : 'false';
-  db.run(
-    `INSERT INTO admin_config (config_key, config_value, updated_at)
-     VALUES ($1, $2, CURRENT_TIMESTAMP)
-     ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
-    [MO_CACHE_SYNC_CONFIG_KEY, value],
-    function (err) {
-      if (err) {
-        console.error('Error saving mo cache sync flag:', err);
-        return res.status(500).json({ success: false, error: err.message });
-      }
-      res.json({ success: true, enabled });
+  const saveEnabled = (done) => {
+    if (!hasEnabled) {
+      return done(null);
     }
-  );
+    const value = body.enabled ? 'true' : 'false';
+    db.run(
+      `INSERT INTO admin_config (config_key, config_value, updated_at)
+       VALUES ($1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+      [MO_CACHE_SYNC_CONFIG_KEY, value],
+      (err) => done(err)
+    );
+  };
+
+  const saveInterval = (done) => {
+    if (!hasInterval) {
+      return done(null);
+    }
+    const intervalMinutes = parseMoCacheSyncIntervalMinutes(body.intervalMinutes);
+    db.run(
+      `INSERT INTO admin_config (config_key, config_value, updated_at)
+       VALUES ($1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+      [MO_CACHE_SYNC_INTERVAL_CONFIG_KEY, String(intervalMinutes)],
+      (err) => done(err, intervalMinutes)
+    );
+  };
+
+  saveEnabled((enabledErr) => {
+    if (enabledErr) {
+      console.error('Error saving mo cache sync flag:', enabledErr);
+      return res.status(500).json({ success: false, error: enabledErr.message });
+    }
+    saveInterval((intervalErr, intervalMinutes) => {
+      if (intervalErr) {
+        console.error('Error saving mo cache sync interval:', intervalErr);
+        return res.status(500).json({ success: false, error: intervalErr.message });
+      }
+
+      isMoCacheSyncEnabled((_flagErr, moCacheSyncEnabled) => {
+        getMoCacheSyncIntervalMinutes(db, (_intErr, currentInterval) => {
+          res.json({
+            success: true,
+            enabled: hasEnabled ? body.enabled : moCacheSyncEnabled !== false,
+            intervalMinutes: hasInterval ? intervalMinutes : currentInterval,
+          });
+        });
+      });
+    });
+  });
 });
 
 // GET /api/admin/mo-stats
@@ -731,20 +785,39 @@ router.get('/mo-stats', (req, res) => {
           return res.status(500).json({ success: false, error: err3.message });
         }
 
-        db.all('SELECT MAX(fetched_at) as last_sync FROM odoo_mo_cache', [], (err4, lastRow) => {
+        db.all(
+          'SELECT MAX(last_updated) as last_updated, MAX(fetched_at) as last_fetched FROM odoo_mo_cache',
+          [],
+          (err4, lastRow) => {
           if (err4) {
             return res.status(500).json({ success: false, error: err4.message });
           }
 
-          res.json({
-            success: true,
-            stats: {
-              total: parseInt(totalRow[0].total) || 0,
-              recent_24h: parseInt(recentRow[0].recent) || 0,
-              older_than_7_days: parseInt(oldRow[0].old) || 0,
-              last_sync: lastRow[0] && lastRow[0].last_sync ? lastRow[0].last_sync : null
+          db.get(
+            'SELECT config_value FROM admin_config WHERE config_key = $1',
+            [ODOO_MO_LAST_SYNC_CONFIG_KEY],
+            (err5, configRow) => {
+              if (err5) {
+                return res.status(500).json({ success: false, error: err5.message });
+              }
+
+              const fromConfig = configRow && configRow.config_value ? configRow.config_value : null;
+              const fromCache =
+                lastRow[0] && (lastRow[0].last_updated || lastRow[0].last_fetched)
+                  ? lastRow[0].last_updated || lastRow[0].last_fetched
+                  : null;
+
+              res.json({
+                success: true,
+                stats: {
+                  total: parseInt(totalRow[0].total) || 0,
+                  recent_24h: parseInt(recentRow[0].recent) || 0,
+                  older_than_7_days: parseInt(oldRow[0].old) || 0,
+                  last_sync: fromConfig || fromCache
+                }
+              });
             }
-          });
+          );
         });
       });
     });
@@ -1194,6 +1267,14 @@ router.post('/sync-mo', async (req, res) => {
       }
 
       console.log(`✅ [Manual Sync] MO data update completed. Total updated: ${totalUpdated}`);
+
+      if (results.some((r) => r.status === 'success')) {
+        try {
+          await recordMoCacheLastSync(db);
+        } catch (syncStampErr) {
+          console.warn('⚠️  [Manual Sync] Failed to record last sync time:', syncStampErr.message);
+        }
+      }
 
       let backfilledTeamNames = 0;
       try {

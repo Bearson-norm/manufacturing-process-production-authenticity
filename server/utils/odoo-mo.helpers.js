@@ -9,12 +9,87 @@ const ODOO_MO_SYNC_FIELDS = [
   'group_worker',
 ];
 
+const ODOO_MO_LAST_SYNC_CONFIG_KEY = 'odoo_mo_last_sync_at';
+const MO_CACHE_SYNC_INTERVAL_CONFIG_KEY = 'odoo_mo_cache_sync_interval_minutes';
+const DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES = 3;
+const MIN_MO_CACHE_SYNC_INTERVAL_MINUTES = 1;
+const MAX_MO_CACHE_SYNC_INTERVAL_MINUTES = 60;
+
+/**
+ * @param {string|null|undefined} value
+ * @returns {number}
+ */
+function parseMoCacheSyncIntervalMinutes(value) {
+  if (value == null || String(value).trim() === '') {
+    return DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES;
+  }
+  const parsed = parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES;
+  }
+  return Math.min(
+    MAX_MO_CACHE_SYNC_INTERVAL_MINUTES,
+    Math.max(MIN_MO_CACHE_SYNC_INTERVAL_MINUTES, parsed)
+  );
+}
+
+/**
+ * @param {object|null} db
+ * @param {function(Error|null, number): void} callback
+ */
+function getMoCacheSyncIntervalMinutes(db, callback) {
+  if (!db) {
+    return callback(null, DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES);
+  }
+  db.get(
+    'SELECT config_value FROM admin_config WHERE config_key = $1',
+    [MO_CACHE_SYNC_INTERVAL_CONFIG_KEY],
+    (err, row) => {
+      if (err) {
+        return callback(err, DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES);
+      }
+      callback(null, parseMoCacheSyncIntervalMinutes(row && row.config_value));
+    }
+  );
+}
+
 const ODOO_MO_CACHE_UPSERT_SQL = `INSERT INTO odoo_mo_cache 
   (mo_number, sku_name, quantity, uom, note, team_name, create_date, fetched_at, last_updated) 
   VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
   ON CONFLICT (mo_number) DO UPDATE SET 
     sku_name = $2, quantity = $3, uom = $4, note = $5, team_name = $6,
-    create_date = $7, last_updated = CURRENT_TIMESTAMP`;
+    create_date = $7, fetched_at = CURRENT_TIMESTAMP, last_updated = CURRENT_TIMESTAMP`;
+
+/**
+ * Persist the time of the last completed Odoo → odoo_mo_cache pull.
+ * Used by Admin "Last sync" so the value is the pull itself, not MAX(fetched_at)
+ * of first-insert-only rows.
+ *
+ * @param {object} db - SQLite-style database wrapper from `database.js`.
+ * @returns {Promise<string|null>} ISO timestamp that was stored, or null if `db` is missing.
+ */
+function recordMoCacheLastSync(db) {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      resolve(null);
+      return;
+    }
+    const value = new Date().toISOString();
+    db.run(
+      `INSERT INTO admin_config (config_key, config_value, updated_at)
+       VALUES ($1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (config_key) DO UPDATE SET config_value = $2, updated_at = CURRENT_TIMESTAMP`,
+      [ODOO_MO_LAST_SYNC_CONFIG_KEY, value],
+      (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(value);
+        }
+      }
+    );
+  });
+}
 
 function stripNoteText(note) {
   return String(note || '')
@@ -598,7 +673,15 @@ async function backfillMoCacheTeamNames(pool) {
 
 module.exports = {
   ODOO_MO_SYNC_FIELDS,
+  ODOO_MO_LAST_SYNC_CONFIG_KEY,
+  MO_CACHE_SYNC_INTERVAL_CONFIG_KEY,
+  DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES,
+  MIN_MO_CACHE_SYNC_INTERVAL_MINUTES,
+  MAX_MO_CACHE_SYNC_INTERVAL_MINUTES,
+  parseMoCacheSyncIntervalMinutes,
+  getMoCacheSyncIntervalMinutes,
   ODOO_MO_CACHE_UPSERT_SQL,
+  recordMoCacheLastSync,
   extractGroupWorkerName,
   extractTeamNameFromNote,
   resolveTeamName,

@@ -5,6 +5,7 @@ import './Dashboard.css';
 
 const ADMIN_MENU_ITEMS = [
   { path: '/admin', icon: '⚙️', label: 'Admin Configuration' },
+  { path: '/admin/odoo-mo-sync', icon: '🔄', label: 'Sinkronisasi MO Odoo' },
   { path: '/report-dashboard', icon: '📊', label: 'Laporan Manufacturing' },
   { path: '/production-chart', icon: '📈', label: 'Grafik Statistik Produksi Pabrik' },
   { path: '/wms-explorer', icon: '🔍', label: 'WMS vs Production Explorer' },

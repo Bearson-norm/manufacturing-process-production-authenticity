@@ -17,9 +17,6 @@ function Admin() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
-  const [moStats, setMoStats] = useState({ total: 0, recent_24h: 0, older_than_7_days: 0, last_sync: null });
-  const [moCacheSyncEnabled, setMoCacheSyncEnabled] = useState(true);
-  const [moCacheToggleLoading, setMoCacheToggleLoading] = useState(false);
   const [syncStats, setSyncStats] = useState({ synced: 0, total: 0 });
   const [picList, setPicList] = useState([]);
   const [newPicName, setNewPicName] = useState('');
@@ -40,7 +37,6 @@ function Admin() {
 
   useEffect(() => {
     fetchConfig();
-    fetchMoStats();
     fetchPicList();
     fetchVendorList();
   }, []);
@@ -84,28 +80,10 @@ function Admin() {
         setWmsUsername(response.data.config.wmsUsername || '');
         setWmsCompanyId(response.data.config.wmsCompanyId || 'FOOM');
         setWmsSite(response.data.config.wmsSite || 'PROD');
-        setMoCacheSyncEnabled(response.data.config.moCacheSyncEnabled !== false);
       }
     } catch (error) {
       console.error('Error fetching config:', error);
       setMessage({ type: 'error', text: 'Failed to load configuration' });
-    }
-  };
-
-  const fetchMoStats = async () => {
-    try {
-      const response = await axios.get('/api/admin/mo-stats');
-      if (response.data.success) {
-        const stats = response.data.stats || {};
-        setMoStats({
-          total: stats.total || 0,
-          recent_24h: stats.recent_24h || 0,
-          older_than_7_days: stats.older_than_7_days || 0,
-          last_sync: stats.last_sync || null
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching MO stats:', error);
     }
   };
 
@@ -394,89 +372,6 @@ function Admin() {
       }
     } catch (error) {
       setMessage({ type: 'error', text: error.response?.data?.error || 'WMS connection test failed' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const formatLastSync = (value) => {
-    if (!value) return 'Belum pernah';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    return date.toLocaleString('id-ID');
-  };
-
-  const handleToggleMoCacheSync = async () => {
-    const nextEnabled = !moCacheSyncEnabled;
-    setMoCacheToggleLoading(true);
-    setMessage({ type: '', text: '' });
-    try {
-      const response = await axios.put('/api/admin/mo-cache-sync', { enabled: nextEnabled });
-      if (response.data.success) {
-        setMoCacheSyncEnabled(response.data.enabled !== false && nextEnabled);
-        setMessage({
-          type: 'success',
-          text: nextEnabled
-            ? 'Penarikan otomatis MO dari Odoo diaktifkan. Worker akan menarik data setiap 1 menit.'
-            : 'Penarikan otomatis MO dari Odoo dinonaktifkan. Cache yang ada tetap dipakai.'
-        });
-      } else {
-        setMessage({ type: 'error', text: response.data.error || 'Gagal mengubah toggle MO cache' });
-      }
-    } catch (error) {
-      console.error('Error toggling mo cache sync:', error);
-      setMessage({ type: 'error', text: error.response?.data?.error || 'Gagal mengubah toggle MO cache' });
-    } finally {
-      setMoCacheToggleLoading(false);
-    }
-  };
-
-  const handleSyncMoFromOdoo = async () => {
-    if (!window.confirm('Tarik data MO dari Odoo sekarang dan tulis ulang ke cache?')) {
-      return;
-    }
-
-    setLoading(true);
-    setMessage({ type: '', text: '' });
-
-    try {
-      const response = await axios.post('/api/admin/sync-mo');
-      if (response.data.success) {
-        setMessage({
-          type: 'success',
-          text: `Sync MO selesai. ${response.data.totalUpdated || 0} record di-update.`
-        });
-        await fetchMoStats();
-      } else {
-        setMessage({ type: 'error', text: response.data.error || 'Gagal sync MO dari Odoo' });
-      }
-    } catch (error) {
-      console.error('Error syncing MO from Odoo:', error);
-      setMessage({ type: 'error', text: error.response?.data?.error || 'Gagal sync MO dari Odoo' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCleanupMo = async () => {
-    if (!window.confirm('Are you sure you want to delete MO data older than 7 days? This action cannot be undone.')) {
-      return;
-    }
-
-    setLoading(true);
-    setMessage({ type: '', text: '' });
-
-    try {
-      const response = await axios.post('/api/admin/cleanup-mo');
-      if (response.data.success) {
-        setMessage({ type: 'success', text: `Cleanup completed! Deleted ${response.data.deletedCount} MO records older than 7 days.` });
-        await fetchMoStats();
-      } else {
-        setMessage({ type: 'error', text: response.data.error || 'Failed to cleanup MO data' });
-      }
-    } catch (error) {
-      console.error('Error cleaning up MO:', error);
-      setMessage({ type: 'error', text: error.response?.data?.error || 'Failed to cleanup MO data' });
     } finally {
       setLoading(false);
     }
@@ -1061,67 +956,19 @@ function Admin() {
           </button>
         </div>
 
-        {/* MO Data Management Section */}
         <div className="admin-section">
-          <h2>MO Data Management</h2>
-          <div className="mo-cache-toggle-row">
-            <div>
-              <label className="mo-cache-toggle" htmlFor="mo-cache-sync-toggle">
-                <input
-                  id="mo-cache-sync-toggle"
-                  type="checkbox"
-                  checked={moCacheSyncEnabled}
-                  onChange={handleToggleMoCacheSync}
-                  disabled={moCacheToggleLoading || loading}
-                />
-                <span className="mo-cache-toggle-slider" aria-hidden="true" />
-                <span className="mo-cache-toggle-text">Tarik data MO dari Odoo (otomatis)</span>
-              </label>
-              <p className="mo-cache-toggle-status">
-                Status: <strong>{moCacheSyncEnabled ? 'Aktif' : 'Nonaktif'}</strong>
-                {' · '}
-                Last sync: {formatLastSync(moStats.last_sync)}
-              </p>
-              <small className="mo-cache-toggle-help">
-                Otomatis setiap 1 menit di worker jika toggle ON dan ENABLE_SCHEDULER=true.
-                OFF hanya menghentikan pull; cache lama tetap dipakai dropdown/search.
-                Sync manual tetap bisa dijalankan.
-              </small>
-            </div>
-            <button
-              type="button"
-              onClick={handleSyncMoFromOdoo}
-              disabled={loading}
-              className="sync-button"
-            >
-              {loading ? 'Syncing...' : 'Sync MO dari Odoo sekarang'}
-            </button>
-          </div>
-          <div className="stats-grid">
-            <div className="stat-card">
-              <div className="stat-label">Total MO Records</div>
-              <div className="stat-value">{moStats.total}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Last 24 Hours</div>
-              <div className="stat-value">{moStats.recent_24h}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Older than 7 days</div>
-              <div className="stat-value">{moStats.older_than_7_days}</div>
-            </div>
-          </div>
+          <h2>Sinkronisasi MO Odoo</h2>
+          <p style={{ color: '#94a3b8', marginBottom: '12px' }}>
+            Toggle pull otomatis, interval (default 3 menit), statistik cache, sync manual, dan cleanup ada di halaman terpisah.
+          </p>
           <button
-            onClick={handleCleanupMo}
-            disabled={loading}
-            className="cleanup-button"
-            style={{ padding: '10px 20px', fontSize: '14px', fontWeight: '600', marginTop: '16px' }}
+            type="button"
+            onClick={() => navigate('/admin/odoo-mo-sync')}
+            className="sync-button"
+            style={{ padding: '10px 20px', fontSize: '14px', fontWeight: '600' }}
           >
-            {loading ? 'Processing...' : 'Cleanup MO Data (Delete older than 7 days)'}
+            Buka konfigurasi sinkronisasi MO Odoo
           </button>
-          <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginTop: '8px' }}>
-            This will query MO numbers from the last 7 days and delete any records older than that.
-          </small>
         </div>
 
         {/* Data Sync Section */}
