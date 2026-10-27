@@ -6,22 +6,11 @@ import {
   isScannerSubmitKey,
   stripScannerLineEndings,
 } from '../utils/scannerInput';
+import { formatQrScanDateTime } from '../utils/qrScanFormat';
 import './QrScanSessionList.css';
 import './QrScanSessionDetail.css';
 
 const PAGE_SIZE = 50;
-
-function formatSessionTime(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString('id-ID', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
-  } catch {
-    return '—';
-  }
-}
 
 function QrScanSessionDetail() {
   const { sessionNumber } = useParams();
@@ -41,6 +30,7 @@ function QrScanSessionDetail() {
   const [scanMessage, setScanMessage] = useState('');
   const [scanError, setScanError] = useState('');
   const [finishing, setFinishing] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const isFinished = session?.status === 'finished';
   const canScan = session && !isFinished;
@@ -49,6 +39,7 @@ function QrScanSessionDetail() {
     setSession({
       session_number: res.data.session_number,
       pic: res.data.pic,
+      shift_number: res.data.shift_number,
       status: res.data.status,
       qty: res.data.qty,
       created_at: res.data.created_at,
@@ -216,6 +207,45 @@ function QrScanSessionDetail() {
     loadSession(Math.max(0, offset - PAGE_SIZE));
   };
 
+  const handleExportExcel = async () => {
+    if (!sessionNumber || exporting) return;
+    setExporting(true);
+    setScanError('');
+    try {
+      const response = await axios.get(`/api/qr-scan/sessions/${sessionNumber}/export`, {
+        responseType: 'blob',
+        timeout: 0,
+      });
+      const contentType = response.headers['content-type'] || '';
+      if (contentType.includes('application/json')) {
+        const text = await response.data.text();
+        const parsed = JSON.parse(text);
+        setScanError(parsed.error || 'Gagal mengekspor Excel');
+        return;
+      }
+      const disposition = response.headers['content-disposition'] || '';
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch?.[1] || `qr-scan-sesi-${sessionNumber}.xlsx`;
+      const blobUrl = URL.createObjectURL(
+        new Blob([response.data], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+      );
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+      setScanMessage('Excel berhasil diunduh');
+    } catch (err) {
+      setScanError(err.response?.data?.error || 'Gagal mengekspor Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading && !session) {
     return (
       <div className="qr-scan-detail-page">
@@ -258,18 +288,31 @@ function QrScanSessionDetail() {
               <h1>Input QR — Sesi #{session.session_number}</h1>
               <p>
                 {isFinished
-                  ? `Selesai ${formatSessionTime(session.finished_at)}`
-                  : `Dimulai ${formatSessionTime(session.created_at)}`}
+                  ? `Selesai ${formatQrScanDateTime(session.finished_at)}`
+                  : `Dimulai ${formatQrScanDateTime(session.created_at)}`}
               </p>
             </div>
           </div>
-          <span
-            className={`qr-scan-session-card__badge qr-scan-session-card__badge--${
-              isFinished ? 'finished' : 'ongoing'
-            }`}
-          >
-            {isFinished ? 'Finished' : 'Ongoing'}
-          </span>
+          <div className="qr-scan-detail-topbar__right">
+            <button
+              type="button"
+              className="qr-scan-detail-export-btn"
+              onClick={handleExportExcel}
+              disabled={exporting || loading}
+            >
+              <span className="qr-scan-detail-export-btn__icon" aria-hidden="true">
+                ↓
+              </span>
+              {exporting ? 'Mengekspor…' : 'Export Excel'}
+            </button>
+            <span
+              className={`qr-scan-session-card__badge qr-scan-session-card__badge--${
+                isFinished ? 'finished' : 'ongoing'
+              }`}
+            >
+              {isFinished ? 'Finished' : 'Ongoing'}
+            </span>
+          </div>
         </header>
 
         <div className="qr-scan-detail-layout">
@@ -279,6 +322,10 @@ function QrScanSessionDetail() {
               <div className="qr-scan-detail-stat">
                 <dt>PIC</dt>
                 <dd>{session.pic}</dd>
+              </div>
+              <div className="qr-scan-detail-stat">
+                <dt>Shift</dt>
+                <dd>{session.shift_number ?? '—'}</dd>
               </div>
               <div className="qr-scan-detail-stat">
                 <dt>Qty</dt>
@@ -355,17 +402,25 @@ function QrScanSessionDetail() {
                     <tr>
                       <th>#</th>
                       <th>Barcode</th>
+                      <th>Waktu scan</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((barcode, index) => (
+                    {items.map((item, index) => {
+                      const barcode = typeof item === 'string' ? item : item.barcode;
+                      const scannedAt = typeof item === 'object' ? item.scanned_at : null;
+                      return (
                       <tr key={`${offset}-${index}-${barcode}`}>
                         <td className="qr-scan-detail-table__index">
                           {itemsTotal - offset - index}
                         </td>
                         <td className="qr-scan-detail-table__barcode">{barcode}</td>
+                        <td className="qr-scan-detail-table__time">
+                          {formatQrScanDateTime(scannedAt)}
+                        </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

@@ -79,6 +79,17 @@ function normalizePicName(raw) {
   return { ok: true, pic };
 }
 
+function normalizeShiftNumber(raw) {
+  const shift = String(raw ?? '').trim();
+  if (!shift) {
+    return { ok: false, error: 'Nomor shift wajib diisi', code: 'SHIFT_NUMBER_REQUIRED' };
+  }
+  if (!/^\d+$/.test(shift)) {
+    return { ok: false, error: 'Nomor shift harus hanya angka', code: 'SHIFT_NUMBER_INVALID' };
+  }
+  return { ok: true, shift_number: shift };
+}
+
 /**
  * @param {import('pg').PoolClient} client
  */
@@ -109,6 +120,7 @@ module.exports = {
   parseSessionNumberParam,
   validateClientScanId,
   normalizePicName,
+  normalizeShiftNumber,
   assertActivePic,
   buildVendorMapFromRows,
 };

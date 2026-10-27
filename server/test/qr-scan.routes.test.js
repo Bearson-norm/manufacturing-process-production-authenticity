@@ -8,6 +8,52 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-for-ci-only'
 process.env.ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'test-admin-pass';
 process.env.PRODUCTION_PASSWORD = process.env.PRODUCTION_PASSWORD || 'test-prod-pass';
 
+function apiMultipart(server, path, fileBuffer, filename, token) {
+  return new Promise((resolve, reject) => {
+    const boundary = `----NodeTestFormBoundary${Date.now()}`;
+    const preamble = Buffer.from(
+      `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+        `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n`,
+      'utf8'
+    );
+    const closing = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+    const body = Buffer.concat([preamble, fileBuffer, closing]);
+    const { port } = server.address();
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (c) => {
+          data += c;
+        });
+        res.on('end', () => {
+          let parsed = {};
+          try {
+            parsed = data ? JSON.parse(data) : {};
+          } catch {
+            parsed = { raw: data };
+          }
+          resolve({ status: res.statusCode, body: parsed });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 function apiRequest(server, method, path, body, token) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : null;
@@ -87,6 +133,14 @@ describe('qr-scan API integration', () => {
       const migration = require('../migrations/003_qr_scan_sessions');
       await migration.up(probeClient);
     }
+    const shiftCol = await probeClient.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_name = 'qr_scan_session' AND column_name = 'shift_number'`
+    );
+    if (shiftCol.rowCount === 0) {
+      const migrationShift = require('../migrations/004_qr_scan_session_shift');
+      await migrationShift.up(probeClient);
+    }
 
     testPicName = `QRScanTestPIC_${Date.now()}`;
     await probeClient.query(
@@ -139,10 +193,17 @@ describe('qr-scan API integration', () => {
       t.skip('PostgreSQL not available');
       return;
     }
-    const res = await apiRequest(server, 'POST', '/api/qr-scan/sessions', { pic: testPicName }, token);
+    const res = await apiRequest(
+      server,
+      'POST',
+      '/api/qr-scan/sessions',
+      { pic: testPicName, shift_number: '1' },
+      token
+    );
     assert.equal(res.status, 201);
     assert.ok(res.body.session_number >= 1);
     assert.equal(res.body.status, 'ongoing');
+    assert.equal(res.body.shift_number, '1');
   });
 
   it('POST session rejects unknown PIC', async (t) => {
@@ -154,7 +215,7 @@ describe('qr-scan API integration', () => {
       server,
       'POST',
       '/api/qr-scan/sessions',
-      { pic: '___nonexistent_pic___' },
+      { pic: '___nonexistent_pic___', shift_number: '1' },
       token
     );
     assert.equal(res.status, 400);
@@ -171,7 +232,7 @@ describe('qr-scan API integration', () => {
       server,
       'POST',
       '/api/qr-scan/sessions',
-      { pic: testPicName },
+      { pic: testPicName, shift_number: '2' },
       token
     );
     const sn1 = create1.body.session_number;
@@ -201,7 +262,7 @@ describe('qr-scan API integration', () => {
       server,
       'POST',
       '/api/qr-scan/sessions',
-      { pic: testPicName },
+      { pic: testPicName, shift_number: '1' },
       token
     );
     const sn2 = create2.body.session_number;
@@ -248,5 +309,36 @@ describe('qr-scan API integration', () => {
     );
     assert.equal(afterFinish.status, 403);
     assert.equal(afterFinish.body.code, 'SESSION_FINISHED');
+  });
+
+  it('POST import creates session and inserts barcodes', async (t) => {
+    if (!dbOk) {
+      t.skip('PostgreSQL not available');
+      return;
+    }
+    const {
+      buildImportTemplateWorkbook,
+      writeWorkbookToBuffer,
+    } = require('../utils/qr-scan-excel.utils');
+    const workbook = buildImportTemplateWorkbook();
+    const sessionSheet = workbook.getWorksheet('Sesi');
+    sessionSheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      const label = String(row.getCell(1).value || '').trim();
+      if (label === 'pic') row.getCell(2).value = testPicName;
+      if (label === 'shift_number') row.getCell(2).value = '3';
+    });
+    const barcodeSheet = workbook.getWorksheet('Barcode');
+    const bc1 = makeBarcode(`import1${Date.now()}`);
+    const bc2 = makeBarcode(`import2${Date.now()}`);
+    barcodeSheet.addRow({ barcode: bc1, scanned_at: '' });
+    barcodeSheet.addRow({ barcode: bc2, scanned_at: '' });
+    const fileBuffer = Buffer.from(await writeWorkbookToBuffer(workbook));
+
+    const res = await apiMultipart(server, '/api/qr-scan/import', fileBuffer, 'import.xlsx', token);
+    assert.equal(res.status, 201);
+    assert.equal(res.body.shift_number, '3');
+    assert.equal(res.body.inserted, 2);
+    assert.ok(res.body.session_number >= 1);
   });
 });

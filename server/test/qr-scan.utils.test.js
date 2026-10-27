@@ -5,6 +5,7 @@ const {
   resolveVendorForBarcode,
   validateClientScanId,
   parseSessionNumberParam,
+  normalizeShiftNumber,
 } = require('../utils/qr-scan.utils');
 const { buildActiveVendorMapByLowerName } = require('../utils/authenticity.utils');
 
@@ -46,5 +47,11 @@ describe('qr-scan.utils', () => {
   it('parseSessionNumberParam rejects invalid numbers', () => {
     assert.equal(parseSessionNumberParam('0').ok, false);
     assert.equal(parseSessionNumberParam('3').sessionNumber, 3);
+  });
+
+  it('normalizeShiftNumber accepts digits only', () => {
+    assert.deepEqual(normalizeShiftNumber('2'), { ok: true, shift_number: '2' });
+    assert.equal(normalizeShiftNumber('').ok, false);
+    assert.equal(normalizeShiftNumber('1a').ok, false);
   });
 });

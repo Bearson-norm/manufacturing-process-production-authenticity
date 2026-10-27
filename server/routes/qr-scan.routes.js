@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { pool } = require('../database');
 const { buildActiveVendorMapByLowerName } = require('../utils/authenticity.utils');
 const {
@@ -7,10 +8,36 @@ const {
   parseSessionNumberParam,
   validateClientScanId,
   normalizePicName,
+  normalizeShiftNumber,
   assertActivePic,
 } = require('../utils/qr-scan.utils');
+const {
+  buildSessionExportWorkbook,
+  buildImportTemplateWorkbook,
+  buildExportFilename,
+  buildTemplateFilename,
+  writeWorkbookToBuffer,
+} = require('../utils/qr-scan-excel.utils');
+const { importQrScanWorkbook } = require('../services/qr-scan-import.service');
 
 const router = express.Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const name = file.originalname || '';
+    const ok =
+      file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      /\.xlsx$/i.test(name);
+    if (!ok) {
+      const err = new Error('File harus berformat .xlsx');
+      err.code = 'INVALID_FILE_TYPE';
+      return cb(err);
+    }
+    return cb(null, true);
+  },
+});
 
 const DEFAULT_PRODUCTION_TYPE = 'cartridge';
 const GENERIC_DB_ERROR = 'Database error';
@@ -65,6 +92,7 @@ router.get('/sessions', async (req, res) => {
       `SELECT
          s.session_number,
          s.pic,
+         s.shift_number,
          s.status,
          s.created_at,
          s.finished_at,
@@ -81,6 +109,7 @@ router.get('/sessions', async (req, res) => {
       sessions: result.rows.map((row) => ({
         session_number: row.session_number,
         pic: row.pic,
+        shift_number: row.shift_number,
         status: row.status,
         qty: row.qty,
         created_at: row.created_at,
@@ -100,6 +129,11 @@ router.post('/sessions', async (req, res) => {
     return res.status(400).json({ error: picResult.error, code: picResult.code });
   }
 
+  const shiftResult = normalizeShiftNumber(req.body?.shift_number);
+  if (!shiftResult.ok) {
+    return res.status(400).json({ error: shiftResult.error, code: shiftResult.code });
+  }
+
   const productionType = String(req.body?.production_type || DEFAULT_PRODUCTION_TYPE).trim();
 
   const client = await pool.connect();
@@ -112,10 +146,10 @@ router.post('/sessions', async (req, res) => {
     }
 
     const insert = await client.query(
-      `INSERT INTO qr_scan_session (pic, production_type)
-       VALUES ($1, $2)
-       RETURNING session_number, pic, status, created_at`,
-      [picCheck.pic, productionType]
+      `INSERT INTO qr_scan_session (pic, shift_number, production_type)
+       VALUES ($1, $2, $3)
+       RETURNING session_number, pic, shift_number, status, created_at`,
+      [picCheck.pic, shiftResult.shift_number, productionType]
     );
     await client.query('COMMIT');
 
@@ -123,6 +157,7 @@ router.post('/sessions', async (req, res) => {
     res.status(201).json({
       session_number: row.session_number,
       pic: row.pic,
+      shift_number: row.shift_number,
       status: row.status,
       created_at: row.created_at,
     });
@@ -132,6 +167,95 @@ router.post('/sessions', async (req, res) => {
     res.status(500).json({ error: GENERIC_DB_ERROR });
   } finally {
     client.release();
+  }
+});
+
+// GET /api/qr-scan/import/template
+router.get('/import/template', async (req, res) => {
+  try {
+    const workbook = buildImportTemplateWorkbook();
+    const buffer = await writeWorkbookToBuffer(workbook);
+    const filename = buildTemplateFilename();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    console.error('qr-scan GET /import/template:', err);
+    res.status(500).json({ error: GENERIC_DB_ERROR });
+  }
+});
+
+// POST /api/qr-scan/import
+router.post('/import', (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      const code = err.code === 'INVALID_FILE_TYPE' ? 'INVALID_FILE_TYPE' : 'UPLOAD_ERROR';
+      return res.status(400).json({
+        error: err.message || 'Upload gagal',
+        code,
+      });
+    }
+    return next();
+  });
+}, async (req, res) => {
+  if (!req.file || !req.file.buffer) {
+    return res.status(400).json({ error: 'File Excel wajib diunggah', code: 'FILE_REQUIRED' });
+  }
+  try {
+    const result = await importQrScanWorkbook(req.file.buffer);
+    res.status(result.httpStatus).json(result.body);
+  } catch (err) {
+    console.error('qr-scan POST /import:', err);
+    res.status(500).json({ error: GENERIC_DB_ERROR });
+  }
+});
+
+// GET /api/qr-scan/sessions/:sessionNumber/export
+router.get('/sessions/:sessionNumber/export', async (req, res) => {
+  const parsed = parseSessionNumberParam(req.params.sessionNumber);
+  if (!parsed.ok) {
+    return res.status(400).json({ error: parsed.error });
+  }
+
+  try {
+    const sessionResult = await pool.query(
+      `SELECT session_number, pic, shift_number, status, created_at, finished_at
+       FROM qr_scan_session
+       WHERE session_number = $1`,
+      [parsed.sessionNumber]
+    );
+    if (sessionResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Sesi tidak ditemukan', code: 'SESSION_NOT_FOUND' });
+    }
+    const session = sessionResult.rows[0];
+
+    const itemsResult = await pool.query(
+      `SELECT i.barcode, i.scanned_at
+       FROM qr_scan_item i
+       INNER JOIN qr_scan_session s ON s.id = i.session_id
+       WHERE s.session_number = $1
+       ORDER BY i.scanned_at DESC, i.id DESC`,
+      [parsed.sessionNumber]
+    );
+
+    const workbook = buildSessionExportWorkbook(session, itemsResult.rows);
+    const buffer = await writeWorkbookToBuffer(workbook);
+    const filename = buildExportFilename(parsed.sessionNumber);
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    console.error('qr-scan GET export:', err);
+    res.status(500).json({ error: GENERIC_DB_ERROR });
   }
 });
 
@@ -151,7 +275,7 @@ router.get('/sessions/:sessionNumber', async (req, res) => {
 
   try {
     const sessionResult = await pool.query(
-      `SELECT id, session_number, pic, status, created_at, finished_at, production_type
+      `SELECT id, session_number, pic, shift_number, status, created_at, finished_at, production_type
        FROM qr_scan_session
        WHERE session_number = $1`,
       [parsed.sessionNumber]
@@ -168,7 +292,7 @@ router.get('/sessions/:sessionNumber', async (req, res) => {
     const itemsTotal = countResult.rows[0]?.total ?? 0;
 
     const itemsResult = await pool.query(
-      `SELECT barcode FROM qr_scan_item
+      `SELECT barcode, scanned_at FROM qr_scan_item
        WHERE session_id = $1
        ORDER BY scanned_at DESC, id DESC
        LIMIT $2 OFFSET $3`,
@@ -178,11 +302,15 @@ router.get('/sessions/:sessionNumber', async (req, res) => {
     res.json({
       session_number: session.session_number,
       pic: session.pic,
+      shift_number: session.shift_number,
       status: session.status,
       qty: itemsTotal,
       created_at: session.created_at,
       finished_at: session.finished_at,
-      items: itemsResult.rows.map((r) => r.barcode),
+      items: itemsResult.rows.map((r) => ({
+        barcode: r.barcode,
+        scanned_at: r.scanned_at,
+      })),
       items_total: itemsTotal,
       limit,
       offset,
@@ -308,7 +436,7 @@ router.patch('/sessions/:sessionNumber/finish', async (req, res) => {
       `UPDATE qr_scan_session
        SET status = 'finished', finished_at = NOW()
        WHERE session_number = $1 AND status = 'ongoing'
-       RETURNING session_number, pic, status, created_at, finished_at`,
+       RETURNING session_number, pic, shift_number, status, created_at, finished_at`,
       [parsed.sessionNumber]
     );
 
@@ -334,6 +462,7 @@ router.patch('/sessions/:sessionNumber/finish', async (req, res) => {
     res.json({
       session_number: row.session_number,
       pic: row.pic,
+      shift_number: row.shift_number,
       status: row.status,
       created_at: row.created_at,
       finished_at: row.finished_at,

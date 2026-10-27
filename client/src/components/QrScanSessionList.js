@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from '../axiosAuth';
+import { formatQrScanDateTime } from '../utils/qrScanFormat';
 import './Dashboard.css';
 import './Production.css';
 import './QrScanSessionList.css';
@@ -14,8 +15,13 @@ function QrScanSessionList() {
   const [picOptions, setPicOptions] = useState([]);
   const [selectedPic, setSelectedPic] = useState('');
   const [picSearchQuery, setPicSearchQuery] = useState('');
+  const [shiftNumber, setShiftNumber] = useState('1');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
+  const [importResult, setImportResult] = useState(null);
+  const fileInputRef = useRef(null);
 
   const filteredPics = useMemo(() => {
     const q = picSearchQuery.trim().toLowerCase();
@@ -43,6 +49,7 @@ function QrScanSessionList() {
   const openCreateModal = async () => {
     setCreateError('');
     setSelectedPic('');
+    setShiftNumber('1');
     setPicSearchQuery('');
     setShowModal(true);
     try {
@@ -71,10 +78,18 @@ function QrScanSessionList() {
       setCreateError('Pilih PIC terlebih dahulu');
       return;
     }
+    const shift = String(shiftNumber || '').trim();
+    if (!/^\d+$/.test(shift)) {
+      setCreateError('Nomor shift wajib diisi (angka saja)');
+      return;
+    }
     setCreating(true);
     setCreateError('');
     try {
-      const res = await axios.post('/api/qr-scan/sessions', { pic: selectedPic });
+      const res = await axios.post('/api/qr-scan/sessions', {
+        pic: selectedPic,
+        shift_number: shift,
+      });
       const sessionNumber = res.data?.session_number;
       setShowModal(false);
       setPicSearchQuery('');
@@ -99,6 +114,70 @@ function QrScanSessionList() {
     }
   };
 
+  const downloadBlobResponse = async (url, fallbackName) => {
+    const response = await axios.get(url, { responseType: 'blob', timeout: 0 });
+    const contentType = response.headers['content-type'] || '';
+    if (contentType.includes('application/json')) {
+      const text = await response.data.text();
+      const parsed = JSON.parse(text);
+      throw new Error(parsed.error || 'Gagal mengunduh file');
+    }
+    const disposition = response.headers['content-disposition'] || '';
+    const filenameMatch = disposition.match(/filename="([^"]+)"/);
+    const filename = filenameMatch?.[1] || fallbackName;
+    const blobUrl = URL.createObjectURL(
+      new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+    );
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+  };
+
+  const handleDownloadTemplate = async () => {
+    setImportError('');
+    try {
+      await downloadBlobResponse('/api/qr-scan/import/template', 'qr-scan-import-template.xlsx');
+    } catch (err) {
+      setImportError(err.message || 'Gagal mengunduh template');
+    }
+  };
+
+  const handleImportClick = () => {
+    if (importing) return;
+    setImportError('');
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImporting(true);
+    setImportError('');
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await axios.post('/api/qr-scan/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setImportResult(res.data);
+      await loadSessions();
+    } catch (err) {
+      setImportError(err.response?.data?.error || err.message || 'Import gagal');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const closeImportResult = () => setImportResult(null);
+
   return (
     <div className="dashboard-container">
       <div className="dashboard-header">
@@ -112,10 +191,41 @@ function QrScanSessionList() {
         <div className="dashboard-content" style={{ width: '100%' }}>
           <div className="dashboard-section-header">
             <h2>Sesi scan</h2>
-            <button type="button" className="help-button" onClick={openCreateModal}>
-              + Tambah sesi
-            </button>
+            <div className="qr-scan-list-actions">
+              <button
+                type="button"
+                className="qr-scan-btn-secondary"
+                onClick={handleDownloadTemplate}
+                disabled={importing}
+              >
+                Unduh template
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="qr-scan-file-input"
+                onChange={handleImportFile}
+                aria-hidden="true"
+                tabIndex={-1}
+              />
+              <button
+                type="button"
+                className="qr-scan-btn-secondary"
+                onClick={handleImportClick}
+                disabled={importing}
+              >
+                {importing ? 'Mengimpor…' : 'Import Excel'}
+              </button>
+              <button type="button" className="help-button" onClick={openCreateModal}>
+                + Tambah sesi
+              </button>
+            </div>
           </div>
+
+          {importError && (
+            <p className="mo-status-message mo-status-message--error">{importError}</p>
+          )}
 
           {loading && <p className="mo-status-message">Memuat sesi…</p>}
           {!loading && error && (
@@ -162,6 +272,20 @@ function QrScanSessionList() {
                         <dd>{s.pic}</dd>
                       </div>
                       <div>
+                        <dt>Shift</dt>
+                        <dd>{s.shift_number ?? '—'}</dd>
+                      </div>
+                      <div>
+                        <dt>Mulai</dt>
+                        <dd>{formatQrScanDateTime(s.created_at)}</dd>
+                      </div>
+                      {finished && (
+                        <div>
+                          <dt>Selesai</dt>
+                          <dd>{formatQrScanDateTime(s.finished_at)}</dd>
+                        </div>
+                      )}
+                      <div>
                         <dt>Qty</dt>
                         <dd className="qr-scan-session-card__qty">{s.qty ?? 0}</dd>
                       </div>
@@ -190,6 +314,21 @@ function QrScanSessionList() {
             <p className="qr-scan-modal-intro">
               Cari nama PIC di bawah, lalu klik untuk memilih.
             </p>
+
+            <div className="form-group">
+              <label htmlFor="qr-scan-shift">Nomor shift</label>
+              <input
+                id="qr-scan-shift"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="qr-scan-pic-search"
+                value={shiftNumber}
+                onChange={(e) => setShiftNumber(e.target.value.replace(/\D/g, ''))}
+                disabled={creating}
+                placeholder="Contoh: 1"
+              />
+            </div>
 
             <div className="form-group qr-scan-pic-picker">
               <label htmlFor="qr-scan-pic-search">Cari PIC</label>
@@ -248,6 +387,66 @@ function QrScanSessionList() {
                 disabled={creating || !selectedPic}
               >
                 {creating ? 'Membuat…' : 'Buat sesi'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importResult && (
+        <div className="modal-overlay" role="presentation" onClick={closeImportResult}>
+          <div
+            className="modal-content qr-scan-import-result"
+            role="dialog"
+            aria-labelledby="qr-scan-import-result-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="qr-scan-import-result-title">Hasil import Excel</h2>
+            <p>
+              Sesi #{importResult.session_number} — PIC {importResult.pic}, shift{' '}
+              {importResult.shift_number}
+            </p>
+            <p>
+              <strong>{importResult.inserted ?? 0}</strong> barcode tersimpan.
+              {(importResult.skipped?.length ?? 0) > 0 && (
+                <> {importResult.skipped.length} dilewati.</>
+              )}
+              {(importResult.errors?.length ?? 0) > 0 && (
+                <> {importResult.errors.length} error validasi.</>
+              )}
+            </p>
+            {importResult.skipped?.length > 0 && (
+              <ul className="qr-scan-import-list">
+                {importResult.skipped.slice(0, 8).map((row) => (
+                  <li key={`${row.barcode}-${row.code}`}>
+                    {row.barcode}: {row.code}
+                  </li>
+                ))}
+                {importResult.skipped.length > 8 && <li>…dan lainnya</li>}
+              </ul>
+            )}
+            {importResult.errors?.length > 0 && (
+              <ul className="qr-scan-import-list qr-scan-import-list--errors">
+                {importResult.errors.slice(0, 8).map((row) => (
+                  <li key={`${row.row}-${row.code}`}>
+                    Baris {row.row}: {row.code}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="qr-scan-modal-actions">
+              <button type="button" className="qr-scan-btn-secondary" onClick={closeImportResult}>
+                Tutup
+              </button>
+              <button
+                type="button"
+                className="help-button"
+                onClick={() => {
+                  closeImportResult();
+                  navigate(`/input-qr-code/${importResult.session_number}`);
+                }}
+              >
+                Buka sesi #{importResult.session_number}
               </button>
             </div>
           </div>
