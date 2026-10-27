@@ -5,6 +5,8 @@ import Dashboard from './components/Dashboard';
 import ProductionLiquid from './components/ProductionLiquid';
 import ProductionDevice from './components/ProductionDevice';
 import ProductionCartridge from './components/ProductionCartridge';
+import QrScanSessionList from './components/QrScanSessionList';
+import QrScanSessionDetail from './components/QrScanSessionDetail';
 import Admin from './components/Admin';
 import ReportDashboard from './components/ReportDashboard';
 import ProductionChart from './components/ProductionChart';
@@ -76,6 +78,22 @@ function App() {
                 <ProductionCartridge />
               </ProtectedRoute>
             } 
+          />
+          <Route
+            path="/input-qr-code"
+            element={
+              <ProtectedRoute>
+                <QrScanSessionList />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/input-qr-code/:sessionNumber"
+            element={
+              <ProtectedRoute>
+                <QrScanSessionDetail />
+              </ProtectedRoute>
+            }
           />
           <Route 
             path="/admin" 

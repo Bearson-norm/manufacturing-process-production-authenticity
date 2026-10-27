@@ -27,10 +27,10 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       imgSrc: ["'self'", 'data:', 'blob:'],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'", 'https://fonts.googleapis.com', 'https://fonts.gstatic.com'],
+      fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
       objectSrc: ["'none'"],
       frameAncestors: ["'self'"],
       baseUri: ["'self'"],
@@ -153,6 +153,7 @@ app.use('/api/production', require('./routes/production.routes'));
 app.use('/api/buffer', require('./routes/buffer.routes'));
 app.use('/api/reject', require('./routes/reject.routes'));
 app.use('/api/pic', require('./routes/pic.routes'));
+app.use('/api/qr-scan', require('./routes/qr-scan.routes'));
 app.use('/api/authenticity-vendors', require('./routes/authenticity-vendor.routes'));
 app.use('/api/odoo', require('./routes/odoo.routes'));
 app.use('/api/statistics', require('./routes/statistics.routes'));

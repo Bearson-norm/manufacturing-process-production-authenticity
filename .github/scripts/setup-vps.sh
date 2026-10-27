@@ -12,10 +12,10 @@ echo "📦 Updating system packages..."
 sudo apt-get update -y
 sudo apt-get upgrade -y
 
-# Install Node.js 18.x
+# Install Node.js 22.x (LTS — minimum 22.23.4 for Oct 2026 security releases)
 if ! command -v node &> /dev/null; then
     echo "📦 Installing Node.js..."
-    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
     sudo apt-get install -y nodejs
 fi
 

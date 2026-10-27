@@ -154,6 +154,11 @@ function Dashboard({ setIsAuthenticated }) {
               <h3>Production Cartridge</h3>
               <p>Manage cartridge production processes</p>
             </div>
+            <div className="production-card" onClick={() => navigate('/input-qr-code')}>
+              <div className="card-icon">📷</div>
+              <h3>Input QR Code</h3>
+              <p>Scan cartridge per sesi (tanpa MO)</p>
+            </div>
           </div>
 
           <section className="mo-status-section">
