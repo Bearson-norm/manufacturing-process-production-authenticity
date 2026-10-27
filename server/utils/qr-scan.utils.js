@@ -3,10 +3,19 @@ const { buildActiveVendorMapByLowerName } = require('./authenticity.utils');
 const UUID_V4_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function stripScannerControlChars(value) {
+  const s = String(value ?? '');
+  let out = '';
+  for (let i = 0; i < s.length; i += 1) {
+    const code = s.charCodeAt(i);
+    const isControl = code === 0x0a || code === 0x0d || code <= 0x1f || code === 0x7f;
+    if (!isControl) out += s[i];
+  }
+  return out.trim();
+}
+
 function normalizeQrScanBarcode(raw) {
-  const barcode = String(raw ?? '')
-    .replace(/[\r\n\u0000-\u001F\u007F]+/g, '')
-    .trim();
+  const barcode = stripScannerControlChars(raw);
   if (!barcode) {
     return { ok: false, error: 'Barcode wajib diisi', code: 'BARCODE_EMPTY' };
   }
