@@ -490,51 +490,53 @@ async function applyBootstrapSchema(client) {
       }
     }
 
-    // Initialize default PIC list
-    const picCountResult = await client.query('SELECT COUNT(*) as count FROM pic_list');
-    const picCount = parseInt(picCountResult.rows[0].count);
-    
-    if (picCount === 0) {
-      const defaultPICs = [
-        'Puput Wijanarko', 'Adhari Wijaya', 'Qurotul Aini', 'Fita Estikasari',
-        'Dela Wahyu Handayani', 'Thania Novelia Suseno', 'Astikaria Nababan', 'Yati Sumiati',
-        'Faliq Humam Zulian', 'Pria Nanda Pratama', 'Rendy Join Prayoga Hutapea', 'Rizqi Mahendra',
-        'Muhammad Irfan Perdinan', 'Ahmad Buseri', 'Ilyas Safiq', 'Ganjar Ferdianto',
-        'Martunis Hidayatulloh', 'Selly Juniar Andriyani', 'Irma Anggraeni', 'Evi Dwi Setiani',
-        'Siti Sopiah', 'Dede Mustika Alawiah', 'Diah Ayu Novianti', 'Anisa Putri Ramadani',
-        'Ahmad Ari Ripa\'i', 'Andre Romadoni', 'Dwi Nova Safitri', 'Sahroni',
-        'Niken Susanti', 'Ubedilah', 'Aulia Rachma Putri', 'Zimam Mulhakam',
-        'Yuliyanti Putri Pratiwi', 'Meitya Rifai Yusnah', 'Nurhadi', 'Bagas Prasetya',
-        'Hendra Azwar Eka Saputra', 'Rini Rokhimah', 'Iin Silpiana Dewi', 'Muhammad Abdul Halim',
-        'Ahmad Muhaimin', 'Sharani Noor padilah', 'Iin Rofizah', 'Frisca Nurjannah',
-        'Windi Nur Azizah', 'Muhammad Ilham', 'Jonathan Claudio P', 'Teguh Santoso',
-        'Adi Ardiansyah', 'Widi Dwi Gita', 'Nurul Amelia', 'Dini Milati',
-        'Sofhie Angellita', 'Annisa Rahmawati', 'Dessy Indriyani', 'Suhendra Jaya Kusuma',
-        'Ardani', 'Rohiah', 'Novita Astriani', 'Nurul Khofiduriah',
-        'Galing Resdianto', 'Nurbaiti', 'Andri Mulyadi', 'Tiaruli Nababan',
-        'Indadari Windrayanti', 'Muhammad Apandi', 'Vini Claras Anatasyia', 'Siti Mahidah',
-        'Rusnia Ningsih', 'Randy Virmansyah', 'Silvia Fransiska', 'Armah Wati',
-        'Euis Santi', 'Hermawan', 'Linda Haryati', 'Aditya Rachman',
-        'Calvin Lama Tokan', 'Norris Samuel Silaban', 'Dora Nopinda', 'Vita Lativa',
-        'Nur Azizah', 'Devi Yanti', 'Ita Purnamasari', 'Rizky Septian',
-        'Laila Arifatul Hilmi', 'Erfild Ardi Mahardika', 'Hanun Dhiya Imtiaz', 'Mayang Puspitaningrum',
-        'Hikmatul Iman', 'Muhammad Tedi Al Bukhori', 'Mahardika', 'Sevira Yunita Andini',
-        'Gista Nadia', 'Parjiyanti', 'Rifki Maulana Rafif', 'Sri hoviya',
-        'Amanda Tifara', 'Laras Wati', 'Dwi Setia Putri', 'Putri Bela Savira',
-        'Siti Hasanah', 'Farhan Rizky Wahyudi', 'Adam Rizki', 'Tomi Wijaya',
-        'Syahrizal', 'Sherly Triananda Lisa', 'Henry Daniarto', 'Sindy Yusnia',
-        'Inka Purnama Sari', 'Larasati', 'Muhamad Hojaji Muslim', 'Sopiyana', 'Yuyun'
-      ];
+    // Sync default PIC list (insert missing names; existing rows unchanged)
+    const defaultPICs = [
+      'Puput Wijanarko', 'Adhari Wijaya', 'Qurotul Aini', 'Fita Estikasari',
+      'Dela Wahyu Handayani', 'Thania Novelia Suseno', 'Astikaria Nababan', 'Yati Sumiati',
+      'Faliq Humam Zulian', 'Pria Nanda Pratama', 'Rendy Join Prayoga Hutapea', 'Rizqi Mahendra',
+      'Muhammad Irfan Perdinan', 'Ahmad Buseri', 'Ilyas Safiq', 'Ganjar Ferdianto',
+      'Martunis Hidayatulloh', 'Selly Juniar Andriyani', 'Irma Anggraeni', 'Evi Dwi Setiani',
+      'Siti Sopiah', 'Dede Mustika Alawiah', 'Diah Ayu Novianti', 'Anisa Putri Ramadani',
+      'Ahmad Ari Ripa\'i', 'Andre Romadoni', 'Dwi Nova Safitri', 'Sahroni',
+      'Niken Susanti', 'Ubedilah', 'Aulia Rachma Putri', 'Zimam Mulhakam',
+      'Yuliyanti Putri Pratiwi', 'Meitya Rifai Yusnah', 'Nurhadi', 'Bagas Prasetya',
+      'Hendra Azwar Eka Saputra', 'Rini Rokhimah', 'Iin Silpiana Dewi', 'Muhammad Abdul Halim',
+      'Ahmad Muhaimin', 'Sharani Noor padilah', 'Iin Rofizah', 'Frisca Nurjannah',
+      'Windi Nur Azizah', 'Muhammad Ilham', 'Jonathan Claudio P', 'Teguh Santoso',
+      'Adi Ardiansyah', 'Widi Dwi Gita', 'Nurul Amelia', 'Dini Milati',
+      'Sofhie Angellita', 'Annisa Rahmawati', 'Dessy Indriyani', 'Suhendra Jaya Kusuma',
+      'Ardani', 'Rohiah', 'Novita Astriani', 'Nurul Khofiduriah',
+      'Galing Resdianto', 'Nurbaiti', 'Andri Mulyadi', 'Tiaruli Nababan',
+      'Indadari Windrayanti', 'Muhammad Apandi', 'Vini Claras Anatasyia', 'Siti Mahidah',
+      'Rusnia Ningsih', 'Randy Virmansyah', 'Silvia Fransiska', 'Armah Wati',
+      'Euis Santi', 'Hermawan', 'Linda Haryati', 'Aditya Rachman',
+      'Calvin Lama Tokan', 'Norris Samuel Silaban', 'Dora Nopinda', 'Vita Lativa',
+      'Nur Azizah', 'Devi Yanti', 'Ita Purnamasari', 'Rizky Septian',
+      'Laila Arifatul Hilmi', 'Erfild Ardi Mahardika', 'Hanun Dhiya Imtiaz', 'Mayang Puspitaningrum',
+      'Hikmatul Iman', 'Muhammad Tedi Al Bukhori', 'Mahardika', 'Sevira Yunita Andini',
+      'Gista Nadia', 'Parjiyanti', 'Rifki Maulana Rafif', 'Sri hoviya',
+      'Amanda Tifara', 'Laras Wati', 'Dwi Setia Putri', 'Putri Bela Savira',
+      'Siti Hasanah', 'Farhan Rizky Wahyudi', 'Adam Rizki', 'Tomi Wijaya',
+      'Syahrizal', 'Sherly Triananda Lisa', 'Henry Daniarto', 'Sindy Yusnia',
+      'Inka Purnama Sari', 'Larasati', 'Muhamad Hojaji Muslim', 'Sopiyana', 'Yuyun',
+      'Rismawati', 'Chica Melani Azizah', 'Restira Nadra', 'Aprizal',
+      'Dita Santiara', 'Eka Pratiwi', 'Ahmad Dira Saputra', 'Imam Priyadi',
+      'Revania Ai Zhafirah', 'Siti Selvi Nurviani', 'Bayu Permana',
+      'Aulya Sesilia Febryanti Hutapea', 'Elsa Sulaeman', 'Sri Wulandari', 'Sulistiawati',
+      'Galih Fahrul Roji', 'Fauziatu Rahmah', 'Farras Nur Aulia', 'Revly Mutiara Cantik',
+      'Agi Cahyadi', 'Rahmat Saputra', 'Ika Purnama', 'Agung Setya Budi',
+      'Rudi Irma', 'Arbela', 'Muhamad Mashur', 'Desi Antika', 'Devi Amelia', 'Ferdi'
+    ];
 
-      for (const name of defaultPICs) {
-        try {
-          await client.query('INSERT INTO pic_list (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [name]);
-        } catch (err) {
-          console.error(`Error inserting PIC ${name}:`, err.message);
-        }
+    for (const name of defaultPICs) {
+      try {
+        await client.query('INSERT INTO pic_list (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [name]);
+      } catch (err) {
+        console.error(`Error inserting PIC ${name}:`, err.message);
       }
-      console.log('✅ Default PIC list initialized');
     }
+    console.log('✅ Default PIC list synchronized');
 
     // Count existing tables
     const tablesResult = await client.query(`
