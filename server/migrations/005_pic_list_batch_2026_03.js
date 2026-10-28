@@ -37,7 +37,11 @@ module.exports = {
   async up(client) {
     for (const name of NEW_PICS) {
       await client.query(
-        'INSERT INTO pic_list (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
+        `INSERT INTO pic_list (name)
+         SELECT $1
+         WHERE NOT EXISTS (
+           SELECT 1 FROM pic_list WHERE lower(trim(name)) = lower(trim($1))
+         )`,
         [name]
       );
     }
