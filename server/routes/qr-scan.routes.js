@@ -1,10 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const { pool } = require('../database');
-const { buildActiveVendorMapByLowerName } = require('../utils/authenticity.utils');
 const {
   normalizeQrScanBarcode,
-  resolveVendorForBarcode,
   parseSessionNumberParam,
   validateClientScanId,
   normalizePicName,
@@ -41,13 +39,6 @@ const upload = multer({
 
 const DEFAULT_PRODUCTION_TYPE = 'cartridge';
 const GENERIC_DB_ERROR = 'Database error';
-
-async function loadActiveVendorMap(client) {
-  const result = await client.query(
-    'SELECT name, digit_count FROM authenticity_vendor WHERE is_active = 1'
-  );
-  return buildActiveVendorMapByLowerName(result.rows);
-}
 
 async function countSessionItems(client, sessionId) {
   const result = await client.query(
@@ -358,13 +349,6 @@ router.post('/sessions/:sessionNumber/scans', async (req, res) => {
     if (session.status === 'finished') {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Sesi sudah selesai', code: 'SESSION_FINISHED' });
-    }
-
-    const vendorMap = await loadActiveVendorMap(client);
-    const vendorResult = resolveVendorForBarcode(barcodeResult.barcode, vendorMap);
-    if (!vendorResult.ok) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: vendorResult.error, code: vendorResult.code });
     }
 
     if (clientScanResult.clientScanId) {

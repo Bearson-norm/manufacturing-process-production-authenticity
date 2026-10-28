@@ -2,12 +2,10 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   normalizeQrScanBarcode,
-  resolveVendorForBarcode,
   validateClientScanId,
   parseSessionNumberParam,
   normalizeShiftNumber,
 } = require('../utils/qr-scan.utils');
-const { buildActiveVendorMapByLowerName } = require('../utils/authenticity.utils');
 
 describe('qr-scan.utils', () => {
   it('normalizeQrScanBarcode trims and allows alphanumeric', () => {
@@ -16,24 +14,6 @@ describe('qr-scan.utils', () => {
     assert.deepEqual(normalizeQrScanBarcode('ABC-123_45'), { ok: true, barcode: 'ABC-123_45' });
     assert.equal(normalizeQrScanBarcode('').ok, false);
     assert.equal(normalizeQrScanBarcode('12 a').code, 'BARCODE_INVALID');
-  });
-
-  it('resolveVendorForBarcode matches digit_count length', () => {
-    const map = buildActiveVendorMapByLowerName([
-      { name: 'VendorA', digit_count: 13 },
-      { name: 'VendorB', digit_count: 16 },
-    ]);
-    assert.equal(resolveVendorForBarcode('1234567890123', map).ok, true);
-    assert.equal(resolveVendorForBarcode('1234567890123', map).vendorName, 'VendorA');
-    assert.equal(resolveVendorForBarcode('123', map).code, 'BARCODE_DIGIT_MISMATCH');
-  });
-
-  it('resolveVendorForBarcode detects ambiguous vendors', () => {
-    const map = buildActiveVendorMapByLowerName([
-      { name: 'A', digit_count: 10 },
-      { name: 'B', digit_count: 10 },
-    ]);
-    assert.equal(resolveVendorForBarcode('1234567890', map).code, 'BARCODE_VENDOR_AMBIGUOUS');
   });
 
   it('validateClientScanId accepts UUID v4 only', () => {

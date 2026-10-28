@@ -1,22 +1,13 @@
 const { pool } = require('../database');
 const {
   normalizeQrScanBarcode,
-  resolveVendorForBarcode,
   normalizePicName,
   normalizeShiftNumber,
   assertActivePic,
-  buildVendorMapFromRows,
 } = require('../utils/qr-scan.utils');
 const { parseImportWorkbook } = require('../utils/qr-scan-excel.utils');
 
 const DEFAULT_PRODUCTION_TYPE = 'cartridge';
-
-async function loadVendorMap(client) {
-  const result = await client.query(
-    'SELECT name, digit_count FROM authenticity_vendor WHERE is_active = 1'
-  );
-  return buildVendorMapFromRows(result.rows);
-}
 
 /**
  * @param {Buffer} fileBuffer
@@ -61,7 +52,6 @@ async function importQrScanWorkbook(fileBuffer) {
     sessionNumber = insert.rows[0].session_number;
     await client.query('COMMIT');
 
-    const vendorMap = await loadVendorMap(client);
     const seenInFile = new Set();
     let inserted = 0;
     const skipped = [];
@@ -81,12 +71,6 @@ async function importQrScanWorkbook(fileBuffer) {
       continue;
     }
     seenInFile.add(barcodeResult.barcode);
-
-    const vendorResult = resolveVendorForBarcode(barcodeResult.barcode, vendorMap);
-    if (!vendorResult.ok) {
-      errors.push({ row: rowNum, code: vendorResult.code, barcode: barcodeResult.barcode });
-      continue;
-    }
 
     try {
       await client.query(

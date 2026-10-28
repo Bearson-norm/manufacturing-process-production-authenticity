@@ -1,5 +1,3 @@
-const { buildActiveVendorMapByLowerName } = require('./authenticity.utils');
-
 const UUID_V4_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -40,30 +38,6 @@ function normalizeQrScanBarcode(raw) {
     };
   }
   return { ok: true, barcode };
-}
-
-function resolveVendorForBarcode(barcode, vendorMap) {
-  const matches = [];
-  for (const spec of vendorMap.values()) {
-    if (barcode.length === spec.digit_count) {
-      matches.push(spec.name);
-    }
-  }
-  if (matches.length === 0) {
-    return {
-      ok: false,
-      error: 'Panjang barcode tidak cocok dengan vendor aktif',
-      code: 'BARCODE_DIGIT_MISMATCH',
-    };
-  }
-  if (matches.length > 1) {
-    return {
-      ok: false,
-      error: 'Panjang barcode ambigu untuk beberapa vendor',
-      code: 'BARCODE_VENDOR_AMBIGUOUS',
-    };
-  }
-  return { ok: true, vendorName: matches[0] };
 }
 
 function parseSessionNumberParam(raw) {
@@ -134,17 +108,11 @@ async function assertActivePic(client, pic) {
   return { ok: true, pic: result.rows[0].name };
 }
 
-function buildVendorMapFromRows(rows) {
-  return buildActiveVendorMapByLowerName(rows);
-}
-
 module.exports = {
   normalizeQrScanBarcode,
-  resolveVendorForBarcode,
   parseSessionNumberParam,
   validateClientScanId,
   normalizePicName,
   normalizeShiftNumber,
   assertActivePic,
-  buildVendorMapFromRows,
 };
