@@ -296,7 +296,7 @@ router.get('/production-by-leader', async (req, res) => {
   }
 });
 
-// GET /api/statistics/ytd-net-production — dashboard total net input (calendar year, WIB)
+// GET /api/statistics/ytd-net-production — dashboard total net input (semester 6 bln, WIB)
 router.get('/ytd-net-production', async (req, res) => {
   try {
     const result = await computeYtdNetProductionTotal(queryAll);

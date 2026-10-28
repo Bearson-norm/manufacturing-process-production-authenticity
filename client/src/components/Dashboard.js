@@ -46,7 +46,7 @@ function Dashboard({ setIsAuthenticated }) {
   const [moStatusLoading, setMoStatusLoading] = useState(true);
   const [moStatusError, setMoStatusError] = useState('');
   const [ytdTotal, setYtdTotal] = useState(null);
-  const [ytdYear, setYtdYear] = useState(null);
+  const [ytdPeriodLabel, setYtdPeriodLabel] = useState('');
   const [ytdLoading, setYtdLoading] = useState(true);
   const [ytdError, setYtdError] = useState('');
   const userRole = localStorage.getItem('userRole') || 'production';
@@ -98,7 +98,7 @@ function Dashboard({ setIsAuthenticated }) {
         const response = await axios.get('/api/statistics/ytd-net-production');
         if (!cancelled && response.data?.success) {
           setYtdTotal(response.data.totalNetProduction ?? 0);
-          setYtdYear(response.data.year ?? new Date().getFullYear());
+          setYtdPeriodLabel(response.data.periodLabel || '');
         }
       } catch (err) {
         if (!cancelled) {
@@ -161,13 +161,13 @@ function Dashboard({ setIsAuthenticated }) {
             <div className="dashboard-section-header-actions">
               <div
                 className={`ytd-qty-badge${ytdError ? ' ytd-qty-badge--error' : ''}`}
-                title={ytdError || 'Total net production (Authenticity − Reject + Buffer) sejak 1 Januari'}
+                title={ytdError || 'Total net production 6 bulan (Authenticity − Reject + Buffer), zona WIB'}
               >
-                {ytdLoading && 'Memuat total tahunan…'}
+                {ytdLoading && 'Memuat total 6 bulan…'}
                 {!ytdLoading && ytdError && 'Total input: —'}
                 {!ytdLoading && !ytdError && (
                   <>
-                    Total input {ytdYear} (1 Jan – hari ini):{' '}
+                    Total input 6 bln ({ytdPeriodLabel}):{' '}
                     <strong>{Number(ytdTotal).toLocaleString('id-ID')} pcs</strong>
                   </>
                 )}

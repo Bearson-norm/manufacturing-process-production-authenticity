@@ -99,7 +99,31 @@ function getJakartaDateParts(date = new Date()) {
   const year = parts.find((p) => p.type === 'year').value;
   const month = parts.find((p) => p.type === 'month').value;
   const day = parts.find((p) => p.type === 'day').value;
-  return { year: Number(year), ymd: `${year}-${month}-${day}` };
+  return {
+    year: Number(year),
+    month: Number(month),
+    ymd: `${year}-${month}-${day}`
+  };
+}
+
+/** Semester 6 bulan (WIB): Jan–Jun atau Jul–Des; periodEnd = min(hari ini, akhir semester). */
+function getCurrentHalfYearPeriod(date = new Date()) {
+  const { year, month, ymd: todayYmd } = getJakartaDateParts(date);
+  const isFirstHalf = month <= 6;
+  const half = isFirstHalf ? 1 : 2;
+  const periodStart = isFirstHalf ? `${year}-01-01` : `${year}-07-01`;
+  const semesterEnd = isFirstHalf ? `${year}-06-30` : `${year}-12-31`;
+  const periodEnd = todayYmd <= semesterEnd ? todayYmd : semesterEnd;
+  const periodLabel = isFirstHalf ? `Jan–Jun ${year}` : `Jul–Des ${year}`;
+
+  return {
+    year,
+    half,
+    periodStart,
+    periodEnd,
+    periodLabel,
+    semesterEnd
+  };
 }
 
 async function fetchBufferRejectByType(queryAll, productionType, moNumbers) {
@@ -142,12 +166,11 @@ const PRODUCTION_TABLES = [
 ];
 
 /**
- * Sum net production (per session, no double-count) for YTD in Asia/Jakarta.
+ * Sum net production (per session) for semester 6 bulan berjalan (Asia/Jakarta).
  * @param {(sql: string, params?: unknown[]) => Promise<unknown[]>} queryAll
  */
 async function computeYtdNetProductionTotal(queryAll) {
-  const { year, ymd: periodEnd } = getJakartaDateParts(new Date());
-  const periodStart = `${year}-01-01`;
+  const { year, half, periodStart, periodEnd, periodLabel } = getCurrentHalfYearPeriod(new Date());
 
   const dateFilterSql = `
     AND DATE(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta') >= $1
@@ -222,8 +245,10 @@ async function computeYtdNetProductionTotal(queryAll) {
 
   return {
     year,
+    half,
     periodStart,
     periodEnd,
+    periodLabel,
     totalNetProduction,
     sessionCount: sessions.length
   };
@@ -232,5 +257,6 @@ async function computeYtdNetProductionTotal(queryAll) {
 module.exports = {
   groupBySession,
   computeYtdNetProductionTotal,
-  getJakartaDateParts
+  getJakartaDateParts,
+  getCurrentHalfYearPeriod
 };
