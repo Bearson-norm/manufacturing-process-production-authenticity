@@ -257,6 +257,9 @@ jobs:
             # Create logs directory
             mkdir -p logs
 
+            echo "🔄 Running database migrations (single process, before PM2)..."
+            NODE_ENV=staging node scripts/run-migrations.js
+
             # Restart staging application with PM2
             echo "🔄 Restarting staging application with PM2..."
             cd "$STAGING_DIR/server"

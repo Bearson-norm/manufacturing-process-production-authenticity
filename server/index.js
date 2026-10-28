@@ -1,5 +1,5 @@
 const app = require('./app');
-const { initializeTables } = require('./database');
+const { initializeTables, db, pool } = require('./database');
 const cron = require('node-cron');
 const { assertAuthConfigOrThrow } = require('./middleware/auth.middleware');
 
@@ -13,29 +13,31 @@ try {
 
 const PORT = process.env.PORT || 1234;
 
-// Initialize database tables using PostgreSQL
-initializeTables().then(async () => {
-  console.log('\n✅ Database initialized and ready');
-  try {
-    await backfillMoCacheTeamNames(pool);
-  } catch (backfillErr) {
-    console.warn('⚠️  team_name backfill skipped:', backfillErr.message);
-  }
-  console.log('🚀 Server starting...\n');
-}).catch(err => {
-  console.error('\n❌ Failed to initialize database:', err);
-  console.error('\n💡 Tips:');
-  console.error('   1. Check database configuration in server/config.js or .env file');
-  console.error('   2. Verify PostgreSQL is running');
-  console.error('   3. Ensure database exists: CREATE DATABASE <db_name>;');
-  console.error('   4. Run: node server/check-database.js to verify connection\n');
-  process.exit(1);
-});
+// Initialize database tables using PostgreSQL (before HTTP / schedulers)
+initializeTables()
+  .then(async () => {
+    console.log('\n✅ Database initialized and ready');
+    try {
+      await backfillMoCacheTeamNames(pool);
+    } catch (backfillErr) {
+      console.warn('⚠️  team_name backfill skipped:', backfillErr.message);
+    }
+    console.log('🚀 Server starting...\n');
+    startHttpOrWorker();
+  })
+  .catch((err) => {
+    console.error('\n❌ Failed to initialize database:', err);
+    console.error('\n💡 Tips:');
+    console.error('   1. Check database configuration in server/config.js or .env file');
+    console.error('   2. Verify PostgreSQL is running');
+    console.error('   3. Ensure database exists: CREATE DATABASE <db_name>;');
+    console.error('   4. Run: node server/check-database.js to verify connection\n');
+    process.exit(1);
+  });
 
 // Import scheduler functions (keep schedulers in index.js for now)
 // TODO: Move to services/scheduler.service.js in future refactoring
 const { getAdminConfig, isMoCacheSyncEnabled } = require('./routes/admin.routes');
-const { db, pool } = require('./database');
 const { pushIdleManufacturingForLiquidMosFromCache } = require('./services/liquid-external-manufacturing.service');
 const {
   ODOO_MO_SYNC_FIELDS,
@@ -420,33 +422,35 @@ function signalReady() {
   }
 }
 
-if (httpEnabled) {
-  server = app.listen(PORT, '0.0.0.0', () => {
-    console.log('🚀 Server is running on port ' + PORT);
-    console.log('📡 Environment: ' + (process.env.NODE_ENV || 'development'));
-    console.log('🔗 Access at: http://localhost:' + PORT);
+function startHttpOrWorker() {
+  if (httpEnabled) {
+    server = app.listen(PORT, '0.0.0.0', () => {
+      console.log('🚀 Server is running on port ' + PORT);
+      console.log('📡 Environment: ' + (process.env.NODE_ENV || 'development'));
+      console.log('🔗 Access at: http://localhost:' + PORT);
+      console.log('🗓️  Scheduler: ' + (schedulerEnabled ? 'enabled' : 'disabled'));
+      runInitialSync();
+      signalReady();
+    });
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error('❌ Port ' + PORT + ' is already in use');
+      } else {
+        console.error('❌ Server error:', err);
+      }
+      process.exit(1);
+    });
+
+    server.timeout = 60000;
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 66000;
+  } else {
+    console.log('📡 HTTP disabled (ENABLE_HTTP=false) — worker/scheduler mode');
     console.log('🗓️  Scheduler: ' + (schedulerEnabled ? 'enabled' : 'disabled'));
     runInitialSync();
     signalReady();
-  });
-
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error('❌ Port ' + PORT + ' is already in use');
-    } else {
-      console.error('❌ Server error:', err);
-    }
-    process.exit(1);
-  });
-
-  server.timeout = 60000;
-  server.keepAliveTimeout = 65000;
-  server.headersTimeout = 66000;
-} else {
-  console.log('📡 HTTP disabled (ENABLE_HTTP=false) — worker/scheduler mode');
-  console.log('🗓️  Scheduler: ' + (schedulerEnabled ? 'enabled' : 'disabled'));
-  runInitialSync();
-  signalReady();
+  }
 }
 
 let isShuttingDown = false;

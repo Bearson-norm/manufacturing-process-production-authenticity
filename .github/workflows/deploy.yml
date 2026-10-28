@@ -147,6 +147,9 @@ jobs:
             cd manufacturing-app/server
             npm install --production
 
+            echo "🔄 Running database migrations (single process, before PM2)..."
+            NODE_ENV=production node scripts/run-migrations.js
+
             mkdir -p logs
 
             # Remove legacy single-process / old names
@@ -218,6 +221,10 @@ jobs:
 
             if [ "$HEALTH_CHECK_PASSED" = false ]; then
               echo "❌ CRITICAL: PRODUCTION health check FAILED after $MAX_RETRIES attempts!"
+              echo "📋 Recent PM2 logs (manufacturing-app):"
+              pm2 logs manufacturing-app --lines 40 --nostream || true
+              echo "📋 Recent PM2 logs (manufacturing-app-worker):"
+              pm2 logs manufacturing-app-worker --lines 40 --nostream || true
               echo "🔄 Attempting rollback to previous version..."
 
               # Find latest backup
