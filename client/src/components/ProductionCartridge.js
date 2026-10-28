@@ -15,6 +15,7 @@ import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
 import { buildPaginatedSavedMoKeys, formatMoSearchLabel, matchesCartridgeNote, isSkuFallbackCartridgeMo } from '../utils/moListHelpers';
 import { fetchBufferRejectBatchMaps } from '../utils/bufferRejectBatch';
+import { scrollProductionModalSection } from '../utils/modalScroll';
 
 // Helper function untuk format tanggal dengan zona waktu Indonesia (WIB)
 const formatDateIndonesia = (dateString) => {
@@ -2340,7 +2341,17 @@ function ProductionCartridge() {
           setSelectedMo(null);
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Input Authenticity Label Process</h2>
+            <h2 id="input-auth-modal-top">Input Authenticity Label Process</h2>
+            <div className="large-modal-quick-nav">
+              <button
+                type="button"
+                className="authenticity-section-jump"
+                onClick={() => scrollProductionModalSection('authenticity-data-section')}
+              >
+                Ke Authenticity Data
+              </button>
+            </div>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>Leader Name</label>
               <input
@@ -2409,8 +2420,8 @@ function ProductionCartridge() {
                 readOnly={selectedMo !== null}
               />
             </div>
-            <div className="authenticity-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+            <div className="authenticity-section" id="authenticity-data-section">
+              <div className="authenticity-section-header-row">
                 <label style={{ margin: 0 }}>Authenticity Data</label>
                 <span 
                   onClick={() => setShowHelpModal(true)}
@@ -2432,6 +2443,13 @@ function ProductionCartridge() {
                 >
                   ?
                 </span>
+                <button
+                  type="button"
+                  className="authenticity-section-jump"
+                  onClick={() => scrollProductionModalSection('input-auth-modal-top')}
+                >
+                  ↑ Atas form
+                </button>
               </div>
               {formData.authenticityRows.map((row, index) => {
                 const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
@@ -2505,6 +2523,7 @@ function ProductionCartridge() {
                 + Add Row
               </button>
             </div>
+            </div>
             <div className="modal-buttons">
               <button onClick={() => {
                 setShowInputModal(false);
@@ -2528,7 +2547,8 @@ function ProductionCartridge() {
           setBufferModalVendorId('');
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Input Buffer Authenticity</h2>
+            <h2 id="buffer-modal-top">Input Buffer Authenticity</h2>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -2593,7 +2613,7 @@ function ProductionCartridge() {
                 </select>
               </div>
             )}
-            <div className="authenticity-section">
+            <div className="authenticity-section" id="authenticity-data-section">
               <label>Nomor Authenticity</label>
               {bufferData.authenticityNumbers.map((number, index) => (
                 <div key={index} className="buffer-row-input">
@@ -2621,6 +2641,7 @@ function ProductionCartridge() {
                 + Add Number
               </button>
             </div>
+            </div>
             <div className="modal-buttons">
               <button onClick={() => {
                 setShowBufferModal(false);
@@ -2643,7 +2664,8 @@ function ProductionCartridge() {
           setRejectModalVendorId('');
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Input Reject Authenticity</h2>
+            <h2 id="reject-modal-top">Input Reject Authenticity</h2>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -2708,7 +2730,7 @@ function ProductionCartridge() {
                 </select>
               </div>
             )}
-            <div className="authenticity-section">
+            <div className="authenticity-section" id="authenticity-data-section">
               <label>Nomor Authenticity</label>
               {rejectData.authenticityNumbers.map((number, index) => (
                 <div key={index} className="buffer-row-input">
@@ -2736,6 +2758,7 @@ function ProductionCartridge() {
                 + Add Number
               </button>
             </div>
+            </div>
             <div className="modal-buttons">
               <button onClick={() => {
                 setShowRejectModal(false);
@@ -2759,6 +2782,7 @@ function ProductionCartridge() {
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Edit Buffer Authenticity</h2>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -2859,6 +2883,7 @@ function ProductionCartridge() {
                 + Tambah Nomor
               </button>
             </div>
+            </div>
             <div className="modal-buttons">
               <button onClick={() => {
                 setEditingBuffer(null);
@@ -2882,6 +2907,7 @@ function ProductionCartridge() {
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Edit Reject Authenticity</h2>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -2981,6 +3007,7 @@ function ProductionCartridge() {
               >
                 + Tambah Nomor
               </button>
+            </div>
             </div>
             <div className="modal-buttons">
               <button onClick={() => {

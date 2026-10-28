@@ -139,6 +139,35 @@
   text-align: left;
 }
 
+.dashboard-section-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ytd-qty-badge {
+  padding: 8px 14px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.4;
+  max-width: 100%;
+}
+
+.ytd-qty-badge strong {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.ytd-qty-badge--error {
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+
 .help-button {
   padding: 10px 20px;
   background: #4CAF50;

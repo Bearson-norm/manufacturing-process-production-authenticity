@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../database');
 const { resolveProductionQuantity } = require('../utils/authenticity.utils');
+const { computeYtdNetProductionTotal } = require('../utils/manufacturing-net.utils');
 
 const VALID_PERIODS = ['week', 'four_weeks', 'month', 'three_months'];
 const VALID_TYPES = ['liquid', 'device', 'cartridge'];
@@ -288,6 +289,23 @@ router.get('/production-by-leader', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching production statistics:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// GET /api/statistics/ytd-net-production — dashboard total net input (calendar year, WIB)
+router.get('/ytd-net-production', async (req, res) => {
+  try {
+    const result = await computeYtdNetProductionTotal(queryAll);
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    console.error('Error in /api/statistics/ytd-net-production:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'

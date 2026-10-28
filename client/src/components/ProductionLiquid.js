@@ -15,6 +15,7 @@ import MoInfoDisplay from './MoInfoDisplay';
 import AuthenticityRowActionCell from './AuthenticityRowActionCell';
 import { buildPaginatedSavedMoKeys, formatMoSearchLabel, matchesLiquidTeamName, matchesLiquidNote, matchesLiquidVariant, isSkuFallbackLiquidMo } from '../utils/moListHelpers';
 import { fetchBufferRejectBatchMaps } from '../utils/bufferRejectBatch';
+import { scrollProductionModalSection } from '../utils/modalScroll';
 
 const STALE_MO_THRESHOLD_MINUTES = 30;
 const STALE_MO_REMINDER_INTERVAL_MS = 10 * 60 * 1000;
@@ -2783,7 +2784,17 @@ function ProductionLiquid({ variant = '30ml' }) {
           setSelectedMo(null);
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Input Authenticity Label Process</h2>
+            <h2 id="input-auth-modal-top">Input Authenticity Label Process</h2>
+            <div className="large-modal-quick-nav">
+              <button
+                type="button"
+                className="authenticity-section-jump"
+                onClick={() => scrollProductionModalSection('authenticity-data-section')}
+              >
+                Ke Authenticity Data
+              </button>
+            </div>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>PIC *</label>
               <input
@@ -2845,8 +2856,8 @@ function ProductionLiquid({ variant = '30ml' }) {
                 readOnly={selectedMo !== null}
               />
             </div>
-            <div className="authenticity-section">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+            <div className="authenticity-section" id="authenticity-data-section">
+              <div className="authenticity-section-header-row">
                 <label style={{ margin: 0 }}>Authenticity Data</label>
                 <span 
                   onClick={() => setShowHelpModal(true)}
@@ -2868,6 +2879,13 @@ function ProductionLiquid({ variant = '30ml' }) {
                 >
                   ?
                 </span>
+                <button
+                  type="button"
+                  className="authenticity-section-jump"
+                  onClick={() => scrollProductionModalSection('input-auth-modal-top')}
+                >
+                  ↑ Atas form
+                </button>
               </div>
               {formData.authenticityRows.map((row, index) => {
                 const hasFirst = row.firstAuthenticity && row.firstAuthenticity.trim() !== '';
@@ -2941,6 +2959,7 @@ function ProductionLiquid({ variant = '30ml' }) {
                 + Add Row
               </button>
             </div>
+            </div>
             <div className="modal-buttons modal-buttons--stacked">
               <div className="modal-buttons-actions">
                 <button onClick={() => {
@@ -2986,7 +3005,8 @@ function ProductionLiquid({ variant = '30ml' }) {
       {showBufferModal && (
         <div className="modal-overlay" onClick={() => setShowBufferModal(false)}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Input Buffer Authenticity</h2>
+            <h2 id="buffer-modal-top">Input Buffer Authenticity</h2>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -3051,7 +3071,7 @@ function ProductionLiquid({ variant = '30ml' }) {
                 </select>
               </div>
             )}
-            <div className="authenticity-section">
+            <div className="authenticity-section" id="authenticity-data-section">
               <label>Nomor Authenticity</label>
               {bufferData.authenticityNumbers.map((number, index) => (
                 <div key={index} className="buffer-row-input">
@@ -3079,6 +3099,7 @@ function ProductionLiquid({ variant = '30ml' }) {
                 + Add Number
               </button>
             </div>
+            </div>
             <div className="modal-buttons">
               <button onClick={() => setShowBufferModal(false)} className="cancel-button">
                 Cancel
@@ -3095,7 +3116,8 @@ function ProductionLiquid({ variant = '30ml' }) {
       {showRejectModal && (
         <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Input Reject Authenticity</h2>
+            <h2 id="reject-modal-top">Input Reject Authenticity</h2>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -3160,7 +3182,7 @@ function ProductionLiquid({ variant = '30ml' }) {
                 </select>
               </div>
             )}
-            <div className="authenticity-section">
+            <div className="authenticity-section" id="authenticity-data-section">
               <label>Nomor Authenticity</label>
               {rejectData.authenticityNumbers.map((number, index) => (
                 <div key={index} className="buffer-row-input">
@@ -3188,6 +3210,7 @@ function ProductionLiquid({ variant = '30ml' }) {
                 + Add Number
               </button>
             </div>
+            </div>
             <div className="modal-buttons">
               <button onClick={() => setShowRejectModal(false)} className="cancel-button">
                 Cancel
@@ -3208,6 +3231,7 @@ function ProductionLiquid({ variant = '30ml' }) {
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Edit Buffer Authenticity</h2>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -3308,6 +3332,7 @@ function ProductionLiquid({ variant = '30ml' }) {
                 + Tambah Nomor
               </button>
             </div>
+            </div>
             <div className="modal-buttons">
               <button onClick={() => {
                 setEditingBuffer(null);
@@ -3331,6 +3356,7 @@ function ProductionLiquid({ variant = '30ml' }) {
         }}>
           <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Edit Reject Authenticity</h2>
+            <div className="large-modal-body">
             <div className="form-group">
               <label>Nama PIC *</label>
               <input
@@ -3430,6 +3456,7 @@ function ProductionLiquid({ variant = '30ml' }) {
               >
                 + Tambah Nomor
               </button>
+            </div>
             </div>
             <div className="modal-buttons">
               <button onClick={() => {

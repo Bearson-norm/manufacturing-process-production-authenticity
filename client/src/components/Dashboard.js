@@ -45,6 +45,10 @@ function Dashboard({ setIsAuthenticated }) {
   });
   const [moStatusLoading, setMoStatusLoading] = useState(true);
   const [moStatusError, setMoStatusError] = useState('');
+  const [ytdTotal, setYtdTotal] = useState(null);
+  const [ytdYear, setYtdYear] = useState(null);
+  const [ytdLoading, setYtdLoading] = useState(true);
+  const [ytdError, setYtdError] = useState('');
   const userRole = localStorage.getItem('userRole') || 'production';
   const isAdmin = userRole === 'admin';
 
@@ -79,6 +83,36 @@ function Dashboard({ setIsAuthenticated }) {
     };
 
     loadMoStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadYtdTotal = async () => {
+      setYtdLoading(true);
+      setYtdError('');
+      try {
+        const response = await axios.get('/api/statistics/ytd-net-production');
+        if (!cancelled && response.data?.success) {
+          setYtdTotal(response.data.totalNetProduction ?? 0);
+          setYtdYear(response.data.year ?? new Date().getFullYear());
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setYtdError(err.response?.data?.error || 'Gagal memuat total tahunan');
+          setYtdTotal(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setYtdLoading(false);
+        }
+      }
+    };
+
+    loadYtdTotal();
     return () => {
       cancelled = true;
     };
@@ -124,14 +158,29 @@ function Dashboard({ setIsAuthenticated }) {
         <div className="dashboard-content">
           <div className="dashboard-section-header">
             <h2>Select Production Type</h2>
-            <button
-              type="button"
-              onClick={() => setShowHelpModal(true)}
-              className="help-button"
-            >
-              <span aria-hidden="true">ℹ️</span>
-              Petunjuk Pengisian Authenticity
-            </button>
+            <div className="dashboard-section-header-actions">
+              <div
+                className={`ytd-qty-badge${ytdError ? ' ytd-qty-badge--error' : ''}`}
+                title={ytdError || 'Total net production (Authenticity − Reject + Buffer) sejak 1 Januari'}
+              >
+                {ytdLoading && 'Memuat total tahunan…'}
+                {!ytdLoading && ytdError && 'Total input: —'}
+                {!ytdLoading && !ytdError && (
+                  <>
+                    Total input {ytdYear} (1 Jan – hari ini):{' '}
+                    <strong>{Number(ytdTotal).toLocaleString('id-ID')} pcs</strong>
+                  </>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowHelpModal(true)}
+                className="help-button"
+              >
+                <span aria-hidden="true">ℹ️</span>
+                Petunjuk Pengisian Authenticity
+              </button>
+            </div>
           </div>
           <div className="production-cards">
             <div className="production-card" onClick={() => navigate('/production/liquid-15ml')}>

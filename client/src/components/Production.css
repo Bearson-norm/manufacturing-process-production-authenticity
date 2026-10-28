@@ -1056,10 +1056,51 @@
 .large-modal {
   max-width: 1000px;
   max-height: calc(100vh - 40px);
-  overflow: visible;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 20px;
+}
+
+.large-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+#authenticity-data-section {
+  scroll-margin-top: 12px;
+}
+
+.authenticity-section-jump {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  color: #93c5fd;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.authenticity-section-jump:hover {
+  background: #1e293b;
+  border-color: #2563eb;
+}
+
+.large-modal-quick-nav {
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+
+.authenticity-section-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 
 .modal-content h2 {
@@ -1117,8 +1158,6 @@
 .large-modal .authenticity-section {
   margin-top: 12px;
   padding-top: 12px;
-  max-height: calc(100vh - 400px);
-  overflow-y: auto;
 }
 
 .authenticity-section label {
@@ -1365,6 +1404,8 @@
 .large-modal .modal-buttons {
   margin-top: 12px;
   flex-shrink: 0;
+  padding-top: 12px;
+  border-top: 1px solid #1f2937;
 }
 
 .cancel-button,
