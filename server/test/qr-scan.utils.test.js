@@ -10,14 +10,15 @@ const {
 const { buildActiveVendorMapByLowerName } = require('../utils/authenticity.utils');
 
 describe('qr-scan.utils', () => {
-  it('normalizeQrScanBarcode trims and validates digits', () => {
+  it('normalizeQrScanBarcode trims and allows alphanumeric', () => {
     assert.deepEqual(normalizeQrScanBarcode('  12345  '), { ok: true, barcode: '12345' });
     assert.deepEqual(normalizeQrScanBarcode('12345\r\n'), { ok: true, barcode: '12345' });
+    assert.deepEqual(normalizeQrScanBarcode('ABC-123_45'), { ok: true, barcode: 'ABC-123_45' });
     assert.equal(normalizeQrScanBarcode('').ok, false);
-    assert.equal(normalizeQrScanBarcode('12a').code, 'BARCODE_NOT_DIGITS');
+    assert.equal(normalizeQrScanBarcode('12 a').code, 'BARCODE_INVALID');
   });
 
-  it('resolveVendorForBarcode matches digit_count', () => {
+  it('resolveVendorForBarcode matches digit_count length', () => {
     const map = buildActiveVendorMapByLowerName([
       { name: 'VendorA', digit_count: 13 },
       { name: 'VendorB', digit_count: 16 },
@@ -49,9 +50,10 @@ describe('qr-scan.utils', () => {
     assert.equal(parseSessionNumberParam('3').sessionNumber, 3);
   });
 
-  it('normalizeShiftNumber accepts digits only', () => {
+  it('normalizeShiftNumber accepts alphanumeric tokens', () => {
     assert.deepEqual(normalizeShiftNumber('2'), { ok: true, shift_number: '2' });
+    assert.deepEqual(normalizeShiftNumber('Shift-A'), { ok: true, shift_number: 'Shift-A' });
     assert.equal(normalizeShiftNumber('').ok, false);
-    assert.equal(normalizeShiftNumber('1a').ok, false);
+    assert.equal(normalizeShiftNumber('1 a').ok, false);
   });
 });

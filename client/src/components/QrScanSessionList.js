@@ -79,8 +79,12 @@ function QrScanSessionList() {
       return;
     }
     const shift = String(shiftNumber || '').trim();
-    if (!/^\d+$/.test(shift)) {
-      setCreateError('Nomor shift wajib diisi (angka saja)');
+    if (!shift) {
+      setCreateError('Nomor shift wajib diisi');
+      return;
+    }
+    if (!/^[A-Za-z0-9._\-/+]+$/.test(shift)) {
+      setCreateError('Nomor shift: huruf, angka, atau . _ - / + saja');
       return;
     }
     setCreating(true);
@@ -320,13 +324,13 @@ function QrScanSessionList() {
               <input
                 id="qr-scan-shift"
                 type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
                 className="qr-scan-pic-search"
                 value={shiftNumber}
-                onChange={(e) => setShiftNumber(e.target.value.replace(/\D/g, ''))}
+                onChange={(e) =>
+                  setShiftNumber(e.target.value.replace(/[^A-Za-z0-9._\-/+]/g, ''))
+                }
                 disabled={creating}
-                placeholder="Contoh: 1"
+                placeholder="Contoh: 1 atau Shift-A"
               />
             </div>
 

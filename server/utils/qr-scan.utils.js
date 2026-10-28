@@ -3,6 +3,12 @@ const { buildActiveVendorMapByLowerName } = require('./authenticity.utils');
 const UUID_V4_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** Huruf, angka, dan beberapa pemisah umum pada label/barcode */
+const QR_SCAN_TOKEN_RE = /^[A-Za-z0-9._\-\/+]+$/;
+
+const MAX_BARCODE_LENGTH = 256;
+const MAX_SHIFT_LENGTH = 32;
+
 function stripScannerControlChars(value) {
   const s = String(value ?? '');
   let out = '';
@@ -19,8 +25,19 @@ function normalizeQrScanBarcode(raw) {
   if (!barcode) {
     return { ok: false, error: 'Barcode wajib diisi', code: 'BARCODE_EMPTY' };
   }
-  if (!/^\d+$/.test(barcode)) {
-    return { ok: false, error: 'Barcode harus hanya angka', code: 'BARCODE_NOT_DIGITS' };
+  if (barcode.length > MAX_BARCODE_LENGTH) {
+    return {
+      ok: false,
+      error: `Barcode maksimal ${MAX_BARCODE_LENGTH} karakter`,
+      code: 'BARCODE_TOO_LONG',
+    };
+  }
+  if (!QR_SCAN_TOKEN_RE.test(barcode)) {
+    return {
+      ok: false,
+      error: 'Barcode hanya boleh huruf, angka, dan karakter . _ - / +',
+      code: 'BARCODE_INVALID',
+    };
   }
   return { ok: true, barcode };
 }
@@ -84,8 +101,15 @@ function normalizeShiftNumber(raw) {
   if (!shift) {
     return { ok: false, error: 'Nomor shift wajib diisi', code: 'SHIFT_NUMBER_REQUIRED' };
   }
-  if (!/^\d+$/.test(shift)) {
-    return { ok: false, error: 'Nomor shift harus hanya angka', code: 'SHIFT_NUMBER_INVALID' };
+  if (shift.length > MAX_SHIFT_LENGTH) {
+    return { ok: false, error: 'Nomor shift terlalu panjang', code: 'SHIFT_NUMBER_INVALID' };
+  }
+  if (!QR_SCAN_TOKEN_RE.test(shift)) {
+    return {
+      ok: false,
+      error: 'Nomor shift hanya boleh huruf, angka, dan karakter . _ - / +',
+      code: 'SHIFT_NUMBER_INVALID',
+    };
   }
   return { ok: true, shift_number: shift };
 }
