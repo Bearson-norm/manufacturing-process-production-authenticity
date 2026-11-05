@@ -20,6 +20,7 @@ const {
   backfillMoCacheTeamNames,
   buildDeviceSyncDomain,
   buildLiquidSyncDomain,
+  buildEmptyNoteSyncDomain,
   recordMoCacheLastSync,
   MO_CACHE_SYNC_INTERVAL_CONFIG_KEY,
   parseMoCacheSyncIntervalMinutes,
@@ -1101,7 +1102,7 @@ router.post('/sync-mo', async (req, res) => {
         });
       }
 
-      const productionTypes = ['liquid', 'device', 'cartridge'];
+      const productionTypes = ['liquid', 'device', 'cartridge', 'empty-note'];
       let totalUpdated = 0;
       const results = [];
 
@@ -1111,7 +1112,12 @@ router.post('/sync-mo', async (req, res) => {
           const url = require('url');
           const noteFilter = productionType.toLowerCase();
 
-          if (noteFilter !== 'cartridge' && noteFilter !== 'liquid' && noteFilter !== 'device') {
+          if (
+            noteFilter !== 'cartridge' &&
+            noteFilter !== 'liquid' &&
+            noteFilter !== 'device' &&
+            noteFilter !== 'empty-note'
+          ) {
             continue;
           }
 
@@ -1152,6 +1158,8 @@ router.post('/sync-mo', async (req, res) => {
             combinedDomain = buildDeviceSyncDomain(startDateStr);
           } else if (noteFilter === 'liquid') {
             combinedDomain = buildLiquidSyncDomain(startDateStr);
+          } else if (noteFilter === 'empty-note') {
+            combinedDomain = buildEmptyNoteSyncDomain(startDateStr);
           } else {
             continue;
           }

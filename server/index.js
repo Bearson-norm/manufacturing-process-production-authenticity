@@ -46,6 +46,7 @@ const {
   backfillMoCacheTeamNames,
   buildDeviceSyncDomain,
   buildLiquidSyncDomain,
+  buildEmptyNoteSyncDomain,
   recordMoCacheLastSync,
   getMoCacheSyncIntervalMinutes,
   DEFAULT_MO_CACHE_SYNC_INTERVAL_MINUTES,
@@ -88,7 +89,7 @@ function updateMoDataFromOdoo() {
       return;
     }
 
-    const productionTypes = ['liquid', 'device', 'cartridge'];
+    const productionTypes = ['liquid', 'device', 'cartridge', 'empty-note'];
     let totalUpdated = 0;
     let anySuccess = false;
 
@@ -124,7 +125,7 @@ function updateMoDataFromOdoo() {
             ['note', '=', false],
             ['note', '=', '']
           ];
-        } else if (noteFilter !== 'liquid' && noteFilter !== 'device') {
+        } else if (noteFilter !== 'liquid' && noteFilter !== 'device' && noteFilter !== 'empty-note') {
           continue;
         }
 
@@ -166,6 +167,8 @@ function updateMoDataFromOdoo() {
           combinedDomain = buildLiquidSyncDomain(startDateStr);
         } else if (noteFilter === 'device') {
           combinedDomain = buildDeviceSyncDomain(startDateStr);
+        } else if (noteFilter === 'empty-note') {
+          combinedDomain = buildEmptyNoteSyncDomain(startDateStr);
         }
 
         const ODOO_URL = `${config.odooBaseUrl}/web/dataset/call_kw/mrp.production/search_read`;

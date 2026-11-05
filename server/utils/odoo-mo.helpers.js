@@ -237,6 +237,37 @@ function buildLiquidSyncDomain(startDateStr) {
   return buildOdooOrDomain(LIQUID_SYNC_NOTE_ILIKE_VALUES, startDateStr);
 }
 
+/**
+ * Exact Odoo `note` values that are blank in the UI.
+ * Html fields often store an empty editor as `<p><br></p>` rather than false or ''.
+ * Match with `=` so a real note that only contains `<br>` is not pulled in.
+ */
+const EMPTY_NOTE_EXACT_VALUES = [
+  false,
+  '',
+  '<p><br></p>',
+  '<p><br/></p>',
+  '<p></p>',
+  '<p>&nbsp;</p>',
+  '<p><br></p>\n',
+  '<p><br/></p>\n',
+  '<p></p>\n',
+  '<p>&nbsp;</p>\n',
+];
+
+/**
+ * Odoo `search_read` domain for MOs with no note (scheduler and POST `/api/admin/sync-mo`).
+ * Own limit slot so blank-note rows are not crowded out by noted MOs.
+ *
+ * @param {string} startDateStr
+ * @returns {unknown[]}
+ */
+function buildEmptyNoteSyncDomain(startDateStr) {
+  const branches = EMPTY_NOTE_EXACT_VALUES.map((value) => ['note', '=', value]);
+  const orOperators = Array(Math.max(0, branches.length - 1)).fill('|');
+  return ['&', ...orOperators, ...branches, ['create_date', '>=', startDateStr]];
+}
+
 function buildDeviceNoteFilterSql(params) {
   const conditions = DEVICE_NOTE_SQL_PATTERNS.map((pattern) => {
     params.push(pattern);
@@ -692,6 +723,7 @@ module.exports = {
   buildExternalManufacturingIdlePushQuery,
   buildDeviceSyncDomain,
   buildLiquidSyncDomain,
+  buildEmptyNoteSyncDomain,
   buildDeviceNoteFilterSql,
   buildLiquidNoteFilterSql,
   matchesDeviceNote,
