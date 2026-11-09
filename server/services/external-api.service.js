@@ -1,4 +1,8 @@
 const { db } = require('../database');
+const {
+  extractManufacturingListPage,
+  nextManufacturingListUrl
+} = require('../utils/manufacturing-list-page');
 
 // Circuit breaker state for External API
 const externalApiCircuitBreaker = {
@@ -518,16 +522,14 @@ async function sendToExternalAPI(data) {
   });
 }
 
-/**
- * GET /api/v1/manufacturing — full parsed row array (for batch jobs; avoids N list downloads).
- * @returns {Promise<Array<object>>}
- */
-function fetchManufacturingV1ListRows(fullListUrl, bearerToken) {
+const MAX_MANUFACTURING_LIST_PAGES = 25;
+
+function requestManufacturingJson(fullUrl, bearerToken) {
   return new Promise((resolve, reject) => {
     const https = require('https');
     const http = require('http');
     const url = require('url');
-    const parsedUrl = url.parse(fullListUrl);
+    const parsedUrl = url.parse(fullUrl);
     const isHttps = parsedUrl.protocol === 'https:';
     const httpModule = isHttps ? https : http;
 
@@ -555,17 +557,13 @@ function fetchManufacturingV1ListRows(fullListUrl, bearerToken) {
         }
         logExternalApiHttpSuccess({
           method: 'GET',
-          url: fullListUrl,
+          url: fullUrl,
           statusCode: res.statusCode,
           body: responseData,
           bodyMaxLen: EXTERNAL_API_RESPONSE_LOG_GET_MAX
         });
         try {
-          const response = JSON.parse(responseData);
-          let rows = [];
-          if (Array.isArray(response)) rows = response;
-          else if (response.data && Array.isArray(response.data)) rows = response.data;
-          resolve(rows);
+          resolve(JSON.parse(responseData));
         } catch (e) {
           reject(e);
         }
@@ -578,6 +576,65 @@ function fetchManufacturingV1ListRows(fullListUrl, bearerToken) {
       reject(new Error('Request timeout'));
     });
     req.end();
+  });
+}
+
+function manufacturingListRowKey(row) {
+  if (!row || typeof row !== 'object') return null;
+  if (row.id != null && String(row.id) !== '') return `id:${row.id}`;
+  if (row.manufacturing_id != null && String(row.manufacturing_id) !== '') {
+    return `mo:${row.manufacturing_id}`;
+  }
+  return null;
+}
+
+/**
+ * GET /api/v1/manufacturing — parsed rows across pages.
+ * Stops when the next page repeats rows, when there is no next page, or after 25 pages.
+ * @param {string} fullListUrl
+ * @param {string} bearerToken
+ * @param {{ stopWhen?: (row: object) => boolean }} [opts]
+ * @returns {Promise<Array<object>>}
+ */
+function fetchManufacturingV1ListRows(fullListUrl, bearerToken, opts = {}) {
+  const stopWhen = opts && typeof opts.stopWhen === 'function' ? opts.stopWhen : null;
+
+  return new Promise((resolve, reject) => {
+    const seen = new Set();
+    const all = [];
+    let pages = 0;
+
+    const load = (pageUrl) => {
+      if (!pageUrl || pages >= MAX_MANUFACTURING_LIST_PAGES) {
+        return resolve(all);
+      }
+      pages += 1;
+      requestManufacturingJson(pageUrl, bearerToken)
+        .then((response) => {
+          const info = extractManufacturingListPage(response);
+          let added = 0;
+          let stop = false;
+          info.rows.forEach((row) => {
+            const key = manufacturingListRowKey(row);
+            if (key && seen.has(key)) return;
+            if (key) seen.add(key);
+            all.push(row);
+            added += 1;
+            if (stopWhen && stopWhen(row)) stop = true;
+          });
+          if (stop || info.rows.length === 0 || added === 0) {
+            return resolve(all);
+          }
+          const nextUrl = nextManufacturingListUrl(pageUrl, info);
+          if (!nextUrl || nextUrl === pageUrl) {
+            return resolve(all);
+          }
+          load(nextUrl);
+        })
+        .catch(reject);
+    };
+
+    load(fullListUrl);
   });
 }
 
@@ -672,71 +729,16 @@ async function getManufacturingIdentityByMoNumber(moNumber, baseUrl, bearerToken
 }
 
 function fetchManufacturingListAndFind(moNumber, fullListUrl, bearerToken) {
-  return new Promise((resolve, reject) => {
-    const https = require('https');
-    const http = require('http');
-    const url = require('url');
-    const parsedUrl = url.parse(fullListUrl);
-    const isHttps = parsedUrl.protocol === 'https:';
-    const httpModule = isHttps ? https : http;
-
-    const headers = { Accept: 'application/json' };
-    if (bearerToken && String(bearerToken).length > 0) {
-      headers.Authorization = `Bearer ${bearerToken}`;
+  const matches = (item) =>
+    item &&
+    (item.manufacturing_id === moNumber || String(item.manufacturing_id) === String(moNumber));
+  return fetchManufacturingV1ListRows(fullListUrl, bearerToken, { stopWhen: matches }).then((rows) => {
+    const hit = (rows || []).find(matches);
+    if (hit && hit.id) {
+      console.log(`✅ [External API] Found id from v1 list for MO ${moNumber}: ${hit.id}`);
+      return { ...hit, id: String(hit.id) };
     }
-
-    const options = {
-      hostname: parsedUrl.hostname,
-      port: parsedUrl.port || (isHttps ? 443 : 80),
-      path: parsedUrl.path,
-      method: 'GET',
-      headers
-    };
-
-    const req = httpModule.request(options, (res) => {
-      let responseData = '';
-      res.on('data', (chunk) => {
-        responseData += chunk;
-      });
-      res.on('end', () => {
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          return reject(new Error(`List GET ${res.statusCode}`));
-        }
-        logExternalApiHttpSuccess({
-          method: 'GET',
-          url: fullListUrl,
-          statusCode: res.statusCode,
-          body: responseData,
-          bodyMaxLen: EXTERNAL_API_RESPONSE_LOG_GET_MAX
-        });
-        try {
-          const response = JSON.parse(responseData);
-          let rows = [];
-          if (Array.isArray(response)) rows = response;
-          else if (response.data && Array.isArray(response.data)) rows = response.data;
-          const hit = rows.find(
-            (item) =>
-              item &&
-              (item.manufacturing_id === moNumber || String(item.manufacturing_id) === String(moNumber))
-          );
-          if (hit && hit.id) {
-            console.log(`✅ [External API] Found id from v1 list for MO ${moNumber}: ${hit.id}`);
-            resolve({ ...hit, id: String(hit.id) });
-          } else {
-            resolve(null);
-          }
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.setTimeout(10000, () => {
-      req.destroy();
-      reject(new Error('Request timeout'));
-    });
-    req.end();
+    return null;
   });
 }
 

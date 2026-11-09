@@ -1368,9 +1368,9 @@ function ProductionLiquid({ variant = '30ml' }) {
   const handleEndManufacturing = async () => {
     if (window.confirm('Apakah Anda yakin ingin mengakhiri proses manufacturing?')) {
       try {
-        await axios.put('/api/production/liquid/end-session', {
+        const response = await axios.put('/api/production/liquid/end-session', {
           session_id: sessionId
-        });
+        }, { timeout: 120000 });
         setManufacturingStarted(false);
         setSessionId(null);
         setLeaderName('');
@@ -1385,7 +1385,11 @@ function ProductionLiquid({ variant = '30ml' }) {
         // Remove session from localStorage
         localStorage.removeItem(sessionStorageKey);
         localStorage.removeItem('production_liquid_session');
-        
+
+        if (response.data && response.data.external_api_verified === false) {
+          alert('status gagal verifikasi, harap reconcile status');
+        }
+
         fetchData();
       } catch (error) {
         console.error('Error ending session:', error);

@@ -9,7 +9,8 @@ const {
 } = require('../utils/authenticity.utils');
 const {
   ensureLiquidExternalIdAndPatchStarted,
-  finalizeLiquidManufacturingExternal
+  finalizeLiquidManufacturingExternal,
+  finalizeLiquidMosIfFullyCompleted
 } = require('../services/liquid-external-manufacturing.service');
 const {
   enqueueSyncSourceRow,
@@ -694,20 +695,55 @@ router.post('/cartridge', (req, res) => {
 });
 
 // PUT /api/production/liquid/end-session
+// Completes active/draft rows. Submit MO is not the only way an MO becomes completed:
+// End Session must send Finished too, once no active row remains for that MO.
 router.put('/liquid/end-session', (req, res) => {
   const { session_id } = req.body;
-  
-  db.run(
-    `UPDATE production_liquid SET status = 'completed', completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
+  if (!session_id) {
+    return res.status(400).json({ error: 'session_id is required' });
+  }
+
+  db.all(
+    `SELECT DISTINCT mo_number
+     FROM production_liquid
      WHERE session_id = $1 AND status IN ('active', 'draft')`,
     [session_id],
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
+    (listErr, moRows) => {
+      if (listErr) {
+        return res.status(500).json({ error: listErr.message });
       }
-      enqueueSyncSession('liquid', session_id);
-      res.json({ message: 'Session ended successfully' });
+      const moNumbers = (moRows || []).map((row) => row.mo_number).filter(Boolean);
+
+      db.run(
+        `UPDATE production_liquid SET status = 'completed', completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
+         WHERE session_id = $1 AND status IN ('active', 'draft')`,
+        [session_id],
+        function(err) {
+          if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+          }
+          enqueueSyncSession('liquid', session_id);
+          if (moNumbers.length === 0) {
+            return res.json({
+              message: 'Session ended successfully',
+              external_api_verified: true,
+              external_mos: []
+            });
+          }
+
+          finalizeLiquidMosIfFullyCompleted(moNumbers, (_finErr, results) => {
+            const externalMos = results || [];
+            const needsVerify = externalMos.filter((row) => !row.skipped);
+            const verified = needsVerify.every((row) => row.verified);
+            res.json({
+              message: 'Session ended successfully',
+              external_api_verified: verified,
+              external_mos: externalMos
+            });
+          });
+        }
+      );
     }
   );
 });

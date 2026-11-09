@@ -453,6 +453,7 @@ function Admin() {
       data.dryRun ? 'preview' : 'applied',
       data.targetsProcessed != null ? `targets: ${data.targetsProcessed}` : '',
       `MES started: ${data.mesStarted != null ? data.mesStarted : 0}`,
+      `MES idle: ${data.mesIdle != null ? data.mesIdle : 0}`,
       `would patch: ${data.wouldPatch != null ? data.wouldPatch : 0}`,
       data.dryRun ? '' : `patched: ${data.patched != null ? data.patched : 0}`,
       `already matched: ${data.alreadyMatched != null ? data.alreadyMatched : 0}`,
@@ -499,8 +500,8 @@ function Admin() {
     const count = reconcilePreview && reconcilePreview.wouldPatch != null ? reconcilePreview.wouldPatch : null;
     const confirmLabel =
       count != null
-        ? `PATCH finished pada ${count} MO started di FOOM MES yang sudah completed di manufacturing_db?`
-        : 'PATCH finished pada MO started di FOOM MES yang sudah completed di manufacturing_db?';
+        ? `PATCH finished pada ${count} MO started/idle di FOOM MES yang sudah completed di manufacturing_db?`
+        : 'PATCH finished pada MO started/idle di FOOM MES yang sudah completed di manufacturing_db?';
     if (!window.confirm(confirmLabel)) {
       return;
     }
@@ -1059,7 +1060,7 @@ function Admin() {
             {loading ? 'Processing...' : 'Apply reconcile MES finished'}
           </button>
           <small style={{ color: '#94a3b8', fontSize: '12px', display: 'block', marginTop: '8px' }}>
-            Menambal MO yang di FOOM MES masih <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>started</code> padahal di <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>production_liquid</code> sudah completed. Preview dulu, lalu Apply untuk PUT+PATCH finished (plus done_qty). MO yang sudah finished/completed atau masih active dibiarkan. (<code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>POST /api/admin/reconcile-external-manufacturing-finished</code>)
+            Menambal MO yang di FOOM MES masih <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>started</code> atau <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>idle</code> padahal di <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>production_liquid</code> sudah completed, termasuk MO yang tidak muncul di halaman pertama daftar MES. Preview dulu, lalu Apply untuk PUT+PATCH finished (plus done_qty). MO yang sudah finished atau masih active dibiarkan. (<code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px' }}>POST /api/admin/reconcile-external-manufacturing-finished</code>)
           </small>
           {reconcilePreview && Array.isArray(reconcilePreview.candidates) && reconcilePreview.candidates.length > 0 && (
             <div style={{ marginTop: '12px', overflowX: 'auto' }}>

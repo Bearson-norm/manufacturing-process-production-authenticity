@@ -6,6 +6,7 @@ const {
   isExcludedFromExternalLiquidManufacturing
 } = require('../utils/liquid-sku.helpers');
 const { formatFinishedPayloadFromCompletedRows } = require('../utils/liquid-manufacturing-payload');
+const { classifyMesRowAgainstLocal } = require('../utils/liquid-finished-reconcile');
 const {
   sendToExternalAPIWithUrl,
   getEnabledExternalManufacturingTargets,
@@ -117,15 +118,17 @@ function buildIdleManufacturingPayload(moRow, leaderName = IDLE_LEADER_PLACEHOLD
 function patchManufacturingResourceStatus(baseUrl, bearerToken, externalId, body, callback) {
   const url = buildManufacturingItemStatusUrl(baseUrl, externalId);
   sendToExternalAPIWithUrl(body, url, 'PATCH', bearerToken)
-    .then(() => callback(null))
+    .then((result) => {
+      if (!result || result.success === false) {
+        return callback(new Error((result && result.message) || 'PATCH status skipped'));
+      }
+      callback(null);
+    })
     .catch((e) => callback(e));
 }
 
 function patchManufacturingSubresourceStatus(baseUrl, bearerToken, externalId, body, callback) {
-  const url = buildManufacturingItemStatusUrl(baseUrl, externalId);
-  sendToExternalAPIWithUrl(body, url, 'PATCH', bearerToken)
-    .then(() => callback(null))
-    .catch((e) => callback(e));
+  patchManufacturingResourceStatus(baseUrl, bearerToken, externalId, body, callback);
 }
 
 /** Fallback: PUT .../manufacturing/:id with { leader_name } only when GET by uuid is unavailable. */
@@ -326,62 +329,100 @@ function putPatchAndVerifyFinished(target, moNumber, formattedPutBody, externalI
   const tag = logTag(target.id);
   const deadline = Date.now() + MES_VERIFY_BUDGET_MS;
   const putUrl = buildManufacturingItemUrl(target.baseUrl, externalId);
+  let settled = false;
+  const finish = (err, result) => {
+    if (settled) return;
+    settled = true;
+    callback(err, result);
+  };
+
+  const STOP = Symbol('finished-verified');
+
+  const retryOrFail = (lastMesStatus, reason) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      console.error(`❌ [${tag}] MES verify failed for MO ${moNumber} (${reason}; last status: ${lastMesStatus})`);
+      return finish(null, { verified: false, lastMesStatus });
+    }
+    const wait = Math.min(MES_VERIFY_RETRY_DELAY_MS, remaining);
+    console.log(`⚠️  [${tag}] MES not finished for MO ${moNumber} (${reason}); retry in ${wait}ms`);
+    setTimeout(runAttempt, wait);
+  };
 
   const runAttempt = () => {
-    sendToExternalAPIWithUrl(formattedPutBody, putUrl, 'PUT', target.bearerToken)
-      .then(() => {
-        console.log(`✅ [${tag}] PUT completed for MO ${moNumber}`);
-      })
-      .catch((e) => {
-        console.error(`❌ [${tag}] PUT failed for MO ${moNumber}:`, e.message);
-      })
-      .then(
-        () =>
-          new Promise((resolve) => {
-            patchManufacturingSubresourceStatus(
-              target.baseUrl,
-              target.bearerToken,
-              externalId,
-              { status: 'finished' },
-              (statusErr) => {
-                if (statusErr) {
-                  console.error(
-                    `❌ [${tag}] PATCH /status finished failed for MO ${moNumber} (local MO already saved):`,
-                    statusErr.message
-                  );
-                } else {
-                  console.log(`✅ [${tag}] PATCH /status finished OK for MO ${moNumber}`);
-                }
-                resolve();
-              }
-            );
-          })
-      )
-      .then(() => fetchManufacturingV1ItemByUuid(target.baseUrl, externalId, target.bearerToken))
+    if (settled) return;
+    fetchManufacturingV1ItemByUuid(target.baseUrl, externalId, target.bearerToken)
+      .catch(() => null)
       .then((row) => {
-        if (isMesRowFinished(row)) {
+        if (settled) return null;
+        const status = String((row && row.status) || '').trim().toLowerCase();
+        if (status === 'finished') {
           console.log(`✅ [${tag}] MES verify finished OK for MO ${moNumber}`);
-          return callback(null, { verified: true, lastMesStatus: 'finished' });
+          finish(null, { verified: true, lastMesStatus: 'finished' });
+          return STOP;
         }
-        const remaining = deadline - Date.now();
-        const lastMesStatus = row && row.status != null ? String(row.status) : null;
-        if (remaining <= 0) {
-          console.error(`❌ [${tag}] MES verify failed for MO ${moNumber} (last status: ${lastMesStatus})`);
-          return callback(null, { verified: false, lastMesStatus });
-        }
-        const wait = Math.min(MES_VERIFY_RETRY_DELAY_MS, remaining);
-        console.log(`⚠️  [${tag}] MES not finished for MO ${moNumber}; retry in ${wait}ms`);
-        setTimeout(runAttempt, wait);
+        if (status !== 'idle') return row;
+        console.log(`⚠️  [${tag}] MO ${moNumber} is idle — PATCH started before finished`);
+        return new Promise((resolve, reject) => {
+          patchManufacturingResourceStatus(
+            target.baseUrl,
+            target.bearerToken,
+            externalId,
+            { status: 'started', started_at: null },
+            (err) => (err ? reject(err) : resolve(row))
+          );
+        });
+      })
+      .then((row) => {
+        if (settled || row === STOP) return null;
+        return sendToExternalAPIWithUrl(formattedPutBody, putUrl, 'PUT', target.bearerToken)
+          .then((result) => {
+            if (!result || result.success === false) {
+              throw new Error((result && result.message) || 'PUT skipped');
+            }
+            console.log(`✅ [${tag}] PUT completed for MO ${moNumber}`);
+          })
+          .catch((e) => {
+            console.error(`❌ [${tag}] PUT failed for MO ${moNumber}:`, e.message);
+          })
+          .then(
+            () =>
+              new Promise((resolve) => {
+                patchManufacturingSubresourceStatus(
+                  target.baseUrl,
+                  target.bearerToken,
+                  externalId,
+                  { status: 'finished' },
+                  (statusErr) => {
+                    if (statusErr) {
+                      console.error(
+                        `❌ [${tag}] PATCH /status finished failed for MO ${moNumber} (local MO already saved):`,
+                        statusErr.message
+                      );
+                    } else {
+                      console.log(`✅ [${tag}] PATCH /status finished OK for MO ${moNumber}`);
+                    }
+                    resolve();
+                  }
+                );
+              })
+          )
+          .then(() => fetchManufacturingV1ItemByUuid(target.baseUrl, externalId, target.bearerToken))
+          .then((verifiedRow) => {
+            if (settled) return null;
+            if (isMesRowFinished(verifiedRow)) {
+              console.log(`✅ [${tag}] MES verify finished OK for MO ${moNumber}`);
+              finish(null, { verified: true, lastMesStatus: 'finished' });
+              return null;
+            }
+            const lastMesStatus = verifiedRow && verifiedRow.status != null ? String(verifiedRow.status) : null;
+            retryOrFail(lastMesStatus, 'status not finished');
+            return null;
+          });
       })
       .catch((e) => {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) {
-          console.error(`❌ [${tag}] MES verify GET failed for MO ${moNumber}:`, e.message);
-          return callback(null, { verified: false, lastMesStatus: null });
-        }
-        const wait = Math.min(MES_VERIFY_RETRY_DELAY_MS, remaining);
-        console.log(`⚠️  [${tag}] MES verify GET failed for MO ${moNumber} (${e.message}); retry in ${wait}ms`);
-        setTimeout(runAttempt, wait);
+        if (settled) return;
+        retryOrFail(null, e.message);
       });
   };
 
@@ -396,33 +437,25 @@ function syncFinalizeForTarget(target, moNumber, formattedPutBody, done) {
     }
   };
 
-  getExternalManufacturingMapRow(moNumber, target.id, (mapErr, mapRow) => {
-    if (mapErr) {
-      console.error(`❌ [${tag}] Map read error:`, mapErr.message);
-      return finish(mapErr, { verified: false });
+  const moRow = {
+    mo_number: moNumber,
+    sku_name: (formattedPutBody && (formattedPutBody.sku_name || formattedPutBody.sku)) || 'Unknown',
+    quantity: formattedPutBody ? formattedPutBody.target_qty : 0
+  };
+  const leaderName = (formattedPutBody && formattedPutBody.leader_name) || IDLE_LEADER_PLACEHOLDER;
+
+  resolveOrCreateExternalManufacturingId(moRow, target, { idleLeaderName: leaderName }, (resolveErr, resolved) => {
+    if (resolveErr || !resolved || !resolved.externalId) {
+      console.error(
+        `❌ [${tag}] No external id for MO ${moNumber}:`,
+        resolveErr ? resolveErr.message : 'lookup and POST idle did not return an id'
+      );
+      return finish(resolveErr, { verified: false });
     }
-
-    const startPutPatchVerify = (externalId) => {
-      putPatchAndVerifyFinished(target, moNumber, formattedPutBody, externalId, finish);
-    };
-
-    if (mapRow && mapRow.external_resource_id) {
-      return startPutPatchVerify(mapRow.external_resource_id);
+    if (resolved.action === 'posted') {
+      console.log(`✅ [${tag}] POST idle before finished for MO ${moNumber} (id ${resolved.externalId})`);
     }
-
-    getManufacturingIdentityByMoNumber(moNumber, target.baseUrl, target.bearerToken)
-      .then((getResult) => {
-        if (!getResult.success || !getResult.id) {
-          console.error(`❌ [${tag}] No external id for MO ${moNumber} (map empty and list lookup failed)`);
-          return finish(null, { verified: false });
-        }
-        upsertExternalManufacturingMap(moNumber, getResult.id, target.id, () => {});
-        startPutPatchVerify(getResult.id);
-      })
-      .catch((e) => {
-        console.error(`❌ [${tag}] Lookup failed for MO ${moNumber}:`, e.message);
-        finish(e, { verified: false });
-      });
+    putPatchAndVerifyFinished(target, moNumber, formattedPutBody, resolved.externalId, finish);
   });
 }
 
@@ -653,35 +686,120 @@ function loadOdooQuantitiesByMoNumbers(moNumbers, callback) {
   );
 }
 
-function classifyMesRowAgainstLocal(mesRow, localAgg) {
-  const mesStatus = String((mesRow && mesRow.status) || '').trim().toLowerCase();
-  const moNumber = mesRow && mesRow.manufacturing_id != null ? String(mesRow.manufacturing_id) : '';
-  const recordId = mesRow && mesRow.id != null ? String(mesRow.id) : '';
-  const skuLabel = (mesRow && (mesRow.sku_name || mesRow.sku)) || '';
+function applyFinishedClassification(classified, summary, wouldPatchItems, target) {
+  if (classified.action === 'alreadyMatched') {
+    summary.alreadyMatched += 1;
+  } else if (classified.action === 'skippedActive') {
+    summary.skippedActive += 1;
+  } else if (classified.action === 'skippedNoLocal') {
+    summary.skippedNoLocal += 1;
+  } else if (classified.action === 'skippedExcluded') {
+    summary.skippedExcluded += 1;
+  } else if (classified.action === 'wouldPatch') {
+    wouldPatchItems.push({
+      manufacturing_id: classified.moNumber,
+      record_id: classified.recordId,
+      targetId: target.id,
+      target
+    });
+  } else {
+    summary.skippedOther += 1;
+  }
+}
 
-  const active = localAgg ? localAgg.active_rows : 0;
-  const completed = localAgg ? localAgg.completed_rows : 0;
+const RECONCILE_LOCAL_LIMIT = 40;
 
-  if (isExcludedFromExternalLiquidManufacturing(skuLabel)) {
-    return { action: 'skippedExcluded', moNumber, recordId, mesStatus };
-  }
-  if (mesStatus === 'finished' && completed > 0 && active === 0) {
-    return { action: 'alreadyMatched', moNumber, recordId, mesStatus };
-  }
-  if (mesStatus === 'started' && active > 0) {
-    return { action: 'skippedActive', moNumber, recordId, mesStatus };
-  }
-  if (mesStatus === 'started' && active === 0 && completed > 0) {
-    return { action: 'wouldPatch', moNumber, recordId, mesStatus };
-  }
-  if (mesStatus === 'started' && (!localAgg || (completed === 0 && active === 0))) {
-    return { action: 'skippedNoLocal', moNumber, recordId, mesStatus };
-  }
-  return { action: 'skippedOther', moNumber, recordId, mesStatus };
+function loadRecentFullyCompletedLiquidMos(callback) {
+  db.all(
+    `SELECT mo_number,
+            (ARRAY_AGG(sku_name ORDER BY completed_at DESC NULLS LAST))[1] AS sku_name
+     FROM production_liquid
+     GROUP BY mo_number
+     HAVING COUNT(*) FILTER (WHERE status = 'active') = 0
+        AND COUNT(*) FILTER (WHERE status = 'completed') > 0
+        AND MAX(completed_at) >= NOW() - INTERVAL '14 days'
+     ORDER BY MAX(completed_at) DESC
+     LIMIT ${RECONCILE_LOCAL_LIMIT}`,
+    [],
+    (err, rows) => {
+      if (err) return callback(err);
+      callback(
+        null,
+        (rows || []).map((row) => ({
+          mo_number: String(row.mo_number),
+          sku_name: row.sku_name || ''
+        }))
+      );
+    }
+  );
 }
 
 /**
- * Reconcile FOOM MES started rows with manufacturing_db completed MOs.
+ * MES list responses are often truncated. Completed MOs missing from that list
+ * are resolved one-by-one (GET by manufacturing_id) so Finished is not skipped.
+ */
+function appendUnlistedCompletedMos(target, list, localMap, wouldPatchItems, summary) {
+  return new Promise((resolve) => {
+    loadRecentFullyCompletedLiquidMos((err, mos) => {
+      if (err) {
+        summary.errors.push({ target: target.id, message: err.message });
+        return resolve();
+      }
+      const listed = new Set(
+        (list || [])
+          .map((row) => (row && row.manufacturing_id != null ? String(row.manufacturing_id) : ''))
+          .filter(Boolean)
+      );
+      const queued = new Set(wouldPatchItems.map((item) => item.manufacturing_id));
+      const missing = (mos || []).filter((mo) => !listed.has(mo.mo_number) && !queued.has(mo.mo_number));
+      if (missing.length === 0) return resolve();
+
+      const tag = `reconcileFinished:${target.id}`;
+      console.log(`🔍 [${tag}] ${missing.length} local completed MO(s) absent from MES list; resolving individually`);
+      let index = 0;
+      const next = () => {
+        if (index >= missing.length) return resolve();
+        const mo = missing[index++];
+        if (isExcludedFromExternalLiquidManufacturing(mo.sku_name)) {
+          summary.skippedExcluded += 1;
+          return setImmediate(next);
+        }
+        const localAgg = localMap.get(mo.mo_number) || null;
+        getManufacturingIdentityByMoNumber(mo.mo_number, target.baseUrl, target.bearerToken, {
+          preloadedListRows: list
+        })
+          .then((found) => {
+            if (!found || !found.success || !found.id) {
+              summary.skippedOther += 1;
+              return setImmediate(next);
+            }
+            const remoteRow = Object.assign({}, found.data || {}, {
+              id: found.id,
+              manufacturing_id:
+                (found.data && found.data.manufacturing_id) || mo.mo_number,
+              sku_name: (found.data && (found.data.sku_name || found.data.sku)) || mo.sku_name
+            });
+            const classified = classifyMesRowAgainstLocal(remoteRow, localAgg);
+            applyFinishedClassification(classified, summary, wouldPatchItems, target);
+            setImmediate(next);
+          })
+          .catch((lookupErr) => {
+            summary.errors.push({
+              mo_number: mo.mo_number,
+              target: target.id,
+              message: lookupErr.message
+            });
+            setImmediate(next);
+          });
+      };
+      next();
+    });
+  });
+}
+
+/**
+ * Reconcile FOOM MES idle/started rows with manufacturing_db completed MOs.
+ * Also resolves recent local completed MOs missing from a truncated MES list.
  * @param {{ dryRun?: boolean }} [opts]
  * @returns {Promise<object>}
  */
@@ -693,6 +811,7 @@ function reconcileMesFinishedWithLocalCompleted(opts = {}) {
       dryRun,
       targetsProcessed: 0,
       mesStarted: 0,
+      mesIdle: 0,
       wouldPatch: 0,
       patched: 0,
       alreadyMatched: 0,
@@ -756,30 +875,16 @@ function reconcileMesFinishedWithLocalCompleted(opts = {}) {
                 const mesStatus = String((mesRow && mesRow.status) || '').trim().toLowerCase();
                 if (mesStatus === 'started') {
                   summary.mesStarted += 1;
+                } else if (mesStatus === 'idle') {
+                  summary.mesIdle += 1;
                 }
                 const moNumber = mesRow && mesRow.manufacturing_id != null ? String(mesRow.manufacturing_id) : '';
                 const localAgg = moNumber ? localMap.get(moNumber) : null;
                 const classified = classifyMesRowAgainstLocal(mesRow, localAgg);
-                if (classified.action === 'alreadyMatched') {
-                  summary.alreadyMatched += 1;
-                } else if (classified.action === 'skippedActive') {
-                  summary.skippedActive += 1;
-                } else if (classified.action === 'skippedNoLocal') {
-                  summary.skippedNoLocal += 1;
-                } else if (classified.action === 'skippedExcluded') {
-                  summary.skippedExcluded += 1;
-                } else if (classified.action === 'wouldPatch') {
-                  wouldPatchItems.push({
-                    manufacturing_id: classified.moNumber,
-                    record_id: classified.recordId,
-                    targetId: target.id,
-                    target
-                  });
-                } else {
-                  summary.skippedOther += 1;
-                }
+                applyFinishedClassification(classified, summary, wouldPatchItems, target);
               });
 
+              return appendUnlistedCompletedMos(target, list, localMap, wouldPatchItems, summary).then(() => {
               summary.wouldPatch += wouldPatchItems.length;
               const patchMoNumbers = wouldPatchItems.map((item) => item.manufacturing_id);
 
@@ -872,6 +977,7 @@ function reconcileMesFinishedWithLocalCompleted(opts = {}) {
                   applyNext();
                 });
               });
+              });
             })
             .catch((e) => {
               console.error(`❌ [${tag}] List GET failed:`, e.message);
@@ -885,6 +991,89 @@ function reconcileMesFinishedWithLocalCompleted(opts = {}) {
   });
 }
 
+/**
+ * After a liquid MO has no active rows left, send Finished to each enabled target.
+ * Used by End Session, which completes rows without going through Submit MO.
+ * @param {string[]} moNumbers
+ * @param {function(Error|null, Array<object>): void} callback
+ */
+function finalizeLiquidMosIfFullyCompleted(moNumbers, callback) {
+  const list = [...new Set((moNumbers || []).map((mo) => String(mo || '').trim()).filter(Boolean))];
+  const results = [];
+  let index = 0;
+
+  const next = () => {
+    if (index >= list.length) {
+      return callback(null, results);
+    }
+    const moNumber = list[index++];
+    db.get(
+      `SELECT COUNT(*) AS active_count
+       FROM production_liquid
+       WHERE mo_number = $1 AND status = 'active'`,
+      [moNumber],
+      (activeErr, activeRow) => {
+        if (activeErr) {
+          results.push({ mo_number: moNumber, verified: false, skipped: false, error: activeErr.message });
+          return next();
+        }
+        const activeCount = parseInt(activeRow && activeRow.active_count, 10) || 0;
+        if (activeCount > 0) {
+          results.push({
+            mo_number: moNumber,
+            verified: false,
+            skipped: true,
+            reason: 'active_remaining'
+          });
+          return next();
+        }
+
+        db.all(
+          `SELECT authenticity_data, leader_name, completed_at, sku_name
+           FROM production_liquid
+           WHERE mo_number = $1 AND status = 'completed'
+           ORDER BY completed_at DESC`,
+          [moNumber],
+          (aggErr, completedRows) => {
+            if (aggErr) {
+              results.push({ mo_number: moNumber, verified: false, skipped: false, error: aggErr.message });
+              return next();
+            }
+            if (!completedRows || completedRows.length === 0) {
+              results.push({
+                mo_number: moNumber,
+                verified: false,
+                skipped: true,
+                reason: 'no_completed'
+              });
+              return next();
+            }
+            db.get(
+              'SELECT quantity FROM odoo_mo_cache WHERE mo_number = $1',
+              [moNumber],
+              (qtyErr, qtyRow) => {
+                const targetQty = !qtyErr && qtyRow ? qtyRow.quantity || 0 : 0;
+                const payload = formatFinishedPayloadFromCompletedRows(moNumber, completedRows, targetQty);
+                finalizeLiquidManufacturingExternal(moNumber, payload, (finErr, finResult) => {
+                  results.push({
+                    mo_number: moNumber,
+                    verified: !finErr && !!(finResult && finResult.verified),
+                    skipped: !!(finResult && finResult.skipped),
+                    error: finErr ? finErr.message : null
+                  });
+                  next();
+                });
+              }
+            );
+          }
+        );
+      }
+    );
+  };
+
+  next();
+}
+
 module.exports = {
   LIQUID_PRODUCTION_TYPE,
   DEFAULT_TARGET_ID,
@@ -894,6 +1083,7 @@ module.exports = {
   isExcludedFromExternalLiquidManufacturing,
   ensureLiquidExternalIdAndPatchStarted,
   finalizeLiquidManufacturingExternal,
+  finalizeLiquidMosIfFullyCompleted,
   pushIdleManufacturingForLiquidMosFromCache,
   reconcileMesFinishedWithLocalCompleted,
   resolveOrCreateExternalManufacturingId

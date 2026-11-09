@@ -1064,6 +1064,7 @@ router.post('/reconcile-external-manufacturing-finished', async (req, res) => {
       success: true,
       dryRun: summary.dryRun,
       mesStarted: summary.mesStarted,
+      mesIdle: summary.mesIdle,
       wouldPatch: summary.wouldPatch,
       patched: summary.patched,
       alreadyMatched: summary.alreadyMatched,
